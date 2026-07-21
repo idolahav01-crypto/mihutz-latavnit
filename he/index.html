@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>מחוץ לתבנית — מורידים את ה-AI מהאתר שה-AI בנה לך</title>
+  <meta name="description" content="סטודיו שמאבחן אתרים שנבנו ב-AI מול 108 סימני גנריות מתועדים — ומתקן רק מה שאישרתם, בלי לשבור אף פיצ'ר. הוכחות מהקוד, אישור שלכם על כל שינוי, ובקרת איכות עצמאית.">
+
+  <link rel="canonical" href="https://mihutz-latavnit.vercel.app/he/">
+  <link rel="alternate" hreflang="en" href="https://mihutz-latavnit.vercel.app/">
+  <link rel="alternate" hreflang="he" href="https://mihutz-latavnit.vercel.app/he/">
+  <link rel="alternate" hreflang="x-default" href="https://mihutz-latavnit.vercel.app/">
+
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="מחוץ לתבנית">
+  <meta property="og:title" content="מורידים את ה-AI מהאתר שה-AI בנה לך">
+  <meta property="og:description" content="אבחון מול 108 סימני גנריות מתועדים, כולל 31 סימני עברית, RTL ורגולציה ישראלית. כל תיקון באישור שלכם.">
+  <meta property="og:url" content="https://mihutz-latavnit.vercel.app/he/">
+  <meta property="og:image" content="https://mihutz-latavnit.vercel.app/assets/og-he.png">
+  <meta property="og:locale" content="he_IL">
+  <meta property="og:locale:alternate" content="en_US">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@800;900&family=Rubik:wght@500;600;700;800&family=Fraunces:opsz,wght@9..144,800&display=swap">
+  <link rel="stylesheet" href="../css/styles.css">
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "ProfessionalService",
+    "name": "מחוץ לתבנית",
+    "alternateName": "Out of the Template",
+    "description": "סטודיו שמאבחן ומשדרג אתרים שנוצרו על ידי AI מול 108 סימני גנריות מתועדים.",
+    "url": "https://mihutz-latavnit.vercel.app/he/",
+    "email": "idolahav01@gmail.com",
+    "areaServed": "IL",
+    "knowsLanguage": ["he", "en"]
+  }
+  </script>
+</head>
+<body>
+  <a class="skip-link" href="#main">דילוג לתוכן</a>
+
+  <header class="site-header">
+    <div class="shell">
+      <a class="wordmark" href="/he/">
+        <span>מחוץ לתבנית<span class="mark-dot">.</span></span>
+        <small dir="ltr">OUT OF THE TEMPLATE</small>
+      </a>
+      <nav class="site-nav" aria-label="ניווט ראשי">
+        <ul>
+          <li><a href="#before-after">לפני / אחרי</a></li>
+          <li><a href="#signals">‏108 הסימנים</a></li>
+          <li><a href="#process">איך זה עובד</a></li>
+          <li><a href="#audit" class="btn btn-primary" data-evt="nav_cta">לאבחון האתר</a></li>
+          <li><a href="/" class="lang-switch" lang="en" hreflang="en" dir="ltr">English</a></li>
+        </ul>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main">
+
+    <!-- HERO — מיושר לימין, שכבת מידע צפופה מתחת ל-CTA (כללים #75, #82) -->
+    <section class="hero">
+      <div class="shell hero-grid">
+        <div class="hero-copy">
+          <p class="hero-kicker">סטודיו בוטיק לאתרים שנבנו על ידי <em>מכונה</em> — וצריכים יד של <em>בן אדם</em>.</p>
+          <h1>האתר שה‑AI בנה לך עובד.<br>הוא פשוט לא נראה כמוך.</h1>
+          <p class="hero-sub">Wix ADI, Claude Code, v0 — כולם מוציאים אתר תקין עם אותה טביעת אצבע: Inter, גרדיאנט סגול, שלושה כרטיסים סימטריים וכפתור "Get Started". אנחנו בודקים את האתר שלך מול <strong>108 סימנים מתועדים</strong> — כולל 31 סימנים של עברית, RTL ורגולציה ישראלית — מראים לך את ההוכחות שורה־שורה, ומתקנים רק מה שאישרת.</p>
+          <p class="hero-actions">
+            <a class="btn btn-primary" href="#audit" data-evt="hero_cta">לאבחון האתר</a>
+            <a class="textlink" href="#before-after">לגרור לפני / אחרי</a>
+          </p>
+          <dl class="hero-facts">
+            <div><dt><strong>108</strong></dt><dd>סימנים נבדקים, כל אחד עם הוכחה מילולית מהקוד</dd></div>
+            <div><dt><strong>31</strong></dt><dd>סימנים ייעודיים לעברית, RTL ורגולציה ישראלית</dd></div>
+            <div><dt><strong>0</strong></dt><dd>שינויים שנכנסים בלי אישור מפורש שלך</dd></div>
+          </dl>
+        </div>
+
+        <figure class="audit-ledger" aria-label="קטע מדוח אבחון אמיתי">
+          <figcaption><span dir="ltr">detection.json — קטע</span><span dir="ltr">temp&nbsp;0 · pass&nbsp;1/1</span></figcaption>
+          <ol>
+            <li><span class="sig-id" dir="ltr">#74</span><span>פונט בלי תמיכה בעברית — נופל ל‑Arial</span><span class="sig-flag" dir="ltr">PRESENT</span></li>
+            <li><span class="sig-id" dir="ltr">#75</span><span>Hero עברי ממורכז — <code>text-align:center</code></span><span class="sig-flag" dir="ltr">PRESENT</span></li>
+            <li><span class="sig-id" dir="ltr">#78</span><span>כיוון מטבע הפוך — ‎"199 ₪"‎ במקום ‎"₪ 199"‎</span><span class="sig-flag" dir="ltr">PRESENT</span></li>
+            <li><span class="sig-id" dir="ltr">#80</span><span>Tailwind בלי RTL — <code>ml-4, text-left</code></span><span class="sig-flag" dir="ltr">PRESENT</span></li>
+            <li><span class="sig-id" dir="ltr">#92</span><span>פוטר בלי ח"פ, תקנון ומדיניות ביטולים</span><span class="sig-flag" dir="ltr">PRESENT</span></li>
+          </ol>
+        </figure>
+      </div>
+    </section>
+
+    <!-- לפני / אחרי -->
+    <section class="section" id="before-after">
+      <div class="shell">
+        <div class="folio">
+          <span class="folio-no">01</span>
+          <h2>גררו את הקו. אותו אתר, ידיים אחרות.</h2>
+          <span class="folio-rule" aria-hidden="true"></span>
+        </div>
+        <p class="section-intro">שני הצדדים הם HTML חי, לא צילומי מסך. צד אחד — מה שכלי ה‑AI מוציאים כברירת מחדל; הצד השני — אותו תוכן אחרי אבחון. כל הבדל ממופה לסימן ממוספר.</p>
+
+        <div class="ba-wrap">
+          <div class="ba-frame" id="ba-frame">
+            <div class="ba-pane ba-after">
+              <span class="mini-tag is-after">אחרי — מאובחן</span>
+              <div class="mini mini-crafted">
+                <div class="c-copy">
+                  <h3>קרמיקה ששורדת את התנור ואת המדיח.</h3>
+                  <p>כלי אבן מסטודיו ביפו, שריפה ב‑1,240 מעלות. מכירת סקונדס בכל יום שישי ראשון בחודש.</p>
+                  <span class="c-btn">הרשמה לסדנת אובניים</span>
+                  <div class="c-facts"><span>פתוח א׳–ה׳</span><span>שריפות כל שבוע</span><span>איסוף מהסטודיו</span></div>
+                </div>
+                <div class="c-aside">
+                  <div><strong dir="ltr">#74</strong> פונט עם עברית אמיתית</div>
+                  <div><strong dir="ltr">#75</strong> hero מיושר לימין</div>
+                  <div><strong dir="ltr">#83</strong> CTA קצר וישיר</div>
+                </div>
+              </div>
+            </div>
+            <div class="ba-pane ba-before" id="ba-before">
+              <div class="ba-inner">
+                <span class="mini-tag is-before">לפני — כמו שנוצר</span>
+                <div class="mini mini-generic" dir="ltr">
+                  <span class="g-pill">✨ Trusted by 500+ customers</span>
+                  <h3>Transform Your Pottery Experience</h3>
+                  <p>We provide seamless, next-level ceramic solutions for everyone.</p>
+                  <div class="g-ctas"><span class="g-btn">Get Started</span><span class="g-btn ghost">Learn More</span></div>
+                  <div class="g-cards">
+                    <div class="g-card"><span class="ico"></span>Quality</div>
+                    <div class="g-card"><span class="ico"></span>Innovation</div>
+                    <div class="g-card"><span class="ico"></span>Passion</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="ba-divider" id="ba-divider" aria-hidden="true"></div>
+            <button class="ba-handle" id="ba-handle" type="button" aria-hidden="true" tabindex="-1">⇄</button>
+          </div>
+          <label class="small" for="ba-range">חשיפת לפני / אחרי (0 = מאובחן במלואו, 100 = כמו שנוצר)</label>
+          <input class="ba-range" type="range" id="ba-range" min="0" max="100" value="50" step="1">
+          <div class="ba-annot">
+            <ul>
+              <li><span class="sig-id" dir="ltr">#9</span> גרדיאנט סגול ב‑hero</li>
+              <li><span class="sig-id" dir="ltr">#19</span> תבנית hero ממורכזת</li>
+              <li><span class="sig-id" dir="ltr">#22</span> תגית "Trusted by 500+"</li>
+              <li><span class="sig-id" dir="ltr">#47</span> באזז‑וורדס במקום עובדות</li>
+              <li><span class="sig-id" dir="ltr">#48</span> שלישייה סימטרית</li>
+              <li><span class="sig-id" dir="ltr">#49</span> ‏"Get Started / Learn More"</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 108 הסימנים -->
+    <section class="section" id="signals">
+      <div class="shell">
+        <div class="folio">
+          <span class="folio-no">02</span>
+          <h2>האבחון הוא רשימה, לא דעה.</h2>
+          <span class="folio-rule" aria-hidden="true"></span>
+        </div>
+        <div class="signals-layout">
+          <div>
+            <p class="signals-count" aria-hidden="true">108</p>
+            <p class="signals-blurb">לכל סימן יש שם, כלל זיהוי, משקל וסטטוס תיקון אוטומטי. סימן מדווח כ"קיים" רק עם ציטוט מילולי מהקוד שלך — "העיצוב מרגיש גנרי" זה לא ממצא; <code dir="ltr">font-family:'Inter'</code> בשורה 12 — כן. הרשימה נבנתה משטח: פלט של כלי AI מול 30 אתרים ישראליים שנבנו בידי מקצוענים, ומתעדכנת רבעונית ככל שהכלים משתפרים.</p>
+            <div class="sig-samples">
+              <p><span class="sig-id" dir="ltr">#73</span> משקל פונט עברי קל מדי — עברית דורשת תמיד ‎+100 מעל המקביל הלטיני.</p>
+              <p><span class="sig-id" dir="ltr">#82</span> אווריריות אגרסיבית — לקהל ישראלי זה נקרא "ריק", לא "יוקרתי".</p>
+              <p><span class="sig-id" dir="ltr">#93</span> אין הצהרת נגישות לפי ת"י 5568 — בישראל זה חוק, לא המלצה.</p>
+            </div>
+          </div>
+          <ol class="cat-index">
+            <li><span class="cat-n" dir="ltr">A</span> טיפוגרפיה ופונטים <span class="cat-count">8</span></li>
+            <li><span class="cat-n" dir="ltr">B</span> צבע, גרדיאנטים וויזואל <span class="cat-count">10</span></li>
+            <li><span class="cat-n" dir="ltr">C</span> פריסה ודפוסי UX <span class="cat-count">8</span></li>
+            <li><span class="cat-n" dir="ltr">D</span> SEO ומטא־דאטה <span class="cat-count">8</span></li>
+            <li><span class="cat-n" dir="ltr">E</span> קוד וביצועים <span class="cat-count">7</span></li>
+            <li><span class="cat-n" dir="ltr">F</span> אנימציות ואינטראקציות <span class="cat-count">5</span></li>
+            <li><span class="cat-n" dir="ltr">G</span> קופי ומיקרו־קופי <span class="cat-count">8</span></li>
+            <li><span class="cat-n" dir="ltr">H</span> נגישות <span class="cat-count">5</span></li>
+            <li><span class="cat-n" dir="ltr">I</span> אייקונים, אנליטיקס, GDPR ו‑RTL <span class="cat-count">6</span></li>
+            <li><span class="cat-n" dir="ltr">J</span> קלישאות AI מסדר שני <span class="cat-count">7</span></li>
+            <li><span class="cat-n" dir="ltr">K</span> עברית ו‑RTL <span class="cat-count">11</span></li>
+            <li><span class="cat-n" dir="ltr">L</span> צבע, מיתוג וניווט ישראלי <span class="cat-count">4</span></li>
+            <li><span class="cat-n" dir="ltr">M</span> גריד, ריווח וטפסים <span class="cat-count">4</span></li>
+            <li><span class="cat-n" dir="ltr">N</span> אמון ורגולציה ישראלית <span class="cat-count">5</span></li>
+            <li><span class="cat-n" dir="ltr">O</span> SEO מתקדם, ביצועים ואנליטיקס <span class="cat-count">7</span></li>
+            <li><span class="cat-n" dir="ltr">P</span> אותנטיות תוכן וקוד <span class="cat-count">5</span></li>
+          </ol>
+        </div>
+      </div>
+    </section>
+
+    <!-- התהליך -->
+    <section class="section" id="process">
+      <div class="shell">
+        <div class="folio">
+          <span class="folio-no">03</span>
+          <h2>זיהוי, טעם ודיוק — שלוש עבודות שונות.</h2>
+          <span class="folio-rule" aria-hidden="true"></span>
+        </div>
+        <p class="section-intro">ולכן הן אף פעם לא קורות במעבר אחד. הפרויקט שלך עובר ארבעה שלבים נפרדים — כל שלב מכוון בדיוק לסוג עבודה אחד, ואת/ה השער באמצע.</p>
+        <ol class="steps">
+          <li>
+            <div>
+              <h3>זיהוי — עוד לא מתקנים כלום</h3>
+              <p>כל קובץ נסרק מול כל 108 הסימנים. כל ממצא מגיע עם נתיב הקובץ, ציטוט מילולי ורמת ביטחון. יש ספק? מדווח כלא־קיים — false positive כאן מרעיל את כל ההמשך.</p>
+            </div>
+            <p class="step-note">מעבר דטרמיניסטי · <code>temperature 0</code> · הפלט: <code>detection.json</code> + פרופיל עובדתי של האתר</p>
+          </li>
+          <li>
+            <div>
+              <h3>עיצוב — כיוון אחד, לא 30 טלאים</h3>
+              <p>לפני שנוגעים בממצא אחד, הסטודיו מתחייב לכיוון עיצובי קוהרנטי אחד לעסק <em>שלך</em>: צבע מותג אחד, צמד פונטים אחד, עיקרון פריסה אחד. כל תיקון נגזר ממנו — כדי שהתוצאה תיקרא כעבודה של מעצב אחד.</p>
+            </div>
+            <p class="step-note">מעבר יצירתי · קלישאות מסדר שני (dark+gold, Playfair, בנטו) אסורות כתיקון בחוזה</p>
+          </li>
+          <li class="step-accent">
+            <div>
+              <h3>אישור שלך — השער האנושי</h3>
+              <p>קודם רואים את הכיוון, אחר כך כל שינוי מוצע עם הקוד הישן והחדש זה לצד זה. אפשר לדחות הכול. שום דבר לא זז בלי "כן".</p>
+            </div>
+            <p class="step-note">בלי אוטומציה כאן — בכוונה</p>
+          </li>
+          <li>
+            <div>
+              <h3>יישום — עריכות כירורגיות בלבד</h3>
+              <p>שינויים מאושרים מוחלים בהתאמה מדויקת. שמות מחלקות, אירועים, ראוטים, טפסים וייבוא נשמרים אחד לאחד; כל עריכה עוברת שש בדיקות עצמיות או מוחזרת לאחור.</p>
+            </div>
+            <p class="step-note">מעבר מדויק · <code>temperature ~0.2</code> · יומן שינויים מלא לכל עריכה</p>
+          </li>
+          <li>
+            <div>
+              <h3>בקרה — מבקר עצמאי וחשדן</h3>
+              <p>מעבר QA נפרד, שלא ראה את הנימוקים, עובר על כל שורה: השתנה משהו לא מאושר? כל סימן באמת נפתר — או רק הוחלף בקלישאה הבאה? נכשל — העריכה חוזרת.</p>
+            </div>
+            <p class="step-note">מעבר אדברסרי · <code>temperature 0</code> · אשם עד שהוכחה חפותו</p>
+          </li>
+        </ol>
+      </div>
+    </section>
+
+    <!-- במה לא נוגעים -->
+    <section class="section" id="guarantees">
+      <div class="shell keep-grid">
+        <div>
+          <div class="folio">
+            <span class="folio-no">04</span>
+            <h2>במה אנחנו לא נוגעים לעולם</h2>
+            <span class="folio-rule" aria-hidden="true"></span>
+          </div>
+          <p>האבחון משנה איך האתר <em>נקרא</em>, אף פעם לא מה שהוא <em>עושה</em>. בדיקת ה‑QA הסופית משווה כל שורה מול החוזה הזה:</p>
+          <ul class="keep-list">
+            <li>שמות מחלקות, מזהים ו‑data-attributes — נשמרים אחד לאחד</li>
+            <li>אירועים, טפסים, ראוטים וייבוא — לא נוגעים</li>
+            <li>הלוגו, התמונות והתוכן שלך — לא מוחלפים לעולם</li>
+            <li>העובדות שלך — אנחנו לא ממציאים מספרים, המלצות או הבטחות. עובדה חסרה חוזרת אליך כשאלה.</li>
+          </ul>
+        </div>
+        <div>
+          <h3>למי זה מתאים</h3>
+          <p>פרילנסרים וסוכנויות שמוסרים ללקוחות אתרים שנבנו ב‑AI; עסקים קטנים שהאתר "המוכן" שלהם עדיין מרגיש לא־שלהם; וכל מי שפונה לשוק הישראלי — שבו עברית, RTL ורגולציה מוסיפים 31 סימנים שרוב הכלים בעולם מעולם לא שמעו עליהם.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- טופס אבחון -->
+    <section class="section" id="audit">
+      <div class="shell">
+        <div class="folio">
+          <span class="folio-no">05</span>
+          <h2>שלחו את האתר דרך הרשימה</h2>
+          <span class="folio-rule" aria-hidden="true"></span>
+        </div>
+        <form class="audit-form" id="audit-form" novalidate>
+          <div class="field">
+            <label for="f-name">שם</label>
+            <input id="f-name" name="name" type="text" autocomplete="name" dir="rtl" required>
+            <p class="error" id="f-name-err">צריך שם כדי לדעת למי ממוען הדוח.</p>
+          </div>
+          <div class="field">
+            <label for="f-email">אימייל</label>
+            <input id="f-email" name="email" type="email" autocomplete="email" dir="ltr" required>
+            <p class="error" id="f-email-err">הכתובת נראית חסרה — בדקו שיש @ ודומיין.</p>
+          </div>
+          <div class="field">
+            <label for="f-url">כתובת האתר</label>
+            <input id="f-url" name="url" type="url" inputmode="url" placeholder="https://" dir="ltr" required>
+            <p class="hint">כתובת חיה, פריוויו ב‑Vercel או ריפו בגיטהאב — מה שיש.</p>
+            <p class="error" id="f-url-err">לא הצלחנו לקרוא את זה ככתובת — היא צריכה להתחיל ב‑https://‎</p>
+          </div>
+          <div class="field">
+            <label for="f-note">משהו שכדאי שנדע? <span class="small">(לא חובה)</span></label>
+            <textarea id="f-note" name="note" rows="3" dir="rtl"></textarea>
+          </div>
+          <button class="btn btn-primary" type="submit" data-evt="form_submit">לשליחת האתר לאבחון</button>
+          <p class="form-footnote">נפתח אימייל מוכן מראש — הפרטים הולכים ישירות לסטודיו, לשום מקום אחר.</p>
+          <p class="form-status" id="form-status" role="status" aria-live="polite"></p>
+        </form>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="shell">
+      <div class="footer-grid">
+        <div>
+          <a class="wordmark" href="/he/"><span>מחוץ לתבנית<span class="mark-dot">.</span></span></a>
+          <p class="small">סטודיו בוטיק שמסיר את טביעת האצבע של ה‑AI מאתרים שנבנו ב‑AI — עם הוכחות, אישור שלך ובקרת איכות עצמאית.</p>
+        </div>
+        <nav aria-label="ניווט תחתון — מדורים">
+          <h3>מדורים</h3>
+          <ul>
+            <li><a href="#before-after">לפני / אחרי</a></li>
+            <li><a href="#signals">‏108 הסימנים</a></li>
+            <li><a href="#process">איך זה עובד</a></li>
+            <li><a href="#audit">לאבחון האתר</a></li>
+          </ul>
+        </nav>
+        <div>
+          <h3>יצירת קשר</h3>
+          <ul>
+            <li><a href="mailto:idolahav01@gmail.com" dir="ltr">idolahav01@gmail.com</a></li>
+            <li class="small">מענה עד שני ימי עסקים</li>
+          </ul>
+        </div>
+        <div>
+          <h3>שפה ומידע</h3>
+          <ul>
+            <li><a href="/he/" aria-current="page">עברית</a></li>
+            <li><a href="/" hreflang="en" lang="en" dir="ltr">English</a></li>
+            <li><a href="/he/accessibility.html">הצהרת נגישות</a></li>
+          </ul>
+        </div>
+      </div>
+      <div class="footer-legal">
+        <span>© 2026 מחוץ לתבנית</span>
+        <span>הצהרת נגישות לפי ת"י 5568 — <a href="/he/accessibility.html">לצפייה</a></span>
+        <!-- TODO לפני עלייה לאוויר: ח"פ, כתובת פיזית, תקנון, מדיניות ביטולים ומדיניות פרטיות לפי תקנות 2017 (סימנים #92, #96) -->
+      </div>
+    </div>
+  </footer>
+
+  <script src="../js/main.js" defer></script>
+</body>
+</html>
