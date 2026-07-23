@@ -53,7 +53,7 @@
           <li><a href="#before-after">לפני / אחרי</a></li>
           <li><a href="#signals">‏108 הסימנים</a></li>
           <li><a href="#process">איך זה עובד</a></li>
-          <li><a href="#audit" class="btn btn-primary" data-evt="nav_cta">לאבחון האתר</a></li>
+          <li><a href="#audit" class="btn btn-primary" data-evt="nav_cta">התחברות עם <span dir="ltr">GitHub</span></a></li>
           <li><a href="/" class="lang-switch" lang="en" hreflang="en" dir="ltr">English</a></li>
         </ul>
       </nav>
@@ -70,7 +70,7 @@
           <h1>האתר שה‑AI בנה לך עובד.<br>הוא פשוט לא נראה כמוך.</h1>
           <p class="hero-sub">Wix ADI, Claude Code, v0 — כולם מוציאים אתר תקין עם אותה טביעת אצבע: Inter, גרדיאנט סגול, שלושה כרטיסים סימטריים וכפתור "Get Started". אנחנו בודקים את האתר שלך מול <strong>108 סימנים מתועדים</strong> — כולל 31 סימנים של עברית, RTL ורגולציה ישראלית — מראים לך את ההוכחות שורה־שורה, ומתקנים רק מה שאישרת.</p>
           <p class="hero-actions">
-            <a class="btn btn-primary" href="#audit" data-evt="hero_cta">לאבחון האתר</a>
+            <a class="btn btn-primary" href="#audit" data-evt="hero_cta">כניסה עם <span dir="ltr">GitHub</span> להתחלה</a>
             <a class="textlink" href="#before-after">לגרור לפני / אחרי</a>
           </p>
           <dl class="hero-facts">
@@ -269,39 +269,23 @@
       </div>
     </section>
 
-    <!-- טופס אבחון -->
+    <!-- שער כניסה -->
     <section class="section" id="audit">
       <div class="shell">
         <div class="folio">
           <span class="folio-no">05</span>
-          <h2>שלחו את האתר דרך הרשימה</h2>
+          <h2>מתחברים, והאבחון מתחיל מהריפו שלכם</h2>
           <span class="folio-rule" aria-hidden="true"></span>
         </div>
-        <form class="audit-form" id="audit-form" novalidate>
-          <div class="field">
-            <label for="f-name">שם</label>
-            <input id="f-name" name="name" type="text" autocomplete="name" dir="rtl" required>
-            <p class="error" id="f-name-err">צריך שם כדי לדעת למי ממוען הדוח.</p>
-          </div>
-          <div class="field">
-            <label for="f-email">אימייל</label>
-            <input id="f-email" name="email" type="email" autocomplete="email" dir="ltr" required>
-            <p class="error" id="f-email-err">הכתובת נראית חסרה — בדקו שיש @ ודומיין.</p>
-          </div>
-          <div class="field">
-            <label for="f-url">כתובת האתר</label>
-            <input id="f-url" name="url" type="url" inputmode="url" placeholder="https://" dir="ltr" required>
-            <p class="hint">כתובת חיה, פריוויו ב‑Vercel או ריפו בגיטהאב — מה שיש.</p>
-            <p class="error" id="f-url-err">לא הצלחנו לקרוא את זה ככתובת — היא צריכה להתחיל ב‑https://‎</p>
-          </div>
-          <div class="field">
-            <label for="f-note">משהו שכדאי שנדע? <span class="small">(לא חובה)</span></label>
-            <textarea id="f-note" name="note" rows="3" dir="rtl"></textarea>
-          </div>
-          <button class="btn btn-primary" type="submit" data-evt="form_submit">לשליחת האתר לאבחון</button>
-          <p class="form-footnote">נפתח אימייל מוכן מראש — הפרטים הולכים ישירות לסטודיו, לשום מקום אחר.</p>
-          <p class="form-status" id="form-status" role="status" aria-live="polite"></p>
-        </form>
+        <p class="section-intro">בלי טופס, בלי הלוך ושוב באימייל. מתחברים עם <span dir="ltr">GitHub</span> פעם אחת — הדשבורד קורא את הריפוזיטוריז שלכם ישירות, ומשם ממשיך דוח 108 הסימנים.</p>
+        <div class="signin-card">
+          <p class="signin-copy">חיבור אחד, קריאה בלבד. אנחנו לא רואים את הסיסמה שלכם ל‑<span dir="ltr">GitHub</span>, ואפשר לבטל את הגישה בכל רגע מההגדרות של <span dir="ltr">GitHub</span>.</p>
+          <a class="btn btn-primary btn-github" href="/api/auth/github/login" data-evt="github_signin">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A8.013 8.013 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>
+            המשך עם <span dir="ltr">GitHub</span>
+          </a>
+          <p class="signin-note">בהמשך אתם מאשרים שנקרא את המטא‑דאטה הציבורית של הריפו כדי להריץ את האבחון. ההתחברות עדיין לא פעילה — נחזור בקרוב.</p>
+        </div>
       </div>
     </section>
   </main>
@@ -319,7 +303,7 @@
             <li><a href="#before-after">לפני / אחרי</a></li>
             <li><a href="#signals">‏108 הסימנים</a></li>
             <li><a href="#process">איך זה עובד</a></li>
-            <li><a href="#audit">לאבחון האתר</a></li>
+            <li><a href="#audit">התחברות</a></li>
           </ul>
         </nav>
         <div>

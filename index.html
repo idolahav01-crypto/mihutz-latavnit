@@ -53,7 +53,7 @@
           <li><a href="#before-after">Before / after</a></li>
           <li><a href="#signals">The 108 signals</a></li>
           <li><a href="#process">How an audit runs</a></li>
-          <li><a href="#audit" class="btn btn-primary" data-evt="nav_cta">Send my site for audit</a></li>
+          <li><a href="#audit" class="btn btn-primary" data-evt="nav_cta">Sign in with GitHub</a></li>
           <li><a href="/he/" class="lang-switch" lang="he" hreflang="he" dir="rtl">עברית</a></li>
         </ul>
       </nav>
@@ -70,7 +70,7 @@
           <h1>Your AI&#8209;built site works.<br>It just doesn't look like&nbsp;you.</h1>
           <p class="hero-sub">Wix ADI, Claude Code, v0, Lovable — they ship working sites with the same fingerprint: Inter, a purple gradient, three symmetric cards and a "Get Started" button. We audit yours against <strong>108 documented signals</strong>, show you the evidence line by line, and fix only what you approve.</p>
           <p class="hero-actions">
-            <a class="btn btn-primary" href="#audit" data-evt="hero_cta">Get the 108&#8209;point audit</a>
+            <a class="btn btn-primary" href="#audit" data-evt="hero_cta">Sign in to start the audit</a>
             <a class="textlink" href="#before-after">Drag a real before&nbsp;/&nbsp;after</a>
           </p>
           <dl class="hero-facts">
@@ -269,39 +269,23 @@
       </div>
     </section>
 
-    <!-- AUDIT REQUEST -->
+    <!-- SIGN-IN GATE -->
     <section class="section" id="audit">
       <div class="shell">
         <div class="folio">
           <span class="folio-no">05</span>
-          <h2>Send your site through the list</h2>
+          <h2>Sign in, and the audit starts from your repo</h2>
           <span class="folio-rule" aria-hidden="true"></span>
         </div>
-        <form class="audit-form" id="audit-form" novalidate>
-          <div class="field">
-            <label for="f-name">Your name</label>
-            <input id="f-name" name="name" type="text" autocomplete="name" required>
-            <p class="error" id="f-name-err">We need a name to address the report to.</p>
-          </div>
-          <div class="field">
-            <label for="f-email">Email</label>
-            <input id="f-email" name="email" type="email" autocomplete="email" required>
-            <p class="error" id="f-email-err">That address doesn't look complete — check for a missing @ or domain.</p>
-          </div>
-          <div class="field">
-            <label for="f-url">Your site's address</label>
-            <input id="f-url" name="url" type="url" inputmode="url" placeholder="https://" required>
-            <p class="hint">A live URL, a Vercel preview, or a GitHub repo — whatever you have.</p>
-            <p class="error" id="f-url-err">We couldn't read that as an address — it should start with https://</p>
-          </div>
-          <div class="field">
-            <label for="f-note">Anything we should know? <span class="small">(optional)</span></label>
-            <textarea id="f-note" name="note" rows="3"></textarea>
-          </div>
-          <button class="btn btn-primary" type="submit" data-evt="form_submit">Send my site for audit</button>
-          <p class="form-footnote">Opens a pre-filled email — your details go directly to the studio, nowhere else.</p>
-          <p class="form-status" id="form-status" role="status" aria-live="polite"></p>
-        </form>
+        <p class="section-intro">No form, no back-and-forth over email. Sign in with GitHub once — the dashboard reads your repos directly, and the 108-signal report follows from there.</p>
+        <div class="signin-card">
+          <p class="signin-copy">One connection, read-only. We never see your GitHub password, and you can revoke access anytime from GitHub's own settings.</p>
+          <a class="btn btn-primary btn-github" href="/api/auth/github/login" data-evt="github_signin">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A8.013 8.013 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>
+            Continue with GitHub
+          </a>
+          <p class="signin-note">By continuing you agree we'll read your repository metadata to run the audit. Sign-in is not live yet — check back shortly.</p>
+        </div>
       </div>
     </section>
   </main>
@@ -319,7 +303,7 @@
             <li><a href="#before-after">Before / after</a></li>
             <li><a href="#signals">The 108 signals</a></li>
             <li><a href="#process">How an audit runs</a></li>
-            <li><a href="#audit">Request an audit</a></li>
+            <li><a href="#audit">Sign in</a></li>
           </ul>
         </nav>
         <div>

@@ -526,45 +526,19 @@ a:hover { color: var(--color-primary-deep); }
 [dir="rtl"] .keep-list li::before { content: "←"; }
 @media (max-width: 900px) { .keep-grid { grid-template-columns: 1fr; } }
 
-/* ---------- audit form ---------- */
-.audit-form {
+/* ---------- GitHub sign-in gate ---------- */
+.signin-card {
   background: var(--color-paper-raised);
   border: 1px solid var(--color-neutral-300);
   border-block-start: 3px solid var(--color-primary);
   border-radius: var(--r-surface);
   box-shadow: var(--shadow-lift);
-  padding: clamp(var(--s-3), 4vw, var(--s-6));
-  max-width: 640px;
+  padding: clamp(var(--s-4), 5vw, var(--s-8));
+  max-width: 560px;
 }
-.field { margin-block-end: var(--s-3); }
-.field label { display: block; font-weight: 600; margin-block-end: 6px; }
-:lang(he) .field label { font-weight: 700; }
-.field .hint { font-size: 0.82rem; color: var(--color-neutral-600); margin-block-start: 4px; }
-.field input, .field textarea {
-  inline-size: 100%;
-  font: inherit;
-  color: var(--color-ink);
-  background: var(--color-paper);
-  border: 1px solid var(--color-neutral-300);
-  border-radius: var(--r-control);
-  padding: 12px 14px;
-  min-block-size: 48px;
-  transition: border-color 140ms ease;
-}
-.field input:hover, .field textarea:hover { border-color: var(--color-neutral-600); }
-.field input:focus-visible, .field textarea:focus-visible { outline-offset: 0; border-color: var(--color-primary); }
-.field.is-invalid input { border-color: var(--color-error); }
-.field .error {
-  display: none;
-  font-size: 0.85rem;
-  color: var(--color-error);
-  font-weight: 500;
-  margin-block-start: 6px;
-}
-.field.is-invalid .error { display: block; }
-.form-footnote { font-size: 0.85rem; color: var(--color-neutral-600); margin-block-start: var(--s-2); }
-.form-status { font-weight: 600; margin-block-start: var(--s-2); }
-.form-status[data-state="ok"] { color: var(--color-ok); }
+.signin-copy { margin: 0 0 var(--s-4); color: var(--color-ink-soft); }
+.btn-github svg { inline-size: 19px; block-size: 19px; flex-shrink: 0; }
+.signin-note { font-size: 0.85rem; color: var(--color-neutral-600); margin-block-start: var(--s-3); }
 
 /* ---------- footer ---------- */
 .site-footer {
@@ -618,5 +592,5 @@ a:hover { color: var(--color-primary-deep); }
 }
 
 @media print {
-  .site-header, .site-footer, .hero-actions, .audit-form { display: none; }
+  .site-header, .site-footer, .hero-actions, .signin-card { display: none; }
 }
