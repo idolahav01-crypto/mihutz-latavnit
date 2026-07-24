@@ -28,7 +28,7 @@
   text-decoration: none;
 }
 :lang(he) .app-brand { font-family: "Frank Ruhl Libre", serif; font-weight: 900; }
-.app-header-actions { display: flex; align-items: center; gap: var(--s-2); }
+.app-header-actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--s-2); justify-content: flex-end; }
 .app-user { font-size: 0.9rem; color: var(--color-neutral-600); }
 
 .app-main { padding-block: clamp(var(--s-4), 6vw, var(--s-8)); }
@@ -241,6 +241,58 @@ code, .mono { font-family: var(--font-mono); }
 
 /* next-stage placeholder */
 .next-stage { margin-block-start: var(--s-4); padding-block-start: var(--s-3); border-block-start: 1px solid var(--color-neutral-300); color: var(--color-neutral-600); font-size: 0.9rem; }
+
+/* ---------- back-navigation arrows ---------- */
+.app-back .back-arrow, .report-back .back-arrow { font-weight: 700; }
+.report-back { margin-block-end: var(--s-3); }
+
+/* ---------- recent audits (history) ---------- */
+#history { max-width: 760px; margin-block-start: var(--s-8); }
+#history[hidden] { display: none; }
+.history-head { display: flex; align-items: baseline; gap: var(--s-2); margin-block-end: var(--s-3); }
+.history-head h2 {
+  font-family: var(--font-display); font-size: 1.25rem; font-weight: 800;
+  color: var(--color-ink); margin: 0;
+}
+:lang(he) .history-head h2 { font-family: "Rubik", sans-serif; font-weight: 800; }
+.history-count { font-size: 0.85rem; color: var(--color-neutral-600); font-variant-numeric: tabular-nums; }
+
+.history-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s-2); }
+.history-row {
+  display: flex; align-items: center; gap: var(--s-3);
+  inline-size: 100%; text-align: start;
+  background: var(--color-paper-raised);
+  border: 1px solid var(--color-neutral-300);
+  border-radius: var(--r-control);
+  padding: var(--s-2) var(--s-3);
+  font: inherit; color: var(--color-ink); cursor: pointer;
+  transition: border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
+}
+.history-row:hover { border-color: var(--color-primary); box-shadow: var(--shadow-lift); transform: translateY(-1px); }
+.history-row:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+
+.history-score {
+  display: inline-flex; align-items: baseline; justify-content: center;
+  font-family: var(--font-mono); font-weight: 700; font-size: 1.3rem;
+  min-inline-size: 3.6em; flex-shrink: 0;
+  padding: 6px 8px; border-radius: var(--r-control);
+  font-variant-numeric: tabular-nums;
+}
+.history-score small { font-size: 0.5em; font-weight: 400; opacity: 0.75; }
+.history-score.sev-good { color: var(--color-ok); background: color-mix(in srgb, var(--color-ok) 12%, transparent); }
+.history-score.sev-mid { color: var(--color-primary-deep); background: color-mix(in srgb, var(--color-primary) 12%, transparent); }
+.history-score.sev-bad { color: var(--color-error); background: color-mix(in srgb, var(--color-error) 12%, transparent); }
+
+.history-meta { min-inline-size: 0; flex: 1; }
+.history-ref { display: block; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.history-sub { display: flex; align-items: center; flex-wrap: wrap; gap: var(--s-1); font-size: 0.8rem; color: var(--color-neutral-600); margin-block-start: 3px; }
+.src-chip {
+  font-size: 0.72rem; font-weight: 600; color: var(--color-ink-soft);
+  background: var(--color-paper); border: 1px solid var(--color-neutral-300);
+  border-radius: 999px; padding: 1px 9px;
+}
+.history-open { font-size: 1.4rem; line-height: 1; color: var(--color-neutral-300); flex-shrink: 0; }
+.history-row:hover .history-open { color: var(--color-primary); }
 
 /* ---------- RTL directional icon (continue arrow) ---------- */
 .dir-arrow { display: inline-block; }

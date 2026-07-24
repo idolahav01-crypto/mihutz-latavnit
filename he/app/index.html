@@ -18,6 +18,7 @@
     <div class="shell">
       <a class="app-brand" href="/he/">מחוץ לתבנית</a>
       <div class="app-header-actions">
+        <a class="btn btn-quiet btn-sm app-back" href="/he/"><span class="back-arrow" aria-hidden="true">→</span> חזרה לאתר</a>
         <span class="app-user" id="app-user"></span>
         <button type="button" class="btn btn-quiet btn-sm" id="signout">התנתקות</button>
         <a class="small" href="/app/" lang="en" dir="ltr">English</a>
@@ -98,6 +99,15 @@
         </div>
       </section>
 
+      <!-- ===== אבחונים אחרונים ===== -->
+      <section id="history" hidden>
+        <div class="history-head">
+          <h2>אבחונים אחרונים</h2>
+          <span class="history-count" id="history-count"></span>
+        </div>
+        <ul class="history-list" id="history-list"></ul>
+      </section>
+
       <!-- ===== טעינה ===== -->
       <section id="loading" hidden>
         <div class="loading">
@@ -108,6 +118,7 @@
 
       <!-- ===== דוח אבחון ===== -->
       <section class="report" id="report" hidden aria-live="polite">
+        <button type="button" class="btn btn-quiet btn-sm report-back" id="report-back"><span class="back-arrow" aria-hidden="true">→</span> חזרה לאבחונים</button>
         <div class="report-summary">
           <span class="score" id="score">0<small>/100</small></span>
           <span class="caption" id="report-caption"></span>

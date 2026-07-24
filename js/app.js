@@ -106,7 +106,7 @@
       showUser();
       return refreshGithubStatus();
     }).then(function () {
-      if (user) wireTabs();
+      if (user) { wireTabs(); loadHistory(); }
     }).catch(function () {
       window.location.replace(HOME);
     });
@@ -118,7 +118,8 @@
      "dropzone", "zip-input", "zip-chosen", "zip-start",
      "url-input", "url-status", "url-start",
      "gh-connected", "gh-disconnected", "gh-connect", "repo-search", "repo-list",
-     "score", "report-caption", "report-body"
+     "score", "report-caption", "report-body", "report-back",
+     "history", "history-list", "history-count"
     ].forEach(function (id) { els[id] = $(id); });
     els.tabs = Array.prototype.slice.call(document.querySelectorAll(".tab"));
   }
@@ -463,9 +464,66 @@
 
     hideLoading();
     els["app-input"].hidden = true;
+    if (els.history) els.history.hidden = true;
     els.report.hidden = false;
     setBusy(false);
     window.scrollTo(0, 0);
+  }
+
+  /* ===== recent audits (history) ===== */
+  var historyRows = [];
+  function loadHistory() {
+    if (!sb || !user || !els.history) return;
+    sb.from("scans")
+      .select("id,source_type,source_ref,ai_fingerprint_score,present_count,files_scanned,detection,created_at")
+      .eq("user_id", user.id).eq("status", "done")
+      .order("created_at", { ascending: false }).limit(20)
+      .then(function (r) {
+        if (r.error || !r.data || !r.data.length) return;
+        historyRows = r.data;
+        renderHistory();
+        els.history.hidden = false;
+      }).catch(function () { /* history is non-critical */ });
+  }
+
+  function sourceLabel(t) {
+    if (t === "github") return "GitHub";
+    if (t === "zip") return "ZIP";
+    if (t === "url") return he ? "קישור" : "link";
+    return t || "";
+  }
+
+  function scoreClass(score) {
+    if (score >= 67) return "bad";   /* strong AI fingerprint */
+    if (score >= 34) return "mid";
+    return "good";
+  }
+
+  function renderHistory() {
+    if (els["history-count"]) {
+      els["history-count"].textContent = historyRows.length + (he ? " אבחונים" : (historyRows.length === 1 ? " audit" : " audits"));
+    }
+    var chevron = he ? "‹" : "›";
+    els["history-list"].innerHTML = historyRows.map(function (s) {
+      var score = s.ai_fingerprint_score != null ? s.ai_fingerprint_score : 0;
+      var ref = s.source_ref || sourceLabel(s.source_type);
+      var sub = [fmtDate(s.created_at)];
+      if (s.present_count != null) sub.push(s.present_count + (he ? " סימנים" : " signals"));
+      return '<li><button type="button" class="history-row" data-id="' + esc(s.id) + '">' +
+        '<span class="history-score sev-' + scoreClass(score) + '">' + esc(String(score)) + "<small>/100</small></span>" +
+        '<span class="history-meta">' +
+          '<span class="history-ref ltr">' + esc(ref) + "</span>" +
+          '<span class="history-sub"><span class="src-chip">' + esc(sourceLabel(s.source_type)) + "</span>" + esc(sub.join(" · ")) + "</span>" +
+        "</span>" +
+        '<span class="history-open" aria-hidden="true">' + chevron + "</span></button></li>";
+    }).join("");
+    Array.prototype.forEach.call(els["history-list"].querySelectorAll("[data-id]"), function (btn) {
+      btn.addEventListener("click", function () {
+        var id = btn.getAttribute("data-id");
+        var s = historyRows.filter(function (x) { return x.id === id; })[0];
+        if (s) { setBusy(true); renderReport(s); }
+      });
+    });
   }
 
   /* ===== error handling ===== */
@@ -497,6 +555,7 @@
   function showLoading(line) {
     hideError();
     els["app-input"].hidden = true;
+    if (els.history) els.history.hidden = true;
     els.report.hidden = true;
     els.loading.hidden = false;
     els["loading-line"].textContent = line;
@@ -508,7 +567,19 @@
   function clip(s, n) { s = String(s || ""); return s.length > n ? s.slice(0, n) + "…" : s; }
   function fmtDate(iso) { try { return new Date(iso).toISOString().slice(0, 10); } catch (e) { return ""; } }
 
-  function wireStatic() { /* placeholder for future static wiring */ }
+  function wireStatic() {
+    if (els["report-back"]) els["report-back"].addEventListener("click", backToInput);
+  }
+
+  /* return from a report (fresh or from history) to the input + history view */
+  function backToInput() {
+    els.report.hidden = true;
+    els["app-input"].hidden = false;
+    if (els.history && historyRows.length) els.history.hidden = false;
+    setBusy(false);
+    window.scrollTo(0, 0);
+    loadHistory(); /* refresh so a just-finished scan shows up */
+  }
 
   /* category lookup by signal id (16 categories, id ranges) */
   function catOf(id) {

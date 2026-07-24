@@ -185,6 +185,10 @@ document.querySelectorAll("[data-evt]").forEach(function (el) {
     var who = document.createElement("span");
     who.className = "nav-user";
     who.textContent = (he ? "שלום, " : "Hi, ") + name;
+    var dash = document.createElement("a");
+    dash.className = "btn btn-primary btn-sm";
+    dash.href = he ? "/he/app/" : "/app/";
+    dash.textContent = he ? "לאבחונים שלי" : "My audits";
     var out = document.createElement("button");
     out.type = "button";
     out.className = "btn btn-quiet btn-sm";
@@ -194,6 +198,7 @@ document.querySelectorAll("[data-evt]").forEach(function (el) {
         .then(function () { window.location.reload(); });
     });
     authLi.appendChild(who);
+    authLi.appendChild(dash);
     authLi.appendChild(out);
     if (modal.open) modal.close();
   }
