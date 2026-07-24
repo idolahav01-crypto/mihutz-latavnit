@@ -10,7 +10,9 @@
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import signals from "./signals.json" with { type: "json" };
 
-const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY")!;
+// Secrets pasted through a dashboard often carry a trailing newline or space,
+// which makes fetch() reject the header as a non-ByteString. Clean it here.
+const ANTHROPIC_API_KEY = (Deno.env.get("ANTHROPIC_API_KEY") ?? "").trim();
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
@@ -245,6 +247,12 @@ Deno.serve(async (req) => {
   await admin.from("scans").update({ status: "detecting" }).eq("id", scanId);
 
   try {
+    if (!ANTHROPIC_API_KEY) throw new Error("missing_anthropic_api_key");
+    // Header values must be Latin-1; a stray unicode char means a bad paste.
+    if (!/^[\x20-\x7E]+$/.test(ANTHROPIC_API_KEY)) {
+      throw new Error("invalid_anthropic_api_key_characters");
+    }
+
     const bundlePath = `${user.id}/${scanId}/bundle.txt`;
     const { data: file, error: dlErr } = await admin.storage
       .from("scans")

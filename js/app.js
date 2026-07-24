@@ -43,7 +43,9 @@
     errGeneric: "משהו השתבש. נסה שוב בעוד רגע.",
     errRepoPrivate: "הריפו פרטי או שאין הרשאה. התחבר עם GitHub.",
     errNoFiles: "לא נמצאו קבצים לסריקה.",
-    errDetect: "האבחון נכשל. נסה שוב."
+    errDetect: "האבחון נכשל. נסה שוב.",
+    noApiKey: "מנוע האבחון לא מוגדר — חסר ANTHROPIC_API_KEY ב-Supabase (Edge Functions → Secrets).",
+    badApiKey: "מפתח ה-ANTHROPIC_API_KEY לא תקין — כנראה נדבקו איתו רווח או ירידת שורה. הגדירו אותו מחדש."
   } : {
     hi: "Hi, ",
     signout: "Sign out",
@@ -70,7 +72,9 @@
     errGeneric: "Something went wrong. Try again in a moment.",
     errRepoPrivate: "Repo is private or you lack access. Connect GitHub.",
     errNoFiles: "No scannable files found.",
-    errDetect: "Diagnosis failed. Try again."
+    errDetect: "Diagnosis failed. Try again.",
+    noApiKey: "Diagnosis engine not configured — ANTHROPIC_API_KEY is missing in Supabase (Edge Functions → Secrets).",
+    badApiKey: "ANTHROPIC_API_KEY is invalid — a space or newline was probably pasted with it. Set it again."
   };
 
   /* ===== file filtering (mirrors the fetch-repo edge function) ===== */
@@ -305,9 +309,8 @@
     var scanId = null;
     createScan("url", v.full).then(function (id) {
       scanId = id;
-      return sb.functions.invoke("fetch-repo", { body: { scan_id: id, owner: v.owner, repo: v.repo, ref: v.ref } });
-    }).then(function (res) {
-      throwInvoke(res);
+      return invokeFn("fetch-repo", { scan_id: id, owner: v.owner, repo: v.repo, ref: v.ref });
+    }).then(function () {
       return runDetect(scanId);
     }).catch(function (e) { handleFlowError(e, scanId); });
   }
@@ -324,15 +327,11 @@
     els["gh-connected"].hidden = false;
     if (repos.length) return;
     els["repo-list"].innerHTML = '<li class="repo-row"><span class="spin"></span></li>';
-    sb.functions.invoke("list-repos", { body: {} }).then(function (res) {
-      if (res.error) {
-        var code = res.error.context && res.error.context.status;
-        if (code === 428) { ghConnected = false; loadRepos(); return; }
-        throw res.error;
-      }
-      repos = (res.data && res.data.repos) || [];
+    invokeFn("list-repos", {}).then(function (data) {
+      repos = (data && data.repos) || [];
       renderRepos("");
-    }).catch(function () {
+    }).catch(function (e) {
+      if (e && e.status === 428) { ghConnected = false; loadRepos(); return; }
       els["repo-list"].innerHTML = '<li class="repo-row">' + esc(T.errGeneric) + "</li>";
     });
   }
@@ -367,9 +366,8 @@
     var scanId = null;
     createScan("github", v.full).then(function (id) {
       scanId = id;
-      return sb.functions.invoke("fetch-repo", { body: { scan_id: id, owner: v.owner, repo: v.repo, ref: v.ref } });
-    }).then(function (res) {
-      throwInvoke(res);
+      return invokeFn("fetch-repo", { scan_id: id, owner: v.owner, repo: v.repo, ref: v.ref });
+    }).then(function () {
       return runDetect(scanId);
     }).catch(function (e) { handleFlowError(e, scanId); });
   }
@@ -391,19 +389,29 @@
 
   function runDetect(scanId) {
     showLoading(T.diagnosing);
-    return sb.functions.invoke("detect", { body: { scan_id: scanId } }).then(function (res) {
-      throwInvoke(res);
+    return invokeFn("detect", { scan_id: scanId }).then(function () {
       return loadReport(scanId);
     });
   }
 
-  function throwInvoke(res) {
-    if (res && res.error) {
-      var e = new Error("invoke_error");
-      e.status = res.error.context && res.error.context.status;
-      e.body = res.data;
-      throw e;
-    }
+  /* Invoke an edge function and, on failure, surface the server's own
+     {error: "..."} payload — supabase-js puts it on error.context (a Response),
+     not on res.data, so it has to be read out explicitly. */
+  function invokeFn(name, body) {
+    return sb.functions.invoke(name, { body: body || {} }).then(function (res) {
+      if (!res.error) return res.data;
+      var ctx = res.error.context;
+      var status = ctx && ctx.status;
+      var read = (ctx && typeof ctx.json === "function")
+        ? ctx.json().catch(function () { return null; })
+        : Promise.resolve(null);
+      return read.then(function (payload) {
+        var e = new Error("invoke_error");
+        e.status = status;
+        e.body = payload;
+        throw e;
+      });
+    });
   }
 
   function loadReport(scanId) {
@@ -466,7 +474,11 @@
     else if (reason === "no_scannable_files") msg = T.errNoFiles;
     else if (reason === "github_not_connected") msg = T.ghNotConnected;
     else if (reason === "github_token_expired") msg = T.ghExpired;
+    else if (reason === "missing_anthropic_api_key") msg = T.noApiKey;
+    else if (reason === "invalid_anthropic_api_key_characters") msg = T.badApiKey;
     else if (reason && /anthropic|model|bundle/.test(reason)) msg = T.errDetect;
+    /* this is a work tool: never hide the concrete reason behind a generic line */
+    else if (reason) msg = T.errGeneric + " (" + reason + ")";
     showError(msg);
   }
 
