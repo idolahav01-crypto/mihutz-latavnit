@@ -200,6 +200,13 @@ a:hover { color: var(--color-primary-deep); }
 .btn-primary:active { transform: translateY(0); box-shadow: var(--shadow-press); }
 .btn-quiet { background: transparent; color: var(--color-ink); border-color: var(--color-neutral-300); }
 .btn-quiet:hover { border-color: var(--color-ink); color: var(--color-ink); }
+.btn-sm { min-height: 40px; padding: 8px 16px; font-size: 0.92rem; }
+
+/* header auth pair: sign in (quiet) + sign up (primary) */
+.nav-auth { display: flex; align-items: center; gap: var(--s-1); }
+.nav-user { font-weight: 600; font-size: 0.92rem; color: var(--color-ink-soft); white-space: nowrap; }
+:lang(he) .nav-user { font-weight: 700; }
+@media (max-width: 760px) { .nav-auth { flex-shrink: 0; } }
 
 .textlink {
   font-weight: 600;
@@ -539,6 +546,54 @@ a:hover { color: var(--color-primary-deep); }
 .signin-copy { margin: 0 0 var(--s-4); color: var(--color-ink-soft); }
 .btn-github svg { inline-size: 19px; block-size: 19px; flex-shrink: 0; }
 .signin-note { font-size: 0.85rem; color: var(--color-neutral-600); margin-block-start: var(--s-3); }
+
+/* ---------- auth modal (sign in / sign up with Google or GitHub) ---------- */
+.auth-modal {
+  padding: 0;
+  border: 1px solid var(--color-neutral-300);
+  border-block-start: 3px solid var(--color-primary);
+  border-radius: var(--r-surface);
+  max-inline-size: 420px;
+  inline-size: calc(100% - var(--s-4));
+  background: var(--color-paper-raised);
+  color: var(--color-ink);
+  box-shadow: var(--shadow-lift);
+}
+.auth-modal::backdrop { background: rgba(26, 22, 16, 0.5); }
+.auth-modal-inner { position: relative; padding: clamp(var(--s-4), 5vw, var(--s-6)); }
+.auth-modal-close {
+  position: absolute;
+  inset-block-start: var(--s-2);
+  inset-inline-end: var(--s-2);
+  inline-size: 34px; block-size: 34px;
+  border: 0; border-radius: var(--r-control);
+  background: transparent; color: var(--color-neutral-600);
+  font-size: 1.5rem; line-height: 1; cursor: pointer;
+}
+.auth-modal-close:hover { background: var(--color-paper); color: var(--color-ink); }
+.auth-modal-title { font-size: 1.5rem; }
+.auth-modal-sub { color: var(--color-ink-soft); font-size: 0.95rem; margin: var(--s-1) 0 var(--s-4); }
+.auth-providers { display: grid; gap: var(--s-2); }
+.btn-provider {
+  inline-size: 100%;
+  background: var(--color-paper-raised);
+  color: var(--color-ink);
+  border: 1px solid var(--color-neutral-300);
+}
+.btn-provider:hover { background: var(--color-paper); border-color: var(--color-ink); color: var(--color-ink); }
+.btn-provider svg { inline-size: 18px; block-size: 18px; flex-shrink: 0; }
+.auth-modal-note { font-size: 0.85rem; color: var(--color-primary-deep); margin-block-start: var(--s-3); min-block-size: 1.2em; }
+.auth-modal-note:empty { margin-block-start: 0; }
+.auth-modal-switch { font-size: 0.9rem; color: var(--color-ink-soft); margin-block-start: var(--s-3); margin-block-end: 0; }
+.auth-modal-switch button {
+  background: none; border: 0; padding: 0; font: inherit; font-weight: 700; cursor: pointer;
+  color: var(--color-primary); text-decoration: underline; text-underline-offset: 3px;
+}
+.auth-modal-switch button:hover { color: var(--color-primary-deep); }
+@media (prefers-reduced-motion: no-preference) {
+  .auth-modal[open] { animation: auth-pop 180ms cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+}
+@keyframes auth-pop { from { opacity: 0; transform: translateY(8px) scale(0.98); } to { opacity: 1; transform: none; } }
 
 /* ---------- footer ---------- */
 .site-footer {
