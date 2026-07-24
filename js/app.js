@@ -45,7 +45,8 @@
     errNoFiles: "לא נמצאו קבצים לסריקה.",
     errDetect: "האבחון נכשל. נסה שוב.",
     noApiKey: "מנוע האבחון לא מוגדר — חסר ANTHROPIC_API_KEY ב-Supabase (Edge Functions → Secrets).",
-    badApiKey: "מפתח ה-ANTHROPIC_API_KEY לא תקין — כנראה נדבקו איתו רווח או ירידת שורה. הגדירו אותו מחדש."
+    badApiKey: "מפתח ה-ANTHROPIC_API_KEY לא תקין — כנראה נדבקו איתו רווח או ירידת שורה. הגדירו אותו מחדש.",
+    errTimeout: "האבחון ארך יותר מ-150 שניות ונקטע. נסו ריפו קטן יותר, או פנו אלינו."
   } : {
     hi: "Hi, ",
     signout: "Sign out",
@@ -74,7 +75,8 @@
     errNoFiles: "No scannable files found.",
     errDetect: "Diagnosis failed. Try again.",
     noApiKey: "Diagnosis engine not configured — ANTHROPIC_API_KEY is missing in Supabase (Edge Functions → Secrets).",
-    badApiKey: "ANTHROPIC_API_KEY is invalid — a space or newline was probably pasted with it. Set it again."
+    badApiKey: "ANTHROPIC_API_KEY is invalid — a space or newline was probably pasted with it. Set it again.",
+    errTimeout: "Diagnosis ran past 150 seconds and was cut off. Try a smaller repo, or contact us."
   };
 
   /* ===== file filtering (mirrors the fetch-repo edge function) ===== */
@@ -424,9 +426,13 @@
   /* ===== report view ===== */
   function renderReport(scan) {
     var det = scan.detection || {};
-    var sigs = det.signals || [];
-    var present = sigs.filter(function (s) { return s.present && s.applicable !== false; });
-    var applicable = sigs.filter(function (s) { return s.applicable !== false; }).length;
+    /* detect returns only the signals it found, plus the ids it ruled
+       inapplicable — absent ones are never sent, which is what keeps the
+       call inside the platform's time limit. */
+    var present = det.present_signals || det.signals || [];
+    var applicable = det.applicable_count != null
+      ? det.applicable_count
+      : 108 - ((det.not_applicable_ids || []).length);
 
     els.score.innerHTML = esc(String(scan.ai_fingerprint_score != null ? scan.ai_fingerprint_score : 0)) + "<small>/100</small>";
     els["report-caption"].textContent =
@@ -476,6 +482,7 @@
     else if (reason === "github_token_expired") msg = T.ghExpired;
     else if (reason === "missing_anthropic_api_key") msg = T.noApiKey;
     else if (reason === "invalid_anthropic_api_key_characters") msg = T.badApiKey;
+    else if (e && (e.status === 546 || e.status === 504)) msg = T.errTimeout;
     else if (reason && /anthropic|model|bundle/.test(reason)) msg = T.errDetect;
     /* this is a work tool: never hide the concrete reason behind a generic line */
     else if (reason) msg = T.errGeneric + " (" + reason + ")";
