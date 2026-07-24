@@ -158,7 +158,12 @@ document.querySelectorAll("[data-evt]").forEach(function (el) {
       getClient().then(function (sb) {
         return sb.auth.signInWithOAuth({
           provider: provider,
-          options: { redirectTo: window.location.origin + window.location.pathname }
+          options: {
+            // After login, land on the dashboard input screen (per language).
+            redirectTo: window.location.origin + (he ? "/he/app/" : "/app/"),
+            // GitHub needs repo read to list/pull the user's repositories.
+            scopes: provider === "github" ? "read:user repo" : undefined
+          }
         });
       }).catch(function () {
         noteEl.textContent = he

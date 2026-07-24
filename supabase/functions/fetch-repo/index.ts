@@ -1,0 +1,159 @@
+// Stage 0 for GitHub inputs (URL tab + OAuth tab).
+// Pulls a repo tarball server-side, filters vendored/binary/oversized files,
+// builds a single "=== FILE: path ===" bundle, and writes it to Storage at
+// {user_id}/{scan_id}/bundle.txt so `detect` can read it uniformly.
+
+import { createClient } from "jsr:@supabase/supabase-js@2";
+import { UntarStream } from "jsr:@std/tar@0.1/untar-stream";
+
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
+const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+const SERVER_GITHUB_TOKEN = Deno.env.get("GITHUB_TOKEN") ?? "";
+
+const MAX_BUNDLE_BYTES = 300_000; // cap code sent to detect (context + cost)
+const MAX_FILE_BYTES = 60_000; // skip single huge files
+
+const cors = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
+
+function json(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...cors, "content-type": "application/json" },
+  });
+}
+
+// Directories and files that never carry the site's own fingerprint.
+const SKIP_DIR =
+  /(^|\/)(node_modules|\.git|dist|build|\.next|\.nuxt|out|vendor|coverage|\.cache|\.vercel|\.turbo)(\/|$)/;
+const SKIP_FILE =
+  /\.(min\.(js|css)|map|lock|png|jpe?g|gif|webp|avif|svg|ico|woff2?|ttf|otf|eot|mp4|webm|mp3|wav|pdf|zip|gz|br|wasm|ds_store)$/i;
+const LOCKFILES = /(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|bun\.lockb)$/i;
+
+function keep(path: string): boolean {
+  if (SKIP_DIR.test(path)) return false;
+  if (LOCKFILES.test(path)) return false;
+  if (SKIP_FILE.test(path)) return false;
+  return true;
+}
+
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
+  if (req.method !== "POST") return json({ error: "method not allowed" }, 405);
+
+  const admin = createClient(SUPABASE_URL, SERVICE_ROLE);
+  const authHeader = req.headers.get("Authorization") ?? "";
+  const { data: userData } = await admin.auth.getUser(
+    authHeader.replace("Bearer ", ""),
+  );
+  const user = userData?.user;
+  if (!user) return json({ error: "unauthorized" }, 401);
+
+  let body: { scan_id?: string; owner?: string; repo?: string; ref?: string };
+  try {
+    body = await req.json();
+  } catch {
+    return json({ error: "invalid body" }, 400);
+  }
+  const { scan_id: scanId, owner, repo, ref } = body;
+  if (!scanId || !owner || !repo) {
+    return json({ error: "scan_id, owner, repo required" }, 400);
+  }
+
+  const { data: scan } = await admin
+    .from("scans")
+    .select("id, user_id")
+    .eq("id", scanId)
+    .single();
+  if (!scan || scan.user_id !== user.id) {
+    return json({ error: "scan not found" }, 404);
+  }
+
+  // Prefer the user's OAuth token (needed for private repos); fall back to a
+  // server token for public repos to dodge the 60/hr unauthenticated limit.
+  const { data: tok } = await admin
+    .from("github_tokens")
+    .select("provider_token")
+    .eq("user_id", user.id)
+    .single();
+  const ghToken = tok?.provider_token || SERVER_GITHUB_TOKEN;
+
+  await admin.from("scans").update({ status: "ingesting" }).eq("id", scanId);
+
+  try {
+    const refPart = ref ? `/${ref}` : "";
+    const res = await fetch(
+      `https://api.github.com/repos/${owner}/${repo}/tarball${refPart}`,
+      {
+        headers: {
+          ...(ghToken ? { Authorization: `Bearer ${ghToken}` } : {}),
+          Accept: "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28",
+        },
+      },
+    );
+    if (res.status === 404) throw new Error("repo_not_found_or_no_access");
+    if (!res.ok || !res.body) throw new Error(`github ${res.status}`);
+
+    const entries = res.body
+      .pipeThrough(new DecompressionStream("gzip"))
+      .pipeThrough(new UntarStream());
+
+    const parts: string[] = [];
+    let total = 0;
+    let fileCount = 0;
+    const decoder = new TextDecoder();
+
+    for await (const entry of entries) {
+      // Tar paths are prefixed with "<owner>-<repo>-<sha>/"; strip it.
+      const rel = entry.path.replace(/^[^/]+\//, "");
+      if (!entry.readable) continue;
+      if (!rel || entry.path.endsWith("/") || !keep(rel)) {
+        await entry.readable.cancel();
+        continue;
+      }
+      if (total >= MAX_BUNDLE_BYTES) {
+        await entry.readable.cancel();
+        continue;
+      }
+      const buf = new Uint8Array(
+        await new Response(entry.readable).arrayBuffer(),
+      );
+      if (buf.byteLength > MAX_FILE_BYTES) continue;
+      const text = decoder.decode(buf);
+      const block = `=== FILE: ${rel} ===\n${text}\n\n`;
+      total += block.length;
+      fileCount += 1;
+      parts.push(block);
+    }
+
+    if (fileCount === 0) throw new Error("no_scannable_files");
+
+    const bundlePath = `${user.id}/${scanId}/bundle.txt`;
+    const { error: upErr } = await admin.storage
+      .from("scans")
+      .upload(bundlePath, new Blob([parts.join("")], { type: "text/plain" }), {
+        upsert: true,
+        contentType: "text/plain",
+      });
+    if (upErr) throw new Error(`storage: ${upErr.message}`);
+
+    await admin
+      .from("scans")
+      .update({ files_scanned: fileCount })
+      .eq("id", scanId);
+
+    return json({ ok: true, scan_id: scanId, files_scanned: fileCount });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    await admin
+      .from("scans")
+      .update({ status: "error", error: message })
+      .eq("id", scanId);
+    return json({ error: message }, 500);
+  }
+});

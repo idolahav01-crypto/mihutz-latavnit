@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>דשבורד — מחוץ לתבנית</title>
+  <meta name="robots" content="noindex" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700;9..144,800&family=Frank+Ruhl+Libre:wght@500;700;800;900&family=Rubik:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/styles.css" />
+  <link rel="stylesheet" href="/css/app.css" />
+</head>
+<body>
+  <a class="skip-link" href="#app-main">דלג לתוכן העמוד</a>
+
+  <header class="app-header">
+    <div class="shell">
+      <a class="app-brand" href="/he/">מחוץ לתבנית</a>
+      <div class="app-header-actions">
+        <span class="app-user" id="app-user"></span>
+        <button type="button" class="btn btn-quiet btn-sm" id="signout">התנתקות</button>
+        <a class="small" href="/app/" lang="en" dir="ltr">English</a>
+      </div>
+    </div>
+  </header>
+
+  <main class="app-main" id="app-main">
+    <div class="shell">
+
+      <!-- ===== מסך הבחירה ===== -->
+      <section id="app-input">
+        <div class="app-head">
+          <h1>מאיפה מתחילים?</h1>
+          <p>הפנו אותנו לקוד המקור של האתר. אנחנו מאבחנים אותו מול
+             <span class="nums">108 סימנים</span> ב-<span class="nums">16 קטגוריות</span>.</p>
+        </div>
+
+        <div class="app-card">
+          <div class="tabs" role="tablist" aria-label="מקור הקלט">
+            <button class="tab" role="tab" data-tab="oauth" aria-selected="false" aria-controls="panel-oauth">
+              <svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0c4.42 0 8 3.58 8 8a8.01 8.01 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A8.01 8.01 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>
+              חיבור GitHub
+            </button>
+            <button class="tab" role="tab" data-tab="zip" aria-selected="false" aria-controls="panel-zip">
+              <svg viewBox="0 0 20 20" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="M10 13V3m0 0L6.5 6.5M10 3l3.5 3.5M3.5 12.5V15a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-2.5"/></svg>
+              העלאת ZIP
+            </button>
+            <button class="tab" role="tab" data-tab="url" aria-selected="false" aria-controls="panel-url">
+              <svg viewBox="0 0 20 20" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" d="M8 11a3.5 3.5 0 0 0 5 0l2-2a3.54 3.54 0 0 0-5-5l-1 1M12 9a3.5 3.5 0 0 0-5 0l-2 2a3.54 3.54 0 0 0 5 5l1-1"/></svg>
+              קישור GitHub
+            </button>
+          </div>
+
+          <!-- OAuth -->
+          <div class="tab-panel" id="panel-oauth" role="tabpanel" hidden>
+            <div id="gh-disconnected" class="connect-card" hidden>
+              <p class="panel-hint">חברו את GitHub כדי לקרוא את הריפוזיטוריז שלכם ישירות ולסרוק אחד בכל פעם.</p>
+              <button type="button" class="btn btn-primary" id="gh-connect">חבר את GitHub</button>
+            </div>
+            <div id="gh-connected" hidden>
+              <div class="repo-search"><input type="text" id="repo-search" placeholder="חיפוש ריפוזיטוריז…" /></div>
+              <ul class="repo-list" id="repo-list"></ul>
+            </div>
+          </div>
+
+          <!-- ZIP -->
+          <div class="tab-panel" id="panel-zip" role="tabpanel" hidden>
+            <p class="panel-hint">‎.zip בלבד, עד 5MB. התיקיות node_modules, ‎.git ו-build לא נסרקות.</p>
+            <div class="dropzone" id="dropzone" role="button" tabindex="0" aria-label="בחירת קובץ zip">
+              <strong>גררו לכאן קובץ ‎.zip</strong>
+              <span class="small">או לחצו לבחירת קובץ</span>
+              <span class="small mono ltr" id="zip-chosen"></span>
+              <input type="file" id="zip-input" accept=".zip" />
+            </div>
+            <div class="card-actions">
+              <button type="button" class="btn btn-primary" id="zip-start" disabled>
+                התחלת אבחון <span class="dir-arrow" aria-hidden="true">→</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- URL -->
+          <div class="tab-panel" id="panel-url" role="tabpanel" hidden>
+            <label class="field">
+              <span class="field-label">כתובת ריפו ציבורי ב-GitHub</span>
+              <input type="url" id="url-input" placeholder="https://github.com/user/repo" dir="ltr" inputmode="url" />
+              <span class="field-status" id="url-status" aria-live="polite"></span>
+            </label>
+            <div class="card-actions">
+              <button type="button" class="btn btn-primary" id="url-start" disabled>
+                התחלת אבחון <span class="dir-arrow" aria-hidden="true">→</span>
+              </button>
+            </div>
+          </div>
+
+          <p class="err-banner" id="err-banner" role="alert" hidden></p>
+        </div>
+      </section>
+
+      <!-- ===== טעינה ===== -->
+      <section id="loading" hidden>
+        <div class="loading">
+          <span class="spin" aria-hidden="true"></span>
+          <p class="mono-line" id="loading-line"></p>
+        </div>
+      </section>
+
+      <!-- ===== דוח אבחון ===== -->
+      <section class="report" id="report" hidden aria-live="polite">
+        <div class="report-summary">
+          <span class="score" id="score">0<small>/100</small></span>
+          <span class="caption" id="report-caption"></span>
+        </div>
+        <div id="report-body"></div>
+        <p class="next-stage">השלב הבא: כיוון עיצובי והצעות תיקון — בקרוב.</p>
+      </section>
+
+    </div>
+  </main>
+
+  <script src="/js/app.js" defer></script>
+</body>
+</html>
