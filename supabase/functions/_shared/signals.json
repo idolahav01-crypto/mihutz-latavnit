@@ -1,0 +1,974 @@
+[
+  {
+    "id": 1,
+    "name": "Inter ללא התאמה",
+    "category": "טיפוגרפיה ופונטים",
+    "category_letter": "א",
+    "detection": "font-family מכיל \"Inter\" ואין font-variation-settings / letter-spacing / font-feature-settings מותאמים",
+    "weight": "high",
+    "auto_fixable": "yes"
+  },
+  {
+    "id": 2,
+    "name": "פונט גנרי מרשימה שחוקה",
+    "category": "טיפוגרפיה ופונטים",
+    "category_letter": "א",
+    "detection": "font-family מכיל אחד מ: Roboto / Open Sans / Lato / Montserrat / Poppins / Nunito / Raleway",
+    "weight": "medium",
+    "auto_fixable": "yes"
+  },
+  {
+    "id": 3,
+    "name": "פונט אחד בלבד לכל האתר (ללא ניגודיות טיפוגרפית)",
+    "category": "טיפוגרפיה ופונטים",
+    "category_letter": "א",
+    "detection": "רק family אחת מוגדרת ב-CSS, ללא שילוב display/body/mono",
+    "weight": "medium",
+    "auto_fixable": "partial"
+  },
+  {
+    "id": 4,
+    "name": "line-height צמוד מדי",
+    "category": "טיפוגרפיה ופונטים",
+    "category_letter": "א",
+    "detection": "line-height < 1.4 על body text (p, li, span)",
+    "weight": "medium",
+    "auto_fixable": "yes"
+  },
+  {
+    "id": 5,
+    "name": "אורך שורה חורג",
+    "category": "טיפוגרפיה ופונטים",
+    "category_letter": "א",
+    "detection": "max-width של container טקסט > 800px או ללא הגבלה על פסקאות",
+    "weight": "low",
+    "auto_fixable": "yes"
+  },
+  {
+    "id": 6,
+    "name": "משקלי פונט שטוחים (ללא קצוות)",
+    "category": "טיפוגרפיה ופונטים",
+    "category_letter": "א",
+    "detection": "font-weight נע רק בין 400–600, ללא 700/800/900 לכותרות ו-300/200 לתתי-כותרות",
+    "weight": "low",
+    "auto_fixable": "partial"
+  },
+  {
+    "id": 7,
+    "name": "גדלי פונט בסקאלה שטוחה",
+    "category": "טיפוגרפיה ופונטים",
+    "category_letter": "א",
+    "detection": "הפרש בין h1 ל-body קטן מפי 2.5 (למשל h1=32px, body=18px)",
+    "weight": "low",
+    "auto_fixable": "partial"
+  },
+  {
+    "id": 8,
+    "name": "font-display לא מוגדר",
+    "category": "טיפוגרפיה ופונטים",
+    "category_letter": "א",
+    "detection": "@font-face או Google Fonts import ללא font-display: swap / optional",
+    "weight": "medium",
+    "auto_fixable": "yes"
+  },
+  {
+    "id": 9,
+    "name": "Gradient סגול/כחול ב-Hero",
+    "category": "צבע, גרדיאנטים ו-Visual",
+    "category_letter": "ב",
+    "detection": "linear-gradient עם purple/indigo/violet/blue ב-section ראשון",
+    "weight": "high",
+    "auto_fixable": "partial"
+  },
+  {
+    "id": 10,
+    "name": "Glassmorphism נרחב",
+    "category": "צבע, גרדיאנטים ו-Visual",
+    "category_letter": "ב",
+    "detection": "backdrop-filter: blur ב-3+ אלמנטים שונים",
+    "weight": "high",
+    "auto_fixable": "partial"
+  },
+  {
+    "id": 11,
+    "name": "צבע Tailwind כברירת מחדל",
+    "category": "צבע, גרדיאנטים ו-Visual",
+    "category_letter": "ב",
+    "detection": "ערכי hex של פלטת Tailwind (#6366f1, #8b5cf6, #3b82f6) כצבע primary",
+    "weight": "high",
+    "auto_fixable": "no"
+  },
+  {
+    "id": 12,
+    "name": "Border-radius אחיד בכל האלמנטים",
+    "category": "צבע, גרדיאנטים ו-Visual",
+    "category_letter": "ב",
+    "detection": "אותו ערך (8px/12px) על כפתורים, כרטיסים, תמונות, inputs — ללא היררכיה",
+    "weight": "medium",
+    "auto_fixable": "partial"
+  },
+  {
+    "id": 13,
+    "name": "Dark mode עם #000000 כרקע בסיס",
+    "category": "צבע, גרדיאנטים ו-Visual",
+    "category_letter": "ב",
+    "detection": "background-color: #000 על body/root במצב dark",
+    "weight": "medium",
+    "auto_fixable": "yes"
+  },
+  {
+    "id": 14,
+    "name": "צבעי Neon/Cyan/Magenta",
+    "category": "צבע, גרדיאנטים ו-Visual",
+    "category_letter": "ב",
+    "detection": "צבעים עם saturation > 90% ו-lightness > 60% כ-primary או accent",
+    "weight": "medium",
+    "auto_fixable": "no"
+  },
+  {
+    "id": 15,
+    "name": "כותרות טקסט עם gradient רב-צבעי",
+    "category": "צבע, גרדיאנטים ו-Visual",
+    "category_letter": "ב",
+    "detection": "h1/h2 עם background-clip: text + linear-gradient של 3+ צבעים",
+    "weight": "high",
+    "auto_fixable": "partial"
+  },
+  {
+    "id": 16,
+    "name": "צללים אחידים (opacity 0.1 בדיוק)",
+    "category": "צבע, גרדיאנטים ו-Visual",
+    "category_letter": "ב",
+    "detection": "box-shadow עם rgba(0,0,0,0.1) על כל הכרטיסים",
+    "weight": "low",
+    "auto_fixable": "yes"
+  },
+  {
+    "id": 17,
+    "name": "היעדר design tokens / CSS variables",
+    "category": "צבע, גרדיאנטים ו-Visual",
+    "category_letter": "ב",
+    "detection": "ערכי צבע hardcoded מפוזרים בכל ה-CSS במקום var(--color-*)",
+    "weight": "medium",
+    "auto_fixable": "yes"
+  },
+  {
+    "id": 18,
+    "name": "סקאלת מרווחים אקראית",
+    "category": "צבע, גרדיאנטים ו-Visual",
+    "category_letter": "ב",
+    "detection": "ערכי padding/margin שאינם כפולות של 4 או 8 (13px, 22px, 37px)",
+    "weight": "low",
+    "auto_fixable": "yes"
+  },
+  {
+    "id": 19,
+    "name": "Hero Template סטנדרטי",
+    "category": "פריסה ו-UX Patterns",
+    "category_letter": "ג",
+    "detection": "section ראשון מכיל בדיוק: badge/pill + h1 + subtitle + 2 כפתורים + תמונה/מוקאפ, ממורכז",
+    "weight": "high",
+    "auto_fixable": "no"
+  },
+  {
+    "id": 20,
+    "name": "רשת 3-4 כרטיסים סימטרית",
+    "category": "פריסה ו-UX Patterns",
+    "category_letter": "ג",
+    "detection": "grid של 3-4 כרטיסים זהים (icon + h3 + p) ברוחב שווה",
+    "weight": "high",
+    "auto_fixable": "no"
+  },
+  {
+    "id": 21,
+    "name": "יישור מרכזי גלובלי",
+    "category": "פריסה ו-UX Patterns",
+    "category_letter": "ג",
+    "detection": "text-align: center על 60%+ מהאלמנטים בעמוד",
+    "weight": "medium",
+    "auto_fixable": "partial"
+  },
+  {
+    "id": 22,
+    "name": "Pills \"Trusted by X+\" צפים",
+    "category": "פריסה ו-UX Patterns",
+    "category_letter": "ג",
+    "detection": "אלמנט עם border-radius גבוה המכיל \"Trusted by X+\" / \"X+ customers\" בתחילת ה-hero",
+    "weight": "medium",
+    "auto_fixable": "no"
+  },
+  {
+    "id": 23,
+    "name": "מוקאפ דשבורד מזויף",
+    "category": "פריסה ו-UX Patterns",
+    "category_letter": "ג",
+    "detection": "תמונה המדמה dashboard עם גרפים/מספרים ב-hero, ללא תוכן אמיתי מהמוצר",
+    "weight": "medium",
+    "auto_fixable": "no"
+  },
+  {
+    "id": 24,
+    "name": "Footer שטוח ללא פרטים",
+    "category": "פריסה ו-UX Patterns",
+    "category_letter": "ג",
+    "detection": "footer עם פחות מ-3 עמודות, ללא כתובת פיזית, טלפון, או שעות פעילות",
+    "weight": "medium",
+    "auto_fixable": "partial"
+  },
+  {
+    "id": 25,
+    "name": "היעדר דפים פנימיים",
+    "category": "פריסה ו-UX Patterns",
+    "category_letter": "ג",
+    "detection": "כל התוכן בדף אחד, ללא /about, /pricing, /blog נפרדים",
+    "weight": "low",
+    "auto_fixable": "no"
+  },
+  {
+    "id": 26,
+    "name": "ניווט המבורגר לניווט ראשי",
+    "category": "פריסה ו-UX Patterns",
+    "category_letter": "ג",
+    "detection": "תפריט ראשי מוסתר מאחורי המבורגר גם בדסקטופ",
+    "weight": "low",
+    "auto_fixable": "no"
+  },
+  {
+    "id": 27,
+    "name": "Schema / JSON-LD חסר לחלוטין",
+    "category": "SEO ומטא-דאטה טכני",
+    "category_letter": "ד",
+    "detection": "אין <script type=\"application/ld+json\"> ב-HTML הראשי",
+    "weight": "high",
+    "auto_fixable": "yes"
+  },
+  {
+    "id": 28,
+    "name": "H1 מרובה בעמוד",
+    "category": "SEO ומטא-דאטה טכני",
+    "category_letter": "ד",
+    "detection": "יותר מ-<h1> אחד בעמוד",
+    "weight": "high",
+    "auto_fixable": "yes"
+  },
+  {
+    "id": 29,
+    "name": "דילוג בהיררכיית כותרות",
+    "category": "SEO ומטא-דאטה טכני",
+    "category_letter": "ד",
+    "detection": "מעבר מ-h2 ל-h4 ללא h3, או h3 לפני h2 ראשון",
+    "weight": "medium",
+    "auto_fixable": "yes"
+  },
+  {
+    "id": 30,
+    "name": "Meta description חסר או גנרי",
+    "category": "SEO ומטא-דאטה טכני",
+    "category_letter": "ד",
+    "detection": "<meta name=\"description\"> חסר, ריק, או זהה לכותרת הדף",
+    "weight": "high",
+    "auto_fixable": "partial"
+  },
+  {
+    "id": 31,
+    "name": "Open Graph חסר / חלקי",
+    "category": "SEO ומטא-דאטה טכני",
+    "category_letter": "ד",
+    "detection": "חסר og:title / og:description / og:image / og:url",
+    "weight": "medium",
+    "auto_fixable": "yes"
+  },
+  {
+    "id": 32,
+    "name": "HTML לא סמנטי",
+    "category": "SEO ומטא-דאטה טכני",
+    "category_letter": "ד",
+    "detection": "<div> במקום article, section, nav, main, header, footer",
+    "weight": "medium",
+    "auto_fixable": "yes"
+  },
+  {
+    "id": 33,
+    "name": "תמונות ללא alt text",
+    "category": "SEO ומטא-דאטה טכני",
+    "category_letter": "ד",
+    "detection": "<img> ללא alt, או alt=\"\" על תמונות תוכן; וכן alt לא-תיאורי (\"תמונה של אדם מחייך\" במקום מידע אמיתי)",
+    "weight": "medium",
+    "auto_fixable": "partial"
+  },
+  {
+    "id": 34,
+    "name": "Sitemap / robots.txt לא תקין",
+    "category": "SEO ומטא-דאטה טכני",
+    "category_letter": "ד",
+    "detection": "robots.txt חוסם Googlebot / sitemap חסר / לא מוצהר ב-robots.txt",
+    "weight": "medium",
+    "auto_fixable": "yes"
+  },
+  {
+    "id": 35,
+    "name": "תמונות ללא מידות מפורשות",
+    "category": "קוד וביצועים",
+    "category_letter": "ה",
+    "detection": "<img> ללא width ו-height (גורם CLS)",
+    "weight": "medium",
+    "auto_fixable": "yes"
+  },
+  {
+    "id": 36,
+    "name": "תמונות בפורמט ישן (JPG/PNG)",
+    "category": "קוד וביצועים",
+    "category_letter": "ה",
+    "detection": "src מכיל .jpg / .png ולא .webp / .avif",
+    "weight": "medium",
+    "auto_fixable": "no"
+  },
+  {
+    "id": 37,
+    "name": "אין lazy loading לתמונות",
+    "category": "קוד וביצועים",
+    "category_letter": "ה",
+    "detection": "<img> מתחת לקו הקיפול ללא loading=\"lazy\"",
+    "weight": "low",
+    "auto_fixable": "yes"
+  },
+  {
+    "id": 38,
+    "name": "JavaScript bloat",
+    "category": "קוד וביצועים",
+    "category_letter": "ה",
+    "detection": "ספריות >200KB שאינן בשימוש (jQuery + plugins, lodash מלא, moment.js)",
+    "weight": "medium",
+    "auto_fixable": "no"
+  },
+  {
+    "id": 39,
+    "name": "CSS לא בשימוש נרחב",
+    "category": "קוד וביצועים",
+    "category_letter": "ה",
+    "detection": "יחס גבוה של CSS rules לא מוחלים (Coverage בדפדפן)",
+    "weight": "low",
+    "auto_fixable": "no"
+  },
+  {
+    "id": 40,
+    "name": "אין preload לפונט ראשי",
+    "category": "קוד וביצועים",
+    "category_letter": "ה",
+    "detection": "<link rel=\"preload\"> חסר עבור פונט הכותרות",
+    "weight": "low",
+    "auto_fixable": "yes"
+  },
+  {
+    "id": 41,
+    "name": "אין CDN / גרסאות assets",
+    "category": "קוד וביצועים",
+    "category_letter": "ה",
+    "detection": "קבצי CSS/JS ללא content hash, נטענים מאותו origin ללא cache headers",
+    "weight": "low",
+    "auto_fixable": "no"
+  },
+  {
+    "id": 42,
+    "name": "Fade-in על כל אלמנט בגלילה",
+    "category": "אנימציות ואינטראקציות",
+    "category_letter": "ו",
+    "detection": "כל section/card עם animation של opacity 0→1 + translateY עם scroll trigger",
+    "weight": "high",
+    "auto_fixable": "no"
+  },
+  {
+    "id": 43,
+    "name": "Hover glow גנרי",
+    "category": "אנימציות ואינטראקציות",
+    "category_letter": "ו",
+    "detection": ":hover עם box-shadow של colored glow על כפתורים וכרטיסים",
+    "weight": "medium",
+    "auto_fixable": "partial"
+  },
+  {
+    "id": 44,
+    "name": "אנימציות width/height/margin",
+    "category": "אנימציות ואינטראקציות",
+    "category_letter": "ו",
+    "detection": "transition/animation על properties שגורמות reflow (width, height, margin, padding, top, left)",
+    "weight": "medium",
+    "auto_fixable": "yes"
+  },
+  {
+    "id": 45,
+    "name": "היעדר prefers-reduced-motion",
+    "category": "אנימציות ואינטראקציות",
+    "category_letter": "ו",
+    "detection": "אין @media (prefers-reduced-motion: reduce) שמכבה אנימציות",
+    "weight": "medium",
+    "auto_fixable": "yes"
+  },
+  {
+    "id": 46,
+    "name": "סמל גלילה מהבהב (scroll indicator)",
+    "category": "אנימציות ואינטראקציות",
+    "category_letter": "ו",
+    "detection": "אלמנט עם animation: bounce/blink/pulse בתחתית ה-hero",
+    "weight": "low",
+    "auto_fixable": "yes"
+  },
+  {
+    "id": 47,
+    "name": "Buzzwords גנריים",
+    "category": "קופי ומיקרו-טקסט",
+    "category_letter": "ז",
+    "detection": "h1/h2 מכילים: Transform / Seamless / Revolutionary / Next-level / Cutting-edge / Empower / Leverage / Unlock / Reimagine / Streamline",
+    "weight": "high",
+    "auto_fixable": "partial"
+  },
+  {
+    "id": 48,
+    "name": "Rule of Three סימטרי בתכונות",
+    "category": "קופי ומיקרו-טקסט",
+    "category_letter": "ז",
+    "detection": "בדיוק 3 בלוקים של features עם אותו מבנה (icon + title + משפט)",
+    "weight": "medium",
+    "auto_fixable": "no"
+  },
+  {
+    "id": 49,
+    "name": "CTA גנרי",
+    "category": "קופי ומיקרו-טקסט",
+    "category_letter": "ז",
+    "detection": "טקסט כפתור ראשי: \"Get Started\" / \"Learn More\" / \"Sign Up\" / \"Try Now\" / \"Get Started for Free\"",
+    "weight": "medium",
+    "auto_fixable": "partial"
+  },
+  {
+    "id": 50,
+    "name": "אין מספרים קונקרטיים",
+    "category": "קופי ומיקרו-טקסט",
+    "category_letter": "ז",
+    "detection": "social proof / תוצאות ללא ספרות (%, $, X users, X hours saved)",
+    "weight": "medium",
+    "auto_fixable": "no"
+  },
+  {
+    "id": 51,
+    "name": "הודעות שגיאה גנריות",
+    "category": "קופי ומיקרו-טקסט",
+    "category_letter": "ז",
+    "detection": "\"Error\" / \"Invalid entry\" / \"An error occurred\" / \"Something went wrong\" / \"אירעה שגיאה\" ב-validation",
+    "weight": "medium",
+    "auto_fixable": "yes"
+  },
+  {
+    "id": 52,
+    "name": "Empty states לא מעוצבים",
+    "category": "קופי ומיקרו-טקסט",
+    "category_letter": "ז",
+    "detection": "רשימה ריקה / תוצאות חיפוש ריקות מציגות כלום או טקסט plain",
+    "weight": "low",
+    "auto_fixable": "no"
+  },
+  {
+    "id": 53,
+    "name": "כפתור Submit גנרי בטפסים",
+    "category": "קופי ומיקרו-טקסט",
+    "category_letter": "ז",
+    "detection": "<button type=\"submit\"> עם \"Submit\" / \"Send\" / \"Go\"",
+    "weight": "low",
+    "auto_fixable": "yes"
+  },
+  {
+    "id": 54,
+    "name": "Testimonials קצרים וחסרי זהות",
+    "category": "קופי ומיקרו-טקסט",
+    "category_letter": "ז",
+    "detection": "testimonial עם פחות מ-30 מילים, ללא שם מלא + תפקיד + חברה + תמונה",
+    "weight": "medium",
+    "auto_fixable": "no"
+  },
+  {
+    "id": 55,
+    "name": "Divs כ-buttons (ללא keyboard support)",
+    "category": "נגישות",
+    "category_letter": "ח",
+    "detection": "<div onclick> / <span onclick> ללא role=\"button\" + tabindex=\"0\" + onkeydown",
+    "weight": "high",
+    "auto_fixable": "yes"
+  },
+  {
+    "id": 56,
+    "name": "Focus outline מבוטל",
+    "category": "נגישות",
+    "category_letter": "ח",
+    "detection": ":focus { outline: none / 0 } ללא חלופה מעוצבת",
+    "weight": "high",
+    "auto_fixable": "yes"
+  },
+  {
+    "id": 57,
+    "name": "ניגודיות צבע נמוכה",
+    "category": "נגישות",
+    "category_letter": "ח",
+    "detection": "יחס ניגודיות < 4.5:1 (WCAG AA)",
+    "weight": "high",
+    "auto_fixable": "yes"
+  },
+  {
+    "id": 58,
+    "name": "חוסר ב-aria-labels",
+    "category": "נגישות",
+    "category_letter": "ח",
+    "detection": "<button> / <a> ללא טקסט גלוי ובלי aria-label (כפתורי אייקון)",
+    "weight": "medium",
+    "auto_fixable": "yes"
+  },
+  {
+    "id": 59,
+    "name": "יעדי מגע קטנים מדי",
+    "category": "נגישות",
+    "category_letter": "ח",
+    "detection": "<button> / <a> עם height/width < 44px",
+    "weight": "medium",
+    "auto_fixable": "yes"
+  },
+  {
+    "id": 60,
+    "name": "ספריית אייקונים גנרית ללא התאמה",
+    "category": "אייקונים, אנליטיקס, GDPR ו-RTL",
+    "category_letter": "ט",
+    "detection": "Font Awesome / Heroicons / Material Icons / Lucide ללא התאמת stroke-width לפונט האתר",
+    "weight": "medium",
+    "auto_fixable": "partial"
+  },
+  {
+    "id": 61,
+    "name": "dataLayer חסר לחלוטין",
+    "category": "אייקונים, אנליטיקס, GDPR ו-RTL",
+    "category_letter": "ט",
+    "detection": "אין window.dataLayer = [] ב-JavaScript",
+    "weight": "medium",
+    "auto_fixable": "yes"
+  },
+  {
+    "id": 62,
+    "name": "GA4 ברמת pageview בלבד",
+    "category": "אייקונים, אנליטיקס, GDPR ו-RTL",
+    "category_letter": "ט",
+    "detection": "קוד GA4 ללא custom events (gtag('event', ...))",
+    "weight": "medium",
+    "auto_fixable": "partial"
+  },
+  {
+    "id": 63,
+    "name": "Cookie banner ללא כפתור Reject",
+    "category": "אייקונים, אנליטיקס, GDPR ו-RTL",
+    "category_letter": "ט",
+    "detection": "cookie consent עם \"Accept\" בלבד, ללא אפשרות דחייה שווה",
+    "weight": "high",
+    "auto_fixable": "no"
+  },
+  {
+    "id": 64,
+    "name": "Physical CSS Properties (שובר RTL)",
+    "category": "אייקונים, אנליטיקס, GDPR ו-RTL",
+    "category_letter": "ט",
+    "detection": "margin-left/right, padding-left/right, float: left, text-align: left במקום logical properties",
+    "weight": "high",
+    "auto_fixable": "yes"
+  },
+  {
+    "id": 65,
+    "name": "hreflang חסר / שגוי",
+    "category": "אייקונים, אנליטיקס, GDPR ו-RTL",
+    "category_letter": "ט",
+    "detection": "אתר רב-שפתי ללא תגי hreflang, או ללא self-referencing / reciprocal tags",
+    "weight": "medium",
+    "auto_fixable": "yes"
+  },
+  {
+    "id": 66,
+    "name": "Pill-Shaped Tabs / Switcher Controls",
+    "category": "דפוסי AI מסדר שני (Second-Order AI Clichés)",
+    "category_letter": "י",
+    "detection": "3+ כפתורי tab עם border-radius ≥ 20px בשורה אחת, במקום flat tabs עם border-bottom indicator",
+    "weight": "high",
+    "auto_fixable": "yes"
+  },
+  {
+    "id": 67,
+    "name": "Dark + Gold/Amber כ\"פרימיום ברירת מחדל\"",
+    "category": "דפוסי AI מסדר שני (Second-Order AI Clichés)",
+    "category_letter": "י",
+    "detection": "רקע near-black (#0A0A0A–#1A1A1A) + accent זהב/נחושת (#C9A84C–#D4A853) כצבע brand יחיד",
+    "weight": "high",
+    "auto_fixable": "no"
+  },
+  {
+    "id": 68,
+    "name": "Playfair Display / Cormorant כ\"פתרון לאלגנטיות\"",
+    "category": "דפוסי AI מסדר שני (Second-Order AI Clichés)",
+    "category_letter": "י",
+    "detection": "Playfair Display / Cormorant Garamond / Lora ככותרות ללא weight contrast קיצוני ו-editorial sizing",
+    "weight": "medium",
+    "auto_fixable": "no"
+  },
+  {
+    "id": 69,
+    "name": "Eyebrow Label על כל Section",
+    "category": "דפוסי AI מסדר שני (Second-Order AI Clichés)",
+    "category_letter": "י",
+    "detection": "3+ sections רצופים עם label קטן uppercase + letter-spacing + accent color מעל h2",
+    "weight": "medium",
+    "auto_fixable": "partial"
+  },
+  {
+    "id": 70,
+    "name": "Golden/Amber Primary CTA Button",
+    "category": "דפוסי AI מסדר שני (Second-Order AI Clichés)",
+    "category_letter": "י",
+    "detection": "כפתור ראשי עם background בטווח HSL: hue 35-50°, saturation >50%, lightness 40-65%",
+    "weight": "medium",
+    "auto_fixable": "no"
+  },
+  {
+    "id": 71,
+    "name": "Bento Grid Layout",
+    "category": "דפוסי AI מסדר שני (Second-Order AI Clichés)",
+    "category_letter": "י",
+    "detection": "grid לא-אחיד עם grid-column: span 2 על חלק מהכרטיסים, ללא תוכן ויזואלי אמיתי",
+    "weight": "medium",
+    "auto_fixable": "no"
+  },
+  {
+    "id": 72,
+    "name": "Section Transition שחור-לבן-שחור מחזורית",
+    "category": "דפוסי AI מסדר שני (Second-Order AI Clichés)",
+    "category_letter": "י",
+    "detection": "3+ מעברים alternating בין רקע כהה לבהיר ברצף סדיר וצפוי",
+    "weight": "medium",
+    "auto_fixable": "partial"
+  },
+  {
+    "id": 73,
+    "name": "משקל פונט עברי קל מדי",
+    "category": "עברית ו-RTL",
+    "category_letter": "יא",
+    "detection": "טקסט עברי ב-font-weight 300–400. עברית דורשת 500+ לגוף הטקסט ו-700+ לכותרות (האות העברית צרה ומורכבת יותר מ-Latin)",
+    "weight": "high",
+    "auto_fixable": "yes"
+  },
+  {
+    "id": 74,
+    "name": "פונט ללא Hebrew Subset",
+    "category": "עברית ו-RTL",
+    "category_letter": "יא",
+    "detection": "פונט ללא תמיכת עברית (Playfair, DM Sans, Cabinet Grotesk) — אותיות עבריות נופלות ל-fallback (Times New Roman/Arial). ב-dev tools: computed font-family על טקסט עברי שונה מה-CSS המוגדר",
+    "weight": "very-high",
+    "auto_fixable": "yes"
+  },
+  {
+    "id": 75,
+    "name": "Hero עברי ממורכז",
+    "category": "עברית ו-RTL",
+    "category_letter": "יא",
+    "detection": "text-align: center על hero בעברית. אתרים ישראליים מיישרים ימינה: תוכן ימין + ויזואל שמאל",
+    "weight": "high",
+    "auto_fixable": "yes"
+  },
+  {
+    "id": 76,
+    "name": "לוגו בצד שמאל באתר RTL",
+    "category": "עברית ו-RTL",
+    "category_letter": "יא",
+    "detection": "לוגו ב-left של ה-nav באתר עברי. באתרי business/service ישראליים הלוגו בימין (RTL navigation start); centered — רק מסורת עיתונות",
+    "weight": "medium",
+    "auto_fixable": "yes"
+  },
+  {
+    "id": 77,
+    "name": "כיוון RTL לא עקבי",
+    "category": "עברית ו-RTL",
+    "category_letter": "יא",
+    "detection": "dir=\"rtl\" על body אבל: flex-direction לא הפוך, position absolute עם left: 0 במקום right: 0, תמונות \"בצד הלא נכון\", חצי carousel לא מסובבים (← במקום →), או direction: rtl ב-CSS בלבד בלי dir=\"rtl\" ב-HTML (פוגע ב-screen readers ומנועי חיפוש)",
+    "weight": "high",
+    "auto_fixable": "partial"
+  },
+  {
+    "id": 78,
+    "name": "כיוון מספרים ומטבע שגוי",
+    "category": "עברית ו-RTL",
+    "category_letter": "יא",
+    "detection": "\"199 ₪\" במקום \"₪ 199\", שעות/מספרים \"בורחים\" בלי unicode bidirectional isolation. מספרים ו-Latin תמיד LTR בתוך RTL",
+    "weight": "medium",
+    "auto_fixable": "yes"
+  },
+  {
+    "id": 79,
+    "name": "שדות טופס ללא dir=\"rtl\"",
+    "category": "עברית ו-RTL",
+    "category_letter": "יא",
+    "detection": "input/placeholder בעברית ללא dir=\"rtl\" על השדה",
+    "weight": "low",
+    "auto_fixable": "yes"
+  },
+  {
+    "id": 80,
+    "name": "Tailwind ללא RTL plugin",
+    "category": "עברית ו-RTL",
+    "category_letter": "יא",
+    "detection": "שימוש ב-classes פיזיים (ml-, pl-, text-left) בלי RTL plugin — יוצר layout \"הפוך\" בחצי המקרים",
+    "weight": "high",
+    "auto_fixable": "yes"
+  },
+  {
+    "id": 81,
+    "name": "שבירות שורה עבריות לא אסתטיות",
+    "category": "עברית ו-RTL",
+    "category_letter": "יא",
+    "detection": "כותרות עבריות עם ירידת שורה \"מכוערת\" באמצע מילה/צירוף — אין hyphenation עברית או text-wrap: balance",
+    "weight": "low",
+    "auto_fixable": "partial"
+  },
+  {
+    "id": 82,
+    "name": "Whitespace אגרסיבי לקהל ישראלי",
+    "category": "עברית ו-RTL",
+    "category_letter": "יא",
+    "detection": "hero בסגנון Linear/Stripe עם whitespace נדיב ומעט מידע. המשתמש הישראלי מצפה לצפיפות — נתפס כ\"ריק\" ו\"לא גמור\"",
+    "weight": "medium",
+    "auto_fixable": "partial"
+  },
+  {
+    "id": 83,
+    "name": "CTA עברי ארוך ו\"מפנק\"",
+    "category": "עברית ו-RTL",
+    "category_letter": "יא",
+    "detection": "\"מצא את הסגנון שלך\" במקום \"כניסה לחשבון\"; תרגום של \"Get started for free\" במקום \"נסה חינם\". ה-CTA הישראלי פונקציונלי: צבע brand, פינות 4-8px, טקסט ישיר וקצר",
+    "weight": "medium",
+    "auto_fixable": "partial"
+  },
+  {
+    "id": 84,
+    "name": "פלטה \"אלגנטית\" במקום brand color אחד חזק",
+    "category": "צבע, מיתוג וניווט ישראלי",
+    "category_letter": "יב",
+    "detection": "כחול + כחול בהיר + לבן \"יפים\" ללא hierarchy, או secondary+tertiary accents. אתרים ישראליים מצליחים: צבע brand אחד חד ועקבי (הפועלים #E2001A, לאומי #1B2A6B, 10bis #FF6B35) — כל השאר neutral. dark+gold לא קיים בשום אתר ישראלי מצליח (ראו #67)",
+    "weight": "high",
+    "auto_fixable": "no"
+  },
+  {
+    "id": 85,
+    "name": "צבע ראשי ללא משמעות פונקציונלית",
+    "category": "צבע, מיתוג וניווט ישראלי",
+    "category_letter": "יב",
+    "detection": "הצבע הראשי משמש גם לפרסומות, גם לניווט, גם לתוכן — אין לו משמעות. מקצועי שומר את הצבע לפעולה ראשית בלבד (n12: אדום רק ל\"מבזק\"/\"LIVE\")",
+    "weight": "medium",
+    "auto_fixable": "partial"
+  },
+  {
+    "id": 86,
+    "name": "States לא עקביים (hover/focus/disabled)",
+    "category": "צבע, מיתוג וניווט ישראלי",
+    "category_letter": "יב",
+    "detection": "hover states לא אחידים, disabled בצבע אחר, focus בצבע שלישי — אין design tokens ל-states",
+    "weight": "medium",
+    "auto_fixable": "yes"
+  },
+  {
+    "id": 87,
+    "name": "ניווט גנרי ללא ארכיטקטורת מידע",
+    "category": "צבע, מיתוג וניווט ישראלי",
+    "category_letter": "יב",
+    "detection": "nav עם 4-6 פריטים (בית/אודות/שירותים/צור קשר) — אין hierarchy, אין mega-menu, אין חלוקת personas. מבנה template שלא משקף את העסק. גם \"5 links + 1 CTA\" מינימליסטי לא עובד לישראל — ה-nav צריך להיות descriptive",
+    "weight": "medium",
+    "auto_fixable": "no"
+  },
+  {
+    "id": 88,
+    "name": "ריווח אחיד ללא היררכיה",
+    "category": "גריד, ריווח וטפסים",
+    "category_letter": "יג",
+    "detection": "padding: 24px לכל section בלי הבחנה; אלמנטים שצריכים קרבה (label + input) מרוחקים, אלמנטים שצריכים ריווח (sections שונים) צמודים. אין column layout שונה לסוגי תוכן",
+    "weight": "medium",
+    "auto_fixable": "partial"
+  },
+  {
+    "id": 89,
+    "name": "Label כ-placeholder בלבד",
+    "category": "גריד, ריווח וטפסים",
+    "category_letter": "יג",
+    "detection": "ה-label בתוך ה-input כ-placeholder — כשהמשתמש מקליד הוא שוכח מה למלא",
+    "weight": "medium",
+    "auto_fixable": "yes"
+  },
+  {
+    "id": 90,
+    "name": "ולידציה רק ב-submit",
+    "category": "גריד, ריווח וטפסים",
+    "category_letter": "יג",
+    "detection": "בדיקת שגיאות רק בלחיצת שליחה, ללא inline validation עם feedback מיידי",
+    "weight": "medium",
+    "auto_fixable": "partial"
+  },
+  {
+    "id": 91,
+    "name": "חיפוש ללא עזרים",
+    "category": "גריד, ריווח וטפסים",
+    "category_letter": "יג",
+    "detection": "שדה חיפוש עם placeholder גנרי, ללא auto-complete, ללא חיפושים נפוצים מוצגים מראש, filters גנריים (\"Category\") במקום taxonomy אמיתי של התחום",
+    "weight": "low",
+    "auto_fixable": "no"
+  },
+  {
+    "id": 92,
+    "name": "פוטר ללא רכיבי חובה ישראליים",
+    "category": "אמון, רגולציה ונגישות ישראלית",
+    "category_letter": "יד",
+    "detection": "אין ח\"פ, כתובת פיזית, שעות שירות, תקנון, מדיניות ביטול עסקה, נציב תלונות, אמנת שירות. ישראל דורשת: הצהרת נגישות (ת\"י 5568) + ביטול עסקה + תקנון + מדיניות פרטיות",
+    "weight": "high",
+    "auto_fixable": "partial"
+  },
+  {
+    "id": 93,
+    "name": "היעדר הצהרת נגישות ת\"י 5568",
+    "category": "אמון, רגולציה ונגישות ישראלית",
+    "category_letter": "יד",
+    "detection": "אין עמוד הצהרת נגישות עם ציטוט \"ת\"י 5568\" / \"WCAG 2.0 AA\" / תקנות תשע\"ג + תאריך עדכון + אימייל פניות נגישות. בישראל זה חוק, לא אפשרות",
+    "weight": "high",
+    "auto_fixable": "partial"
+  },
+  {
+    "id": 94,
+    "name": "היעדר skip links",
+    "category": "אמון, רגולציה ונגישות ישראלית",
+    "category_letter": "יד",
+    "detection": "אין \"דלג לתוכן העמוד\" / \"דלג לתפריט\" לניווט keyboard-only",
+    "weight": "medium",
+    "auto_fixable": "yes"
+  },
+  {
+    "id": 95,
+    "name": "היעדר כפתור ניגודיות/נגישות גלוי",
+    "category": "אמון, רגולציה ונגישות ישראלית",
+    "category_letter": "יד",
+    "detection": "אין toggle ניגודיות/High Contrast נגיש ממיקום קבוע בכל עמוד",
+    "weight": "low",
+    "auto_fixable": "partial"
+  },
+  {
+    "id": 96,
+    "name": "פרטיות לא מותאמת לחוק הישראלי",
+    "category": "אמון, רגולציה ונגישות ישראלית",
+    "category_letter": "יד",
+    "detection": "Privacy Policy template באנגלית/GDPR בלבד שלא מתייחס לתקנות הגנת הפרטיות הישראליות (חובה מ-2017); אין cookie banner בעברית לכל גולש",
+    "weight": "high",
+    "auto_fixable": "partial"
+  },
+  {
+    "id": 97,
+    "name": "Meta description משוכפל בין עמודים",
+    "category": "SEO, ביצועים ואנליטיקס מתקדם",
+    "category_letter": "טו",
+    "detection": "אותו description (\"ברוכים הבאים לאתר שלנו\") בכל עמוד — duplicate content",
+    "weight": "medium",
+    "auto_fixable": "partial"
+  },
+  {
+    "id": 98,
+    "name": "og:image = לוגו לכל העמודים",
+    "category": "SEO, ביצועים ואנליטיקס מתקדם",
+    "category_letter": "טו",
+    "detection": "כל שיתוף ברשתות מציג אותה תמונה; og:type תמיד \"website\" גם לתוכן",
+    "weight": "medium",
+    "auto_fixable": "partial"
+  },
+  {
+    "id": 99,
+    "name": "Canonical URL חסר",
+    "category": "SEO, ביצועים ואנליטיקס מתקדם",
+    "category_letter": "טו",
+    "detection": "אין canonical דינמי שמצביע על עצמו בכל עמוד — סכנת duplicate content",
+    "weight": "medium",
+    "auto_fixable": "yes"
+  },
+  {
+    "id": 100,
+    "name": "תמונות ללא CDN / srcset רספונסיבי",
+    "category": "SEO, ביצועים ואנליטיקס מתקדם",
+    "category_letter": "טו",
+    "detection": "תמונות ב-/images/ מקומי ללא CDN, ללא responsive srcset, ללא ריסייז/WebP אוטומטיים",
+    "weight": "medium",
+    "auto_fixable": "no"
+  },
+  {
+    "id": 101,
+    "name": "אין code splitting",
+    "category": "SEO, ביצועים ואנליטיקס מתקדם",
+    "category_letter": "טו",
+    "detection": "bundle ראשוני של 2MB+ — LCP גרוע",
+    "weight": "medium",
+    "auto_fixable": "no"
+  },
+  {
+    "id": 102,
+    "name": "אין Google Tag Manager",
+    "category": "SEO, ביצועים ואנליטיקס מתקדם",
+    "category_letter": "טו",
+    "detection": "GA snippet ישיר ב-HTML במקום GTM container. 100% מ-30 האתרים הישראליים שנסרקו משתמשים ב-GTM — בלעדיו אי אפשר להוסיף analytics/conversion tracking/heatmaps בלי לפתוח קוד",
+    "weight": "medium",
+    "auto_fixable": "yes"
+  },
+  {
+    "id": 103,
+    "name": "הסתרת תוכן במובייל עם display:none",
+    "category": "SEO, ביצועים ואנליטיקס מתקדם",
+    "category_letter": "טו",
+    "detection": "תוכן מוסתר ב-mobile ב-display:none — לא נגיש ל-search engines ול-screen readers; @media queries בלי התחשבות ב-touch targets, swipe gestures, thumb zones",
+    "weight": "medium",
+    "auto_fixable": "partial"
+  },
+  {
+    "id": 104,
+    "name": "תמונות סטוק גנריות / פנים AI",
+    "category": "אותנטיות תוכן וקוד",
+    "category_letter": "טז",
+    "detection": "תמונות Unsplash מוכרות (לחיצת ידיים, laptop, צוות מחייך), פנים שנוצרו ב-AI (ניתן לזהות בעיניים). בישראל: אם אין photos ישראליים אמיתיים — עדיף graphic/abstract מאשר stock person",
+    "weight": "high",
+    "auto_fixable": "no"
+  },
+  {
+    "id": 105,
+    "name": "נתונים וסטטיסטיקות ללא מקור",
+    "category": "אותנטיות תוכן וקוד",
+    "category_letter": "טז",
+    "detection": "\"98% מהלקוחות מרוצים\" — בלי מקור, בלי תאריך, בלי methodology; תמונות בלי קרדיט",
+    "weight": "medium",
+    "auto_fixable": "no"
+  },
+  {
+    "id": 106,
+    "name": "אתר סטטי לחלוטין — נתונים hardcoded",
+    "category": "אותנטיות תוכן וקוד",
+    "category_letter": "טז",
+    "detection": "מחירים/נתונים כתובים ידנית ב-HTML — כל שינוי דורש פתיחת קוד. אין CMS, אין API, אין תוכן דינמי",
+    "weight": "medium",
+    "auto_fixable": "no"
+  },
+  {
+    "id": 107,
+    "name": "אתר חד-לשוני בשוק רב-לשוני",
+    "category": "אותנטיות תוכן וקוד",
+    "category_letter": "טז",
+    "detection": "עברית בלבד — מפספס +20% מהאוכלוסייה (רוסית/ערבית/אנגלית כשפה ראשית); אין hreflang (ראו #65); אין dark mode / prefers-color-scheme",
+    "weight": "medium",
+    "auto_fixable": "no"
+  },
+  {
+    "id": 108,
+    "name": "קוד מונוליטי עם config בפנים",
+    "category": "אותנטיות תוכן וקוד",
+    "category_letter": "טז",
+    "detection": "הכל ב-App.jsx אחד — state, routing, styling; API keys, URLs, feature flags ב-code ולא ב-.env/CMS; transition: all 0.3s ease על כל אלמנט; אייקונים בגדלים לא עקביים (16px/24px/4px) ללא grid אחיד",
+    "weight": "medium",
+    "auto_fixable": "partial"
+  }
+]
