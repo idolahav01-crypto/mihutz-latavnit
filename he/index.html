@@ -53,7 +53,10 @@
           <li><a href="#before-after">לפני / אחרי</a></li>
           <li><a href="#signals">‏108 הסימנים</a></li>
           <li><a href="#process">איך זה עובד</a></li>
-          <li><a href="#audit" class="btn btn-primary" data-evt="nav_cta">התחברות עם <span dir="ltr">GitHub</span></a></li>
+          <li class="nav-auth">
+            <a href="#audit" class="btn btn-quiet btn-sm" data-auth-open="signin" data-evt="nav_signin">התחברות</a>
+            <a href="#audit" class="btn btn-primary btn-sm" data-auth-open="signup" data-evt="nav_signup">הרשמה</a>
+          </li>
           <li><a href="/" class="lang-switch" lang="en" hreflang="en" dir="ltr">English</a></li>
         </ul>
       </nav>
@@ -70,7 +73,7 @@
           <h1>האתר שה‑AI בנה לך עובד.<br>הוא פשוט לא נראה כמוך.</h1>
           <p class="hero-sub">Wix ADI, Claude Code, v0 — כולם מוציאים אתר תקין עם אותה טביעת אצבע: Inter, גרדיאנט סגול, שלושה כרטיסים סימטריים וכפתור "Get Started". אנחנו בודקים את האתר שלך מול <strong>108 סימנים מתועדים</strong> — כולל 31 סימנים של עברית, RTL ורגולציה ישראלית — מראים לך את ההוכחות שורה־שורה, ומתקנים רק מה שאישרת.</p>
           <p class="hero-actions">
-            <a class="btn btn-primary" href="#audit" data-evt="hero_cta">כניסה עם <span dir="ltr">GitHub</span> להתחלה</a>
+            <a class="btn btn-primary" href="#audit" data-auth-open="signup" data-evt="hero_cta">הרשמה להתחלה</a>
             <a class="textlink" href="#before-after">לגרור לפני / אחרי</a>
           </p>
           <dl class="hero-facts">
@@ -277,14 +280,11 @@
           <h2>מתחברים, והאבחון מתחיל מהריפו שלכם</h2>
           <span class="folio-rule" aria-hidden="true"></span>
         </div>
-        <p class="section-intro">בלי טופס, בלי הלוך ושוב באימייל. מתחברים עם <span dir="ltr">GitHub</span> פעם אחת — הדשבורד קורא את הריפוזיטוריז שלכם ישירות, ומשם ממשיך דוח 108 הסימנים.</p>
+        <p class="section-intro">בלי טופס, בלי הלוך ושוב באימייל. נרשמים פעם אחת עם <span dir="ltr">Google</span> או <span dir="ltr">GitHub</span> — הדשבורד קורא את הריפוזיטוריז שלכם ישירות, ומשם ממשיך דוח 108 הסימנים.</p>
         <div class="signin-card">
-          <p class="signin-copy">חיבור אחד, קריאה בלבד. אנחנו לא רואים את הסיסמה שלכם ל‑<span dir="ltr">GitHub</span>, ואפשר לבטל את הגישה בכל רגע מההגדרות של <span dir="ltr">GitHub</span>.</p>
-          <a class="btn btn-primary btn-github" href="/api/auth/github/login" data-evt="github_signin">
-            <svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A8.013 8.013 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>
-            המשך עם <span dir="ltr">GitHub</span>
-          </a>
-          <p class="signin-note">בהמשך אתם מאשרים שנקרא את המטא‑דאטה הציבורית של הריפו כדי להריץ את האבחון. ההתחברות עדיין לא פעילה — נחזור בקרוב.</p>
+          <p class="signin-copy">חיבור אחד, מאובטח. אנחנו לא רואים את הסיסמאות שלכם — ההתחברות עוברת דרך <span dir="ltr">Google</span> או <span dir="ltr">GitHub</span>, ואפשר לבטל את הגישה בכל רגע מההגדרות שלהם.</p>
+          <a class="btn btn-primary" href="#audit" data-auth-open="signup" data-evt="gate_cta">הרשמה להתחלה</a>
+          <p class="signin-note">ההרשמה חינמית ופתוחה עם חשבון <span dir="ltr">Google</span> או <span dir="ltr">GitHub</span> הקיים שלכם — בלי סיסמה חדשה לזכור.</p>
         </div>
       </div>
     </section>
@@ -329,6 +329,30 @@
       </div>
     </div>
   </footer>
+
+  <!-- חלונית התחברות: כניסה / הרשמה עם Google או GitHub -->
+  <dialog class="auth-modal" id="auth-modal" aria-labelledby="auth-modal-title"
+    data-title-signin="התחברות" data-title-signup="יצירת חשבון"
+    data-sub-signin="ברוך שובך. בחרו איך להמשיך." data-sub-signup="חשבון אחד לכל היסטוריית האבחונים שלכם."
+    data-switch-signin="עוד לא רשומים? יצירת חשבון" data-switch-signup="כבר יש חשבון? התחברות">
+    <div class="auth-modal-inner">
+      <button class="auth-modal-close" type="button" data-auth-close aria-label="סגירה">&times;</button>
+      <h2 class="auth-modal-title" id="auth-modal-title">התחברות</h2>
+      <p class="auth-modal-sub">ברוך שובך. בחרו איך להמשיך.</p>
+      <div class="auth-providers">
+        <button class="btn btn-provider" type="button" data-auth-provider="google">
+          <svg viewBox="0 0 18 18" aria-hidden="true"><path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84a4.14 4.14 0 0 1-1.8 2.72v2.26h2.92c1.71-1.57 2.68-3.89 2.68-6.62Z"/><path fill="#34A853" d="M9 18c2.43 0 4.47-.8 5.96-2.18l-2.92-2.26c-.81.54-1.85.86-3.04.86-2.34 0-4.32-1.58-5.03-3.7H.96v2.33A9 9 0 0 0 9 18Z"/><path fill="#FBBC05" d="M3.97 10.72a5.41 5.41 0 0 1 0-3.44V4.95H.96a9 9 0 0 0 0 8.1l3.01-2.33Z"/><path fill="#EA4335" d="M9 3.58c1.32 0 2.5.45 3.44 1.35l2.58-2.58C13.47.9 11.43 0 9 0A9 9 0 0 0 .96 4.95l3.01 2.33C4.68 5.16 6.66 3.58 9 3.58Z"/></svg>
+          המשך עם <span dir="ltr">Google</span>
+        </button>
+        <button class="btn btn-provider" type="button" data-auth-provider="github">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A8.013 8.013 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>
+          המשך עם <span dir="ltr">GitHub</span>
+        </button>
+      </div>
+      <p class="auth-modal-note" data-auth-note aria-live="polite"></p>
+      <p class="auth-modal-switch"><button type="button" data-auth-switch>עוד לא רשומים? יצירת חשבון</button></p>
+    </div>
+  </dialog>
 
   <script src="../js/main.js" defer></script>
 </body>
