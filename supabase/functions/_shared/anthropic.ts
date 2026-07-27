@@ -160,8 +160,15 @@ export function buildClaudeRequestBody(opts: ClaudeCallOptions): Record<string, 
   return body;
 }
 
-export function shouldStream(opts: Pick<ClaudeCallOptions, "stream" | "maxTokens">): boolean {
-  return opts.stream ?? opts.maxTokens > STREAM_THRESHOLD_TOKENS;
+export function shouldStream(
+  opts: Pick<ClaudeCallOptions, "stream" | "maxTokens" | "thinking">,
+): boolean {
+  // Thinking is the other way to hit an idle timeout: the model can reason for
+  // a long time before emitting its first output byte, and a non-streaming
+  // connection just sits there. Stream whenever thinking is on, regardless of
+  // max_tokens — stage 2 sits exactly ON the token threshold, so it would
+  // otherwise take the non-streaming path with adaptive thinking enabled.
+  return opts.stream ?? (opts.maxTokens > STREAM_THRESHOLD_TOKENS || opts.thinking === true);
 }
 
 /** Pull the first text block out of a Messages API response and JSON-parse it. */

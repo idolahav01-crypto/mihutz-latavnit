@@ -138,3 +138,18 @@ Deno.test("runStage5: effort high, sends diffs + signals, NO prior rationale", a
   // clean context: the detected-signal explanation text must NOT leak in
   assertFalse(uc.includes("purple gradient")); // stage-1 explanation not forwarded
 });
+
+Deno.test("stage 2 streams: it sits on the token threshold but enables thinking", () => {
+  // Regression guard. With thinking on and 16000 max_tokens, the non-streaming
+  // path would wait through the whole thinking phase with no bytes on the wire
+  // and risk an idle timeout inside the ~150s edge-function budget.
+  const { impl, calls } = mockCall({ design_direction: {}, proposals: [] });
+  return runStage2({
+    apiKey: "k", siteProfile: {}, detection: DETECTION,
+    files: parseBundle(BUNDLE), signals: SIGNALS, callImpl: impl,
+  }).then(() => {
+    const body = buildClaudeRequestBody(calls[0]) as Record<string, unknown>;
+    assertEquals(body.stream, true);
+    assertEquals((body.thinking as { type: string }).type, "adaptive");
+  });
+});

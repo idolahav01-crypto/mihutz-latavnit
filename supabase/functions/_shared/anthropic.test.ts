@@ -95,7 +95,7 @@ Deno.test("callClaude posts a real request with cache_control on system + correc
   const oc = body.output_config as Record<string, unknown>;
   assertEquals(oc.effort, "high");
   assertEquals((oc.format as { type: string }).type, "json_schema");
-  // 16000 is at the threshold, not above it, so this one does not stream.
+  // 16000 is at the threshold and thinking is off here, so no streaming.
   assertEquals(body.stream, undefined);
 });
 
@@ -136,6 +136,11 @@ Deno.test("requests above the streaming threshold set stream:true", () => {
   assertFalse(shouldStream({ maxTokens: 16000 }));
   assert(shouldStream({ maxTokens: 32000 }));
   assert(shouldStream({ maxTokens: 1000, stream: true }));
+  // Thinking is the other idle-timeout risk: the model can reason for a long
+  // time before the first output byte. Stage 2 sits exactly ON the threshold
+  // with thinking enabled, so it must still stream.
+  assert(shouldStream({ maxTokens: 16000, thinking: true }));
+  assertFalse(shouldStream({ maxTokens: 16000, thinking: true, stream: false }));
   const body = buildClaudeRequestBody({
     apiKey: "k", model: "claude-opus-4-8", effort: "high", maxTokens: 32000,
     system: "s", userContent: "u",
