@@ -133,7 +133,9 @@
      "repo-dialog", "repo-search", "repo-list", "repo-count", "repo-empty", "repo-names",
      "score", "report-caption", "report-body", "report-back",
      "history", "history-list", "history-all", "history-empty",
-     "history-dialog", "history-all-list"
+     "history-dialog", "history-all-list",
+     "fix-pipeline", "propose-fixes", "fix-hint", "design-direction",
+     "proposals", "fix-actions", "apply-fixes", "apply-result", "qa-result"
     ].forEach(function (id) { els[id] = $(id); });
     els.stageItems = Array.prototype.slice.call(document.querySelectorAll(".stages li"));
   }
@@ -649,8 +651,155 @@
     els["app-input"].hidden = true;
     els.history.hidden = true;
     els.report.hidden = false;
+    renderFixPipeline(scan);
     setBusy(false);
     window.scrollTo(0, 0);
+  }
+
+  /* ===== fix pipeline: stage 2 (design) → 4 (apply) → 5 (QA) =====
+     The report view exposes a "Propose fixes" button. It runs Stage 2, shows the
+     design_direction + per-signal proposals, then "Apply approved fixes" runs
+     Stage 4 (apply) and Stage 5 (QA) with up to two automatic reapply rounds —
+     the loop the server also caps. MVP auto-approves the applicable proposals. */
+  var currentScanId = null;
+
+  var P = he ? {
+    propose: "הצע תיקונים", proposing: "בונה כיוון עיצובי והצעות…",
+    designTitle: "כיוון עיצובי", proposalsTitle: function (n) { return "הצעות תיקון (" + n + ")"; },
+    apply: "החל תיקונים מאושרים", applying: "מחיל תיקונים…", qaRunning: "בקרת איכות…",
+    qaPass: "עבר בקרת איכות", qaFail: "בקרת האיכות מצאה בעיות — מריץ סבב תיקון…",
+    needsHuman: "חלק מהתיקונים דורשים בדיקה ידנית.",
+    applied: function (a, t) { return "הוחלו " + a + " מתוך " + t + " תיקונים"; },
+    noFixes: "אין תיקונים אוטומטיים ישימים בסריקה הזו.",
+    err: "משהו השתבש בשלב התיקון. נסו שוב.", strategic: "המלצה אסטרטגית (דורשת אדם)",
+    palette: "פלטה", typography: "טיפוגרפיה", layout: "עיקרון פריסה", personality: "אופי"
+  } : {
+    propose: "Propose fixes", proposing: "Building design direction and proposals…",
+    designTitle: "Design direction", proposalsTitle: function (n) { return "Fix proposals (" + n + ")"; },
+    apply: "Apply approved fixes", applying: "Applying fixes…", qaRunning: "Running QA…",
+    qaPass: "Passed QA", qaFail: "QA found issues — running a fix round…",
+    needsHuman: "Some fixes need manual review.",
+    applied: function (a, t) { return "Applied " + a + " of " + t + " fixes"; },
+    noFixes: "No auto-applicable fixes in this scan.",
+    err: "Something went wrong during the fix stage. Try again.", strategic: "Strategic recommendation (needs a human)",
+    palette: "Palette", typography: "Typography", layout: "Layout principle", personality: "Personality"
+  };
+
+  function fmtReason(e) {
+    var r = e && e.body && e.body.error;
+    return r ? " (" + r + ")" : "";
+  }
+
+  function renderFixPipeline(scan) {
+    if (!els["fix-pipeline"]) return;
+    currentScanId = scan.id;
+    els["design-direction"].hidden = true;
+    els["proposals"].hidden = true;
+    els["fix-actions"].hidden = true;
+    els["apply-result"].hidden = true;
+    els["qa-result"].hidden = true;
+    els["fix-hint"].textContent = "";
+    els["propose-fixes"].hidden = false;
+    els["propose-fixes"].disabled = false;
+    els["propose-fixes"].textContent = P.propose;
+    /* a scan opened from history may already carry stage-2 output */
+    if (scan.design_direction || (scan.proposals && scan.proposals.length)) {
+      renderDesign(scan.design_direction);
+      renderProposals(scan.proposals || []);
+    }
+  }
+
+  function renderDesign(dd) {
+    if (!dd) return;
+    var pal = (dd.brand_palette || []).map(function (c) {
+      return '<span class="tok" dir="ltr"><i style="background:' + esc(c.hex) + '"></i>' +
+        esc((c.token || c.role || "") + " " + (c.hex || "")) + "</span>";
+    }).join("");
+    var typ = dd.typography ? esc((dd.typography.heading || "") + " / " + (dd.typography.body || "")) : "";
+    els["design-direction"].innerHTML = "<h3>" + esc(P.designTitle) + "</h3>" +
+      '<p class="dd-line"><b>' + esc(P.palette) + ":</b> " + pal + "</p>" +
+      '<p class="dd-line"><b>' + esc(P.typography) + ":</b> " + typ + "</p>" +
+      '<p class="dd-line"><b>' + esc(P.layout) + ":</b> " + esc(dd.layout_principle || "") + "</p>" +
+      '<p class="dd-line"><b>' + esc(P.personality) + ":</b> " + esc((dd.personality || []).join(", ")) + "</p>" +
+      (dd.rationale ? '<p class="dd-rationale">' + esc(dd.rationale) + "</p>" : "");
+    els["design-direction"].hidden = false;
+  }
+
+  function renderProposals(list) {
+    var applicable = list.filter(function (p) { return p.applicable_edit; });
+    els["proposals"].innerHTML = "<h3>" + esc(P.proposalsTitle(list.length)) + "</h3>" +
+      '<ul class="prop-list">' + list.map(function (p) {
+        var strategic = !p.applicable_edit;
+        var head = "#" + esc(String(p.signal_id)) + " · " + esc(p.fix_type || "") + (p.risk ? " · " + esc(p.risk) : "");
+        var code = (p.old_code && p.sample_new_code)
+          ? '<div class="prop-diff" dir="ltr"><code class="old">' + esc(clip(String(p.old_code), 120)) +
+            '</code><code class="new">' + esc(clip(String(p.sample_new_code), 120)) + "</code></div>"
+          : "";
+        var tag = strategic ? '<span class="prop-strategic">' + esc(P.strategic) + "</span>" : "";
+        return '<li class="prop' + (strategic ? " is-strategic" : "") + '">' +
+          '<div class="prop-head" dir="ltr">' + head + "</div>" +
+          '<div class="prop-rationale">' + esc(p.rationale || "") + "</div>" + code + tag + "</li>";
+      }).join("") + "</ul>";
+    els["proposals"].hidden = false;
+    els["propose-fixes"].hidden = true;
+    if (applicable.length) {
+      els["apply-fixes"].textContent = P.apply;
+      els["fix-actions"].hidden = false;
+    } else {
+      els["fix-hint"].textContent = P.noFixes;
+    }
+  }
+
+  function proposeFixes() {
+    if (!currentScanId) return;
+    els["propose-fixes"].disabled = true;
+    els["fix-hint"].textContent = P.proposing;
+    invokeFn("design", { scan_id: currentScanId }).then(function (data) {
+      els["fix-hint"].textContent = "";
+      renderDesign(data && data.design_direction);
+      /* design keeps its payload small (counts only); read the stored proposals */
+      return sb.from("scans").select("design_direction,proposals").eq("id", currentScanId).single();
+    }).then(function (r) {
+      if (r && r.data) { renderDesign(r.data.design_direction); renderProposals(r.data.proposals || []); }
+    }).catch(function (e) {
+      els["fix-hint"].textContent = P.err + fmtReason(e);
+      els["propose-fixes"].disabled = false;
+    });
+  }
+
+  function applyFixes() {
+    if (!currentScanId) return;
+    els["fix-actions"].hidden = true;
+    els["apply-result"].hidden = false;
+    els["apply-result"].innerHTML = "<p>" + esc(P.applying) + "</p>";
+    invokeFn("apply", { scan_id: currentScanId }).then(function (data) {
+      els["apply-result"].innerHTML = "<p>" + esc(P.applied(data.fixes_applied, data.fixes_total)) + "</p>";
+      return runQa();
+    }).catch(function (e) {
+      els["apply-result"].innerHTML = "<p>" + esc(P.err + fmtReason(e)) + "</p>";
+    });
+  }
+
+  function runQa() {
+    els["qa-result"].hidden = false;
+    els["qa-result"].innerHTML = "<p>" + esc(P.qaRunning) + "</p>";
+    return invokeFn("qa", { scan_id: currentScanId }).then(function (data) {
+      var score = (data.verdict && data.verdict.human_quality_score);
+      if (data.pass) {
+        els["qa-result"].innerHTML = '<p class="qa-pass">' + esc(P.qaPass) +
+          (score != null ? " · " + esc(String(score)) + "/100" : "") + "</p>";
+        return;
+      }
+      if (data.can_reapply) {
+        els["qa-result"].innerHTML = "<p>" + esc(P.qaFail) + "</p>";
+        var ids = ((data.verdict && data.verdict.recommend_reapply) || [])
+          .map(function (x) { return x.signal_id; });
+        return invokeFn("apply", { scan_id: currentScanId, reapply_signal_ids: ids }).then(runQa);
+      }
+      els["qa-result"].innerHTML = '<p class="qa-human">' + esc(P.needsHuman) + "</p>";
+    }).catch(function (e) {
+      els["qa-result"].innerHTML = "<p>" + esc(P.err + fmtReason(e)) + "</p>";
+    });
   }
 
   /* ===== recent audits (history) ===== */
@@ -658,7 +807,7 @@
   function loadHistory() {
     if (!sb || !user || !els.history) return;
     sb.from("scans")
-      .select("id,source_type,source_ref,ai_fingerprint_score,present_count,files_scanned,detection,created_at")
+      .select("id,source_type,source_ref,ai_fingerprint_score,present_count,files_scanned,detection,design_direction,proposals,created_at")
       .eq("user_id", user.id).eq("status", "done")
       .order("created_at", { ascending: false }).limit(20)
       .then(function (r) {
@@ -773,6 +922,8 @@
 
   function wireStatic() {
     if (els["report-back"]) els["report-back"].addEventListener("click", backToInput);
+    if (els["propose-fixes"]) els["propose-fixes"].addEventListener("click", proposeFixes);
+    if (els["apply-fixes"]) els["apply-fixes"].addEventListener("click", applyFixes);
   }
 
   /* return from a report (fresh or from history) to the input + history view */
