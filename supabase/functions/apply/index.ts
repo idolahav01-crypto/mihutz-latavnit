@@ -15,9 +15,12 @@ import { cleanApiKey } from "../_shared/anthropic.ts";
 import {
   type ApprovedFix,
   deriveApprovedFixes,
+  detectConflicts,
   filesTouchedByFixes,
+  orderFixes,
   parseBundle,
   type ProposalValidation,
+  reconcileApply,
   serializeBundle,
 } from "../_shared/pipeline.ts";
 import { MODEL, runStage4 } from "../_shared/stages.ts";
@@ -51,10 +54,14 @@ Deno.serve(async (req) => {
   }
   if (!scan.proposals) return json({ error: "run_design_first" }, 409);
 
-  const fixes = (body.approved_fixes && body.approved_fixes.length)
+  const requested = (body.approved_fixes && body.approved_fixes.length)
     ? body.approved_fixes
     : deriveApprovedFixes(scan.proposals as ProposalValidation[], body.reapply_signal_ids);
-  if (!fixes.length) return json({ error: "no_applicable_fixes" }, 409);
+  if (!requested.length) return json({ error: "no_applicable_fixes" }, 409);
+
+  // Sort by depends_on BEFORE the call rather than asking the model to do it, so
+  // token-level fixes land before the component fixes that reference them.
+  const { ordered: fixes, cycles, danglingDeps } = orderFixes(requested);
 
   try {
     const apiKey = cleanApiKey(Deno.env.get("ANTHROPIC_API_KEY"));
@@ -72,13 +79,19 @@ Deno.serve(async (req) => {
       if (original.has(p)) touched.set(p, original.get(p)!);
     }
 
+    // Overlapping old_code regions cannot both apply. Drop the losers here
+    // instead of letting the model invent a merged edit for them.
+    const conflicts = detectConflicts(fixes, original);
+    const dropped = new Set(conflicts.map((c) => c.loser));
+    const sendable = fixes.filter((f) => !dropped.has(f.signal_id));
+
     await admin.from("scans").update({ pipeline_status: "applying" }).eq("id", scanId);
 
     const startedAt = Date.now();
     const result = await runStage4({
       apiKey,
       files: touched,
-      approvedFixes: fixes,
+      approvedFixes: sendable,
       designDirection: scan.design_direction,
     });
     await recordStageUsage(
@@ -87,9 +100,17 @@ Deno.serve(async (req) => {
       buildEntry("apply", MODEL, result.usage, Date.now() - startedAt, "high"),
     );
 
-    // Persist the edited touched files as their own bundle for Stage 5 / packaging.
-    const editedMap = new Map<string, string>();
-    for (const f of result.files) editedMap.set(f.path, f.content);
+    // Verify the model's output against the fixes byte-for-byte and
+    // deterministically apply anything it dropped or wrongly claimed as applied.
+    const modelMap = new Map<string, string>();
+    for (const f of result.files) modelMap.set(f.path, f.content);
+    const recon = reconcileApply(
+      touched,
+      modelMap,
+      sendable,
+      result.change_log as Array<{ signal_id?: number; applied?: boolean }>,
+    );
+    const editedMap = recon.files;
     const editedPath = `${user.id}/${scanId}/edited-bundle.txt`;
     const { error: upErr } = await admin.storage
       .from("scans")
@@ -103,20 +124,28 @@ Deno.serve(async (req) => {
       .from("scans")
       .update({
         approved_fixes: fixes,
-        change_log: result.change_log,
+        change_log: recon.reconciled,
         pipeline_status: "applied",
       })
       .eq("id", scanId);
 
-    const applied = (result.change_log as Array<{ applied?: boolean }>)
-      .filter((c) => c.applied === true).length;
+    const applied = recon.reconciled.filter((r) => r.applied).length;
     return json({
       ok: true,
       scan_id: scanId,
-      files_edited: result.files.filter((f) => f.edited).length,
+      files_edited: [...editedMap.keys()].filter((p) => editedMap.get(p) !== touched.get(p)).length,
       fixes_applied: applied,
-      fixes_total: fixes.length,
+      fixes_total: requested.length,
+      // Everything below is what the model got wrong; surfaced so a bad run is
+      // visible immediately rather than at the QA stage.
+      recovered_by_fallback: recon.reconciled.filter((r) => r.applied_by === "deterministic")
+        .map((r) => r.signal_id),
+      false_applied_claims: recon.falseClaims,
+      conflicts,
+      dependency_cycles: cycles,
+      dangling_dependencies: danglingDeps,
       change_log: result.change_log,
+      reconciled: recon.reconciled,
       usage: result.usage,
     });
   } catch (e) {

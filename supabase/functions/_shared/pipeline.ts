@@ -350,3 +350,257 @@ export function buildDiffs(
   }
   return parts.join("\n");
 }
+
+// ============================================================
+// Deterministic ordering, conflict detection, and apply fallback
+//
+// Stages 4's prompt asks the model to order fixes by depends_on and to detect
+// overlapping edits itself, and to report honestly when a fix did not apply.
+// That is three separate things we were trusting a model to get right with no
+// verification. The functions below re-derive all three from the data, so the
+// model's judgement is checked rather than assumed:
+//
+//   orderFixes      — topologically sorts by depends_on before the call, so the
+//                     model receives them already in a valid order.
+//   detectConflicts — finds fixes whose old_code regions overlap in the same
+//                     file. These genuinely cannot both apply.
+//   reconcileApply  — after the call, verifies each fix actually landed in the
+//                     returned file and deterministically applies (via applyFix)
+//                     any the model dropped or silently skipped.
+// ============================================================
+
+export interface OrderedFixes {
+  ordered: ApprovedFix[];
+  /** signal_ids involved in a dependency cycle; order among them is arbitrary. */
+  cycles: number[];
+  /** depends_on entries pointing at a signal_id not in this fix set. */
+  danglingDeps: Array<{ signal_id: number; missing: number }>;
+}
+
+/**
+ * Topologically sort fixes so a fix always follows everything it depends_on.
+ * Token/global fixes therefore land before the component fixes that reference
+ * their tokens, which is what makes the old_code of the later fix still match.
+ *
+ * Ties are broken by the fixes' original order, so the result is stable — the
+ * same proposals always produce the same edit sequence, which matters because
+ * QA diffs the output.
+ */
+export function orderFixes(fixes: ApprovedFix[]): OrderedFixes {
+  const present = new Set(fixes.map((f) => f.signal_id));
+  const danglingDeps: Array<{ signal_id: number; missing: number }> = [];
+
+  // index by signal_id; a signal can legitimately have several fixes (different
+  // files), so each id maps to a list and the whole group moves together.
+  const groups = new Map<number, ApprovedFix[]>();
+  const order: number[] = [];
+  for (const f of fixes) {
+    if (!groups.has(f.signal_id)) {
+      groups.set(f.signal_id, []);
+      order.push(f.signal_id);
+    }
+    groups.get(f.signal_id)!.push(f);
+  }
+
+  const deps = new Map<number, Set<number>>();
+  for (const id of order) {
+    const set = new Set<number>();
+    for (const f of groups.get(id)!) {
+      for (const d of f.depends_on ?? []) {
+        if (d === id) continue; // self-dependency is meaningless, not a cycle
+        if (!present.has(d)) {
+          danglingDeps.push({ signal_id: id, missing: d });
+          continue;
+        }
+        set.add(d);
+      }
+    }
+    deps.set(id, set);
+  }
+
+  // Kahn's algorithm, emitting ready nodes in original order for stability.
+  const resolved: number[] = [];
+  const remaining = new Set(order);
+  while (remaining.size > 0) {
+    const ready = order.filter(
+      (id) => remaining.has(id) && [...deps.get(id)!].every((d) => !remaining.has(d)),
+    );
+    if (ready.length === 0) break; // everything left is in a cycle
+    for (const id of ready) {
+      resolved.push(id);
+      remaining.delete(id);
+    }
+  }
+
+  const cycles = order.filter((id) => remaining.has(id));
+  // Cycled fixes still get applied — just in their original relative order,
+  // after everything that could be ordered properly. Dropping them would
+  // silently lose work over what is usually a mislabelled dependency.
+  const finalIds = [...resolved, ...cycles];
+  return {
+    ordered: finalIds.flatMap((id) => groups.get(id)!),
+    cycles,
+    danglingDeps,
+  };
+}
+
+export interface FixConflict {
+  file: string;
+  /** The fix that keeps its edit (earlier in the ordered list). */
+  winner: number;
+  /** The fix whose region overlaps the winner's and cannot also apply. */
+  loser: number;
+}
+
+/**
+ * Find fixes whose old_code regions overlap within the same file. Two edits to
+ * the same bytes cannot both apply, and letting the model "merge" them is how a
+ * plausible-looking but wrong edit gets shipped — the spec is explicit that the
+ * second one should fail rather than be guessed at.
+ *
+ * Only exact-match regions are checked; a fix whose old_code isn't a unique
+ * verbatim substring is already rejected upstream by validateProposals.
+ */
+export function detectConflicts(
+  fixes: ApprovedFix[],
+  files: Map<string, string>,
+): FixConflict[] {
+  const conflicts: FixConflict[] = [];
+  const claimed = new Map<string, Array<{ start: number; end: number; id: number }>>();
+
+  for (const fix of fixes) {
+    const content = files.get(fix.file);
+    if (content == null) continue;
+    const start = content.indexOf(fix.old_code);
+    if (start === -1) continue;
+    const range = { start, end: start + fix.old_code.length, id: fix.signal_id };
+
+    const existing = claimed.get(fix.file) ?? [];
+    for (const other of existing) {
+      if (range.start < other.end && other.start < range.end) {
+        conflicts.push({ file: fix.file, winner: other.id, loser: range.id });
+      }
+    }
+    existing.push(range);
+    claimed.set(fix.file, existing);
+  }
+  return conflicts;
+}
+
+export interface ReconciledFix {
+  signal_id: number;
+  file: string;
+  applied: boolean;
+  /** Who actually made the edit. "none" means it could not be applied at all. */
+  applied_by: "model" | "deterministic" | "none";
+  reason: string | null;
+}
+
+export interface ReconcileResult {
+  files: Map<string, string>;
+  reconciled: ReconciledFix[];
+  /**
+   * signal_ids the model's own change_log reported as applied=true, but whose
+   * old_code is still present in the file it returned. These are the dangerous
+   * ones: a silently false self-report that would otherwise ship as "fixed".
+   * Empty when no change_log is supplied.
+   */
+  falseClaims: number[];
+}
+
+/**
+ * Safety net for Stage 4: verify the model's output against the fixes it was
+ * given, and fall back to deterministic application for anything it dropped.
+ *
+ * The model self-reports `applied` per fix, but a false "pass" there is exactly
+ * the failure the QA stage is meant to catch late and expensively. Checking the
+ * bytes is cheap and catches it immediately: a fix has landed only if its
+ * old_code is gone from the returned file. Anything still present is re-applied
+ * with applyFix(), which never approximates — so the fallback either produces
+ * the exact approved edit or reports it as unapplied.
+ */
+export function reconcileApply(
+  original: Map<string, string>,
+  modelFiles: Map<string, string>,
+  fixes: ApprovedFix[],
+  /** The model's own change_log, used only to flag false "applied" self-reports. */
+  modelChangeLog?: Array<{ signal_id?: number; applied?: boolean }>,
+): ReconcileResult {
+  const claimedApplied = new Set(
+    (modelChangeLog ?? [])
+      .filter((c) => c.applied === true && typeof c.signal_id === "number")
+      .map((c) => c.signal_id as number),
+  );
+  const out = new Map(original);
+  for (const [path, content] of modelFiles) out.set(path, content);
+
+  const reconciled: ReconciledFix[] = [];
+  const falseClaims: number[] = [];
+
+  for (const fix of fixes) {
+    const before = original.get(fix.file);
+    const current = out.get(fix.file);
+    if (current == null || before == null) {
+      reconciled.push({
+        signal_id: fix.signal_id,
+        file: fix.file,
+        applied: false,
+        applied_by: "none",
+        reason: "file_missing_from_output",
+      });
+      continue;
+    }
+
+    // A fix whose old_code was never in the original file cannot have been
+    // applied by anyone — absence from the output proves nothing about it.
+    // Explicit approved_fixes come straight from the request body, so this is
+    // not guaranteed upstream and has to be checked here.
+    if (!before.includes(fix.old_code)) {
+      reconciled.push({
+        signal_id: fix.signal_id,
+        file: fix.file,
+        applied: false,
+        applied_by: "none",
+        reason: "no_match",
+      });
+      continue;
+    }
+
+    // Given old_code WAS in the original, its absence now means the edit landed.
+    if (!current.includes(fix.old_code)) {
+      reconciled.push({
+        signal_id: fix.signal_id,
+        file: fix.file,
+        applied: true,
+        applied_by: "model",
+        reason: null,
+      });
+      continue;
+    }
+
+    // Still there — the model either reported the failure honestly or claimed a
+    // success that isn't in the bytes. Either way, try it ourselves.
+    if (claimedApplied.has(fix.signal_id)) falseClaims.push(fix.signal_id);
+    const result = applyFix(current, fix.old_code, fix.new_code);
+    if (result.applied) {
+      out.set(fix.file, result.content);
+      reconciled.push({
+        signal_id: fix.signal_id,
+        file: fix.file,
+        applied: true,
+        applied_by: "deterministic",
+        reason: null,
+      });
+    } else {
+      reconciled.push({
+        signal_id: fix.signal_id,
+        file: fix.file,
+        applied: false,
+        applied_by: "none",
+        reason: result.reason,
+      });
+    }
+  }
+
+  return { files: out, reconciled, falseClaims };
+}

@@ -9,6 +9,7 @@
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import signals from "./signals.json" with { type: "json" };
+import { assembleFinalFiles, parseBundle, serializeBundle } from "../_shared/pipeline.ts";
 
 // Secrets pasted through a dashboard often carry a trailing newline or space,
 // which makes fetch() reject the header as a non-ByteString. Clean it here.
@@ -42,7 +43,9 @@ const WEIGHT_POINTS: Record<string, number> = {
 };
 
 function buildSignalList(): string {
-  return (signals as Array<Record<string, string>>)
+  // No cast: `id` is a number, so Record<string, string> was never accurate and
+  // failed `deno check`. Template interpolation handles the JSON types as-is.
+  return signals
     .map(
       (s) =>
         `#${s.id} | ${s.name} | category: ${s.category} | weight: ${s.weight} | auto_fixable: ${s.auto_fixable}\n   detection: ${s.detection}`,
@@ -228,8 +231,15 @@ Deno.serve(async (req) => {
   if (!user) return json({ error: "unauthorized" }, 401);
 
   let scanId: string;
+  // mode "after" re-runs this same audit on the FIXED code so the UI can show a
+  // real before/after fingerprint score instead of asserting an improvement.
+  // Everything about the audit is identical — same prompt, same schema, same
+  // scoring — which is the only way the two numbers are comparable.
+  let mode: "before" | "after" = "before";
   try {
-    ({ scan_id: scanId } = await req.json());
+    const body = await req.json();
+    scanId = body.scan_id;
+    if (body.mode === "after") mode = "after";
   } catch {
     return json({ error: "invalid body" }, 400);
   }
@@ -244,7 +254,9 @@ Deno.serve(async (req) => {
     return json({ error: "scan not found" }, 404);
   }
 
-  await admin.from("scans").update({ status: "detecting" }).eq("id", scanId);
+  if (mode === "before") {
+    await admin.from("scans").update({ status: "detecting" }).eq("id", scanId);
+  }
 
   try {
     if (!ANTHROPIC_API_KEY) throw new Error("missing_anthropic_api_key");
@@ -258,7 +270,22 @@ Deno.serve(async (req) => {
       .from("scans")
       .download(bundlePath);
     if (dlErr || !file) throw new Error("bundle not found in storage");
-    const bundle = await file.text();
+    let bundle = await file.text();
+
+    if (mode === "after") {
+      // The edited bundle holds ONLY the files Stage 4 touched. Auditing it
+      // alone would score a fraction of the project and look like a huge
+      // improvement for the wrong reason, so overlay it on the original and
+      // audit the complete, assembled project.
+      const { data: editedFile, error: edErr } = await admin.storage
+        .from("scans")
+        .download(`${user.id}/${scanId}/edited-bundle.txt`);
+      if (edErr || !editedFile) throw new Error("edited_bundle_not_found");
+      bundle = serializeBundle(
+        assembleFinalFiles(parseBundle(bundle), parseBundle(await editedFile.text())),
+      );
+    }
+
     const fileCount = (bundle.match(/^=== FILE: /gm) ?? []).length;
 
     const res = await fetch("https://api.anthropic.com/v1/messages", {
@@ -306,6 +333,41 @@ Deno.serve(async (req) => {
     // Recompute the score deterministically from the returned signals.
     const { score, present } = computeScore(detection.signals ?? []);
 
+    if (mode === "after") {
+      // Written to the *_after columns; the original numbers stay untouched so
+      // the pair can be shown side by side.
+      const { data: before } = await admin
+        .from("scans")
+        .select("ai_fingerprint_score, present_count")
+        .eq("id", scanId)
+        .single();
+
+      await admin
+        .from("scans")
+        .update({
+          detection_after: detection,
+          ai_fingerprint_score_after: score,
+          present_count_after: present,
+          rescanned_at: new Date().toISOString(),
+        })
+        .eq("id", scanId);
+
+      return json({
+        ok: true,
+        scan_id: scanId,
+        mode,
+        before: {
+          ai_fingerprint_score: before?.ai_fingerprint_score ?? null,
+          present_count: before?.present_count ?? null,
+        },
+        after: { ai_fingerprint_score: score, present_count: present },
+        // Negative = the fingerprint went down, which is the goal.
+        score_delta: before?.ai_fingerprint_score == null
+          ? null
+          : score - before.ai_fingerprint_score,
+      });
+    }
+
     await admin
       .from("scans")
       .update({
@@ -321,16 +383,20 @@ Deno.serve(async (req) => {
     return json({
       ok: true,
       scan_id: scanId,
+      mode,
       ai_fingerprint_score: score,
       present_count: present,
       files_scanned: detection.meta?.files_scanned ?? fileCount,
     });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
-    await admin
-      .from("scans")
-      .update({ status: "error", error: message })
-      .eq("id", scanId);
-    return json({ error: message }, 500);
+    // A failed re-scan must not mark the original, successful scan as errored.
+    if (mode === "before") {
+      await admin
+        .from("scans")
+        .update({ status: "error", error: message })
+        .eq("id", scanId);
+    }
+    return json({ error: message, mode }, 500);
   }
 });
