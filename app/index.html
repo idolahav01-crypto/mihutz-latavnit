@@ -128,7 +128,19 @@
           <span class="caption" id="report-caption"></span>
         </div>
         <div id="report-body"></div>
-        <p class="next-stage">Next stage: design direction and proposed fixes — coming soon.</p>
+
+        <!-- ===== fix pipeline: stage 2 (design) → 4 (apply) → 5 (QA) ===== -->
+        <div class="fix-pipeline" id="fix-pipeline">
+          <button type="button" class="btn btn-primary" id="propose-fixes">Propose fixes</button>
+          <p class="fix-hint" id="fix-hint" aria-live="polite"></p>
+          <div class="fix-stage" id="design-direction" hidden></div>
+          <div class="fix-stage" id="proposals" hidden></div>
+          <div class="fix-actions" id="fix-actions" hidden>
+            <button type="button" class="btn btn-primary" id="apply-fixes">Apply approved fixes</button>
+          </div>
+          <div class="fix-stage" id="apply-result" hidden aria-live="polite"></div>
+          <div class="fix-stage" id="qa-result" hidden aria-live="polite"></div>
+        </div>
       </section>
 
     </div>
