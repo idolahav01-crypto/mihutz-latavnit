@@ -50,28 +50,31 @@
 .app-user { font-size: 0.9rem; color: var(--color-neutral-600); }
 
 /* the work column — everything the user acts on lives inside it */
-.app-main { padding-block: clamp(var(--s-3), 3vw, var(--s-4)); }
+.app-main { padding-block: clamp(var(--s-1), 2vw, var(--s-2)); }
 .work {
   max-inline-size: var(--work-measure);
   margin-inline: auto;
   padding-inline: var(--s-2);
 }
 
-/* ---------- section head ---------- */
-.app-head { margin-block-end: var(--s-3); }
+/* ---------- section head ----------
+   Centred because it stands alone — nothing beside it to align to.
+   Signal #21 flags text-align:center once it passes ~60% of the page,
+   and #75 flags a centred Hebrew hero, so centring stays on the few
+   blocks that genuinely have no neighbour: this head, the drop area,
+   the loading checklist, empty states and sheet titles. Everything
+   that is read in sequence or sits next to a peer stays start-aligned. */
+.app-head { margin-block-end: var(--s-2); text-align: center; }
 .app-head h1 {
   font-size: clamp(1.6rem, 3.2vw, 2.1rem);
   line-height: 1.15;
   margin-block-end: 4px;
 }
-.app-head p { color: var(--color-neutral-600); margin: 0; font-size: 0.95rem; max-width: none; }
-.app-head .nums { color: var(--color-ink); font-weight: 700; }
-
-/* visually hidden, still read by screen readers */
-.vh {
-  position: absolute; inline-size: 1px; block-size: 1px;
-  overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+.app-head p {
+  color: var(--color-neutral-600); margin: 0; font-size: 0.95rem;
+  max-width: 64ch; margin-inline: auto;
 }
+.app-head .nums { color: var(--color-ink); font-weight: 700; }
 
 /* code / URLs stay LTR inside an RTL context */
 .ltr { direction: ltr; unicode-bidi: isolate; }
@@ -95,9 +98,9 @@ code, .mono { font-family: var(--font-mono); }
    ============================================================ */
 .drop {
   border: 1.5px dashed var(--color-neutral-300);
-  border-radius: var(--r-control);
+  border-radius: var(--r-surface);
   background: var(--color-paper-raised);
-  padding: var(--s-3);
+  padding: var(--s-2) var(--s-3);
   text-align: center;
   cursor: pointer;
   transition: border-color 140ms ease, background-color 140ms ease;
@@ -110,7 +113,7 @@ code, .mono { font-family: var(--font-mono); }
 .drop-acts { margin-block-start: var(--s-1); }
 .drop-acts .sep { color: var(--color-neutral-300); margin-inline: var(--s-1); }
 .drop-note {
-  margin-block-start: var(--s-2);
+  margin-block-start: var(--s-1);
   font-size: 0.8rem;
   color: var(--color-neutral-600);
 }
@@ -134,7 +137,7 @@ code, .mono { font-family: var(--font-mono); }
 /* ---------- the "or" hairline between path 1 and the rows ---------- */
 .or {
   display: flex; align-items: center; gap: var(--s-2);
-  margin-block: var(--s-2);
+  margin-block: 6px;
   color: var(--color-neutral-600);
   font-size: 0.8rem;
   max-width: none;
@@ -148,17 +151,33 @@ code, .mono { font-family: var(--font-mono); }
    PATHS 2 & 3 — the two white rows. Identical in shape, so they
    read as siblings rather than as two different features.
    ============================================================ */
+/* A path is label + control + status. The label sits 4px off its field
+   (proximity, #88) while paths are a full step apart, so the grouping is
+   legible without a box around it. The label is visible, never a
+   placeholder standing in for one (#89). */
+.path + .path { margin-block-start: var(--s-2); }
+.path-label {
+  display: block;
+  font-size: 0.82rem; font-weight: 600;
+  color: var(--color-ink-soft);
+  margin-block-end: 4px;
+}
+:lang(he) .path-label { font-weight: 700; }
+
 .row {
   display: flex; align-items: center; gap: var(--s-2);
   background: var(--color-paper-raised);
   border: 1px solid var(--color-neutral-300);
-  border-radius: var(--r-control);
+  border-radius: var(--r-surface);
   padding-block: var(--s-1);
   padding-inline: var(--s-2) var(--s-1);
   min-block-size: 56px;
 }
 .row:focus-within { border-color: var(--color-primary); }
-.row + .row { margin-block-start: var(--s-2); }
+.row-note { flex: 1; min-inline-size: 0; font-size: 0.88rem; color: var(--color-neutral-600); }
+.row .btn svg { inline-size: 16px; block-size: 16px; flex-shrink: 0; }
+/* comfortable touch target — .btn-sm alone is 40px */
+.row .btn { min-block-size: 44px; }
 
 .row-field { flex: 1; min-inline-size: 0; display: block; }
 .row-field input {
@@ -172,18 +191,9 @@ code, .mono { font-family: var(--font-mono); }
    so it never drifts across the field and collides with the button */
 [dir="rtl"] .row-field input { text-align: right; }
 
-.row-label {
-  flex: 1; min-inline-size: 0;
-  display: inline-flex; align-items: center; gap: var(--s-1);
-  font-weight: 600; color: var(--color-ink);
-}
-:lang(he) .row-label { font-weight: 700; }
-.row-label svg { inline-size: 18px; block-size: 18px; flex-shrink: 0; }
-
 .row-status {
   min-block-size: 1.3em;
-  margin-block: 6px 0;
-  padding-inline: var(--s-2);
+  margin-block: 4px 0;
   font-size: 0.82rem;
   color: var(--color-neutral-600);
   max-width: none;
@@ -191,13 +201,27 @@ code, .mono { font-family: var(--font-mono); }
 .row-status.err { color: var(--color-error); }
 .row-status.ok { color: var(--color-ink-soft); }
 
-/* the GitHub row sits right under the URL status line */
-.row-gh { margin-block-start: var(--s-1); }
+/* ---------- empty states (#52) ----------
+   Never a bare sentence: a stated fact plus the next move. Centred,
+   because an empty state has nothing beside it to align to. */
+.empty {
+  text-align: center;
+  padding: var(--s-4) var(--s-2);
+}
+.empty[hidden] { display: none; }
+.empty-title { margin: 0; font-weight: 600; color: var(--color-ink); max-width: none; }
+:lang(he) .empty-title { font-weight: 700; }
+.empty-body {
+  margin: 6px auto 0;
+  font-size: 0.88rem;
+  color: var(--color-neutral-600);
+  max-width: 46ch;
+}
 
 /* ---------- error banner ---------- */
 .err-banner {
   border: 1px solid var(--color-error);
-  border-radius: var(--r-control);
+  border-radius: var(--r-surface);
   background: var(--color-paper-raised);
   color: var(--color-error);
   padding: var(--s-2);
@@ -210,7 +234,7 @@ code, .mono { font-family: var(--font-mono); }
 /* ============================================================
    RECENT AUDITS — three rows and a way to see the rest
    ============================================================ */
-#history { margin-block-start: var(--s-3); }
+#history { margin-block-start: var(--s-2); }
 #history[hidden] { display: none; }
 .history-head {
   display: flex; align-items: baseline; justify-content: space-between;
@@ -405,7 +429,7 @@ code, .mono { font-family: var(--font-mono); }
   max-block-size: min(560px, calc(100vh - var(--s-6)));
   padding: 0;
   border: 1px solid var(--color-neutral-300);
-  border-radius: var(--r-control);
+  border-radius: var(--r-surface);
   background: var(--color-paper-raised);
   color: var(--color-ink);
   box-shadow: var(--shadow-lift);
@@ -430,13 +454,24 @@ code, .mono { font-family: var(--font-mono); }
 }
 .sheet-close:hover { color: var(--color-ink); }
 
+/* search that helps rather than waits (#91): concrete placeholder,
+   browser autocomplete via <datalist>, live "4 of 23" underneath */
+.sheet-tools { padding: var(--s-2) var(--s-2) 0; }
 .sheet-search {
-  margin: var(--s-2) var(--s-2) 0;
+  inline-size: 100%;
   padding: var(--s-1) var(--s-2);
   border: 1px solid var(--color-neutral-300);
   border-radius: var(--r-control);
   background: var(--color-paper);
   font: inherit; color: var(--color-ink);
+}
+.sheet-count {
+  margin: 4px 0 0;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--color-neutral-600);
+  min-block-size: 1.2em;
+  max-width: none;
 }
 .sheet .repo-list, .sheet .history-list {
   margin: 0; padding: 0 var(--s-2) var(--s-2);
@@ -456,8 +491,6 @@ code, .mono { font-family: var(--font-mono); }
 }
 .repo-row:hover { background: var(--color-paper); }
 .repo-list li:last-child .repo-row { border-block-end: none; }
-.repo-row.is-note { cursor: default; color: var(--color-neutral-600); font-size: 0.9rem; }
-.repo-row.is-note:hover { background: none; }
 .repo-meta { min-inline-size: 0; }
 .repo-name { display: block; font-weight: 600; }
 :lang(he) .repo-name { font-weight: 700; }
@@ -474,10 +507,19 @@ code, .mono { font-family: var(--font-mono); }
 /* ---------- narrow screens ---------- */
 @media (max-width: 560px) {
   .row { flex-wrap: wrap; padding-block: var(--s-2); }
-  .row-field, .row-label { flex-basis: 100%; }
+  .row-field, .row-note { flex-basis: 100%; }
   .row .btn { inline-size: 100%; }
   .picked { flex-direction: column; align-items: stretch; }
   .picked-acts { justify-content: space-between; }
+}
+
+/* Touch targets only where a finger is actually used, so the pointer
+   layout keeps its compact one-screen fit. */
+@media (pointer: coarse) {
+  .drop-acts .linkbtn { padding-block: 9px; }
+  .row { min-block-size: 60px; }
+  .row-field input { min-block-size: 44px; }
+  .history-row, .repo-row { padding-block: var(--s-2); }
 }
 
 @media (prefers-reduced-motion: reduce) {

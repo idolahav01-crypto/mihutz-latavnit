@@ -64,38 +64,50 @@
         <p class="or" aria-hidden="true"><span>or</span></p>
 
         <!-- path 2 — public repo link -->
-        <div class="row">
-          <label class="row-field">
-            <span class="vh">Public GitHub repo URL</span>
-            <input type="url" id="url-input" placeholder="https://github.com/user/repo"
-                   dir="ltr" inputmode="url" autocomplete="off" />
-          </label>
-          <button type="button" class="btn btn-primary btn-sm" id="url-start" disabled>
-            Audit <span class="dir-arrow" aria-hidden="true">→</span>
-          </button>
+        <div class="path">
+          <label class="path-label" for="url-input">Public GitHub repo URL</label>
+          <div class="row">
+            <span class="row-field">
+              <input type="url" id="url-input" placeholder="https://github.com/user/repo"
+                     dir="ltr" inputmode="url" autocomplete="off" />
+            </span>
+            <button type="button" class="btn btn-primary btn-sm" id="url-start" disabled>
+              Audit <span class="dir-arrow" aria-hidden="true">→</span>
+            </button>
+          </div>
+          <p class="row-status" id="url-status" aria-live="polite"></p>
         </div>
-        <p class="row-status" id="url-status" aria-live="polite"></p>
 
         <!-- path 3 — connected GitHub -->
-        <div class="row row-gh">
-          <span class="row-label">
-            <svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0c4.42 0 8 3.58 8 8a8.01 8.01 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A8.01 8.01 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>
-            <span id="gh-label">Your GitHub repositories</span>
-          </span>
-          <button type="button" class="btn btn-quiet btn-sm" id="gh-pick" hidden>Pick a repo</button>
-          <button type="button" class="btn btn-quiet btn-sm" id="gh-connect" hidden>Connect GitHub</button>
+        <div class="path">
+          <span class="path-label" id="gh-label">Your GitHub repositories</span>
+          <div class="row">
+            <span class="row-note" id="gh-note">Scanned straight from your account, private repos included</span>
+            <button type="button" class="btn btn-quiet btn-sm" id="gh-pick" hidden>
+              <svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0c4.42 0 8 3.58 8 8a8.01 8.01 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A8.01 8.01 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>
+              Pick a repo
+            </button>
+            <button type="button" class="btn btn-quiet btn-sm" id="gh-connect" hidden>
+              <svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0c4.42 0 8 3.58 8 8a8.01 8.01 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A8.01 8.01 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>
+              Connect GitHub
+            </button>
+          </div>
         </div>
 
         <p class="err-banner" id="err-banner" role="alert" hidden></p>
       </section>
 
       <!-- ===== recent audits ===== -->
-      <section id="history" hidden>
+      <section id="history">
         <div class="history-head">
           <h2>Recent audits</h2>
           <button type="button" class="linkbtn" id="history-all" hidden></button>
         </div>
         <ul class="history-list" id="history-list"></ul>
+        <div class="empty" id="history-empty" hidden>
+          <p class="empty-title">No audits yet.</p>
+          <p class="empty-body">Pick one of the three ways above. The first audit takes about a minute, and the result stays here.</p>
+        </div>
       </section>
 
       <!-- ===== loading ===== -->
@@ -128,8 +140,14 @@
       <h2 id="repo-dialog-title">Pick a repository</h2>
       <button type="button" class="sheet-close" data-close-dialog aria-label="Close">&times;</button>
     </div>
-    <input type="text" class="sheet-search" id="repo-search" placeholder="Search…" autocomplete="off" />
+    <div class="sheet-tools">
+      <input type="text" class="sheet-search" id="repo-search" list="repo-names"
+             placeholder="Filter by name — e.g. pottery" autocomplete="off" />
+      <datalist id="repo-names"></datalist>
+      <p class="sheet-count" id="repo-count" aria-live="polite"></p>
+    </div>
     <ul class="repo-list" id="repo-list"></ul>
+    <div class="empty" id="repo-empty" hidden></div>
   </dialog>
 
   <!-- all audits -->

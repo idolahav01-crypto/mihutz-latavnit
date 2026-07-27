@@ -22,7 +22,7 @@
     hi: "שלום, ",
     signout: "התנתקות",
     zipTooBig: "הקובץ גדול מ-5MB.",
-    zipEmpty: "לא נמצאו קבצים לסריקה.",
+    zipEmpty: "הארכיון ריק מקוד. ודאו שהוא מכיל את קבצי המקור ולא רק תיקיית build.",
     urlFormat: "פורמט לא תקין. דוגמה: https://github.com/user/repo",
     urlChecking: "בודק את הריפו...",
     urlOk: "הריפו נמצא וזמין.",
@@ -31,7 +31,9 @@
     ghNotConnected: "GitHub לא מחובר. השתמשו בשורת GitHub כדי לחבר.",
     ghExpired: "החיבור ל-GitHub פג. התחבר מחדש עם GitHub.",
     ghConnectedLabel: "הריפוזיטוריז שלכם ב-GitHub",
-    ghDisconnectedLabel: "לסריקת ריפו פרטי — חברו את GitHub",
+    ghDisconnectedLabel: "הריפוזיטוריז שלכם ב-GitHub",
+    ghNoteConnected: "סריקה ישירה מהחשבון, כולל ריפוזיטוריז פרטיים",
+    ghNoteDisconnected: "נכנסתם עם Google. חברו את GitHub כדי לסרוק גם ריפו פרטי",
     reposEmpty: "לא נמצאו ריפוזיטוריז בחשבון.",
     noRepoMatch: "אין ריפו שתואם לחיפוש.",
     reposLoading: "טוען ריפוזיטוריז...",
@@ -41,10 +43,13 @@
     },
     scanned: function (n) { return "נסרקו " + n + " קבצים"; },
     foundSignals: function (p, appl) { return "נמצאו " + p + " סימנים מתוך " + appl + " ישימים"; },
-    errGeneric: "משהו השתבש. נסה שוב בעוד רגע.",
+    errGeneric: "השרת לא ענה. נסו שוב — ואם זה חוזר, שלחו לנו את שם הריפו.",
     errRepoPrivate: "הריפו פרטי או שאין הרשאה. התחבר עם GitHub.",
-    errNoFiles: "לא נמצאו קבצים לסריקה.",
-    errDetect: "האבחון נכשל. נסה שוב.",
+    errNoFiles: "אין כאן קוד לסרוק — רק קבצים שמסוננים ממילא (node_modules,‏ ‎.git, תמונות).",
+    errDetect: "מנוע האבחון החזיר תשובה לא תקינה. הריצו שוב; אם זה חוזר, זה אצלנו.",
+    errRetry: "נסו שוב",
+    searchClear: "ניקוי החיפוש",
+    searchCount: function (n, total) { return n + " מתוך " + total; },
     noApiKey: "מנוע האבחון לא מוגדר — חסר ANTHROPIC_API_KEY ב-Supabase (Edge Functions → Secrets).",
     badApiKey: "מפתח ה-ANTHROPIC_API_KEY לא תקין — כנראה נדבקו איתו רווח או ירידת שורה. הגדירו אותו מחדש.",
     errTimeout: "האבחון ארך יותר מ-150 שניות ונקטע. נסו ריפו קטן יותר, או פנו אלינו."
@@ -52,7 +57,7 @@
     hi: "Hi, ",
     signout: "Sign out",
     zipTooBig: "File is larger than 5MB.",
-    zipEmpty: "No scannable files found.",
+    zipEmpty: "The archive has no source code in it. Check that it holds your source files, not just a build folder.",
     urlFormat: "Invalid format. Example: https://github.com/user/repo",
     urlChecking: "Checking the repo...",
     urlOk: "Repo found and accessible.",
@@ -61,7 +66,9 @@
     ghNotConnected: "GitHub is not connected. Use the GitHub row to connect.",
     ghExpired: "GitHub connection expired. Reconnect with GitHub.",
     ghConnectedLabel: "Your GitHub repositories",
-    ghDisconnectedLabel: "To scan a private repo, connect GitHub",
+    ghDisconnectedLabel: "Your GitHub repositories",
+    ghNoteConnected: "Scanned straight from your account, private repos included",
+    ghNoteDisconnected: "You signed in with Google. Connect GitHub to scan private repos too",
     reposEmpty: "No repositories found on the account.",
     noRepoMatch: "No repo matches your search.",
     reposLoading: "Loading repositories...",
@@ -71,10 +78,13 @@
     },
     scanned: function (n) { return "Scanned " + n + " files"; },
     foundSignals: function (p, appl) { return "Found " + p + " signals of " + appl + " applicable"; },
-    errGeneric: "Something went wrong. Try again in a moment.",
+    errGeneric: "The server didn't answer. Try again — and if it keeps happening, send us the repo name.",
     errRepoPrivate: "Repo is private or you lack access. Connect GitHub.",
-    errNoFiles: "No scannable files found.",
-    errDetect: "Diagnosis failed. Try again.",
+    errNoFiles: "There's no code here to scan — only files we filter out anyway (node_modules, .git, images).",
+    errDetect: "The audit engine returned a malformed response. Run it again; if it repeats, it's on us.",
+    errRetry: "Try again",
+    searchClear: "Clear the search",
+    searchCount: function (n, total) { return n + " of " + total; },
     noApiKey: "Diagnosis engine not configured — ANTHROPIC_API_KEY is missing in Supabase (Edge Functions → Secrets).",
     badApiKey: "ANTHROPIC_API_KEY is invalid — a space or newline was probably pasted with it. Set it again.",
     errTimeout: "Diagnosis ran past 150 seconds and was cut off. Try a smaller repo, or contact us."
@@ -119,10 +129,11 @@
      "dropzone", "files-input", "dir-input", "pick-files", "pick-dir",
      "picked", "picked-what", "picked-clear", "files-start",
      "url-input", "url-status", "url-start",
-     "gh-label", "gh-pick", "gh-connect",
-     "repo-dialog", "repo-search", "repo-list",
+     "gh-label", "gh-note", "gh-pick", "gh-connect",
+     "repo-dialog", "repo-search", "repo-list", "repo-count", "repo-empty", "repo-names",
      "score", "report-caption", "report-body", "report-back",
-     "history", "history-list", "history-all", "history-dialog", "history-all-list"
+     "history", "history-list", "history-all", "history-empty",
+     "history-dialog", "history-all-list"
     ].forEach(function (id) { els[id] = $(id); });
     els.stageItems = Array.prototype.slice.call(document.querySelectorAll(".stages li"));
   }
@@ -188,6 +199,7 @@
 
   function paintGithubRow() {
     els["gh-label"].textContent = ghConnected ? T.ghConnectedLabel : T.ghDisconnectedLabel;
+    els["gh-note"].textContent = ghConnected ? T.ghNoteConnected : T.ghNoteDisconnected;
     els["gh-pick"].hidden = !ghConnected;
     els["gh-connect"].hidden = ghConnected;
   }
@@ -441,9 +453,13 @@
 
   function loadRepos() {
     if (repos.length) { renderRepos(els["repo-search"].value); return; }
-    els["repo-list"].innerHTML = '<li><span class="repo-row is-note">' + esc(T.reposLoading) + "</span></li>";
+    showRepoEmpty(T.reposLoading);
     invokeFn("list-repos", {}).then(function (data) {
       repos = (data && data.repos) || [];
+      /* feed the browser's own autocomplete so typing narrows without guessing */
+      els["repo-names"].innerHTML = repos.map(function (r) {
+        return '<option value="' + esc(r.full_name) + '"></option>';
+      }).join("");
       renderRepos("");
     }).catch(function (e) {
       if (e && e.status === 428) {
@@ -454,19 +470,38 @@
         showError(T.ghExpired);
         return;
       }
-      els["repo-list"].innerHTML = '<li><span class="repo-row is-note">' + esc(T.errGeneric) + "</span></li>";
+      showRepoEmpty(T.errGeneric, T.errRetry, function () { repos = []; loadRepos(); });
     });
+  }
+
+  /* One place decides what the sheet shows when there is no list to show,
+     and every variant offers the next move rather than a bare sentence. */
+  function showRepoEmpty(msg, actionLabel, onAction) {
+    els["repo-list"].innerHTML = "";
+    els["repo-count"].textContent = "";
+    var html = '<p class="empty-title">' + esc(msg) + "</p>";
+    if (actionLabel) html += '<p class="empty-body"><button type="button" class="linkbtn" id="repo-empty-act">' + esc(actionLabel) + "</button></p>";
+    els["repo-empty"].innerHTML = html;
+    els["repo-empty"].hidden = false;
+    if (actionLabel) $("repo-empty-act").addEventListener("click", onAction);
   }
 
   function renderRepos(query) {
     var q = (query || "").toLowerCase();
-    var note = function (msg) {
-      els["repo-list"].innerHTML = '<li><span class="repo-row is-note">' + esc(msg) + "</span></li>";
-    };
-    if (!repos.length) { note(T.reposEmpty); return; }
-    var list = repos.filter(function (r) { return !q || (r.full_name || "").toLowerCase().indexOf(q) !== -1; });
-    if (!list.length) { note(T.noRepoMatch); return; }
+    if (!repos.length) { showRepoEmpty(T.reposEmpty); return; }
 
+    var list = repos.filter(function (r) { return !q || (r.full_name || "").toLowerCase().indexOf(q) !== -1; });
+    if (!list.length) {
+      showRepoEmpty(T.noRepoMatch, T.searchClear, function () {
+        els["repo-search"].value = "";
+        renderRepos("");
+        els["repo-search"].focus();
+      });
+      return;
+    }
+
+    els["repo-empty"].hidden = true;
+    els["repo-count"].textContent = T.searchCount(list.length, repos.length);
     els["repo-list"].innerHTML = list.map(function (r) {
       var sub = [];
       if (r.language) sub.push(esc(r.language));
@@ -627,11 +662,9 @@
       .eq("user_id", user.id).eq("status", "done")
       .order("created_at", { ascending: false }).limit(20)
       .then(function (r) {
-        if (r.error || !r.data || !r.data.length) return;
-        historyRows = r.data;
+        historyRows = (!r.error && r.data) || [];
         renderHistory();
-        els.history.hidden = false;
-      }).catch(function () { /* history is non-critical */ });
+      }).catch(function () { renderHistory(); });
   }
 
   function sourceLabel(t) {
@@ -644,10 +677,15 @@
   /* Only the three most recent stay on the page — the rest are one click
      away in the sheet, so the working screen never grows past one view. */
   function renderHistory() {
+    var empty = !historyRows.length;
+    /* the section stays on screen either way — a first-time user should see
+       where results will land, not a gap where a section used to be */
+    els["history-empty"].hidden = !empty;
+    els["history-list"].hidden = empty;
+    els["history-all"].hidden = empty || historyRows.length <= HISTORY_PREVIEW;
+    if (empty) { els["history-list"].innerHTML = ""; return; }
     renderHistoryInto(historyRows.slice(0, HISTORY_PREVIEW), els["history-list"]);
-    var overflow = historyRows.length > HISTORY_PREVIEW;
-    els["history-all"].hidden = !overflow;
-    if (overflow) els["history-all"].textContent = T.allAudits(historyRows.length);
+    if (!els["history-all"].hidden) els["history-all"].textContent = T.allAudits(historyRows.length);
   }
 
   function renderHistoryInto(rows, target) {
@@ -725,7 +763,7 @@
     els.loading.hidden = true;
     setStage(-1);
     els["app-input"].hidden = false;
-    if (historyRows.length) els.history.hidden = false;
+    els.history.hidden = false;
   }
 
   /* ===== small utils ===== */
@@ -741,7 +779,7 @@
   function backToInput() {
     els.report.hidden = true;
     els["app-input"].hidden = false;
-    if (historyRows.length) els.history.hidden = false;
+    els.history.hidden = false;
     clearPicked();
     setBusy(false);
     window.scrollTo(0, 0);
