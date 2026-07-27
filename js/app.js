@@ -12,6 +12,7 @@
   var MAX_ZIP_BYTES = 5 * 1024 * 1024; /* 5MB */
   var MAX_BUNDLE_BYTES = 300000;
   var MAX_FILE_BYTES = 60000;
+  var HISTORY_PREVIEW = 3; /* rows shown inline; the rest live in the sheet */
 
   var he = document.documentElement.lang === "he";
   var HOME = he ? "/he/" : "/";
@@ -20,24 +21,24 @@
   var T = he ? {
     hi: "שלום, ",
     signout: "התנתקות",
-    reading: "קורא קבצים",
-    filtering: "מסנן קבצים לא רלוונטיים",
-    uploading: "מעלה לניתוח",
-    fetching: "מושך את הריפו",
-    diagnosing: "מריץ אבחון מול 108 סימנים...",
-    zipOnly: "קובץ ‎.zip בלבד.",
     zipTooBig: "הקובץ גדול מ-5MB.",
-    zipEmpty: "לא נמצאו קבצים לסריקה בארכיון.",
+    zipEmpty: "לא נמצאו קבצים לסריקה.",
     urlFormat: "פורמט לא תקין. דוגמה: https://github.com/user/repo",
     urlChecking: "בודק את הריפו...",
     urlOk: "הריפו נמצא וזמין.",
     urlNotFound: "הריפו לא נמצא. בדוק את הכתובת.",
-    urlPrivate: "הריפו פרטי — התחבר עם GitHub (טאב 'חיבור GitHub') כדי לגשת אליו.",
-    ghNotConnected: "GitHub לא מחובר. עבור לטאב 'חיבור GitHub' כדי לחבר.",
+    urlPrivate: "הריפו פרטי — חברו את GitHub כדי לגשת אליו.",
+    ghNotConnected: "GitHub לא מחובר. השתמשו בשורת GitHub כדי לחבר.",
     ghExpired: "החיבור ל-GitHub פג. התחבר מחדש עם GitHub.",
+    ghConnectedLabel: "הריפוזיטוריז שלכם ב-GitHub",
+    ghDisconnectedLabel: "לסריקת ריפו פרטי — חברו את GitHub",
     reposEmpty: "לא נמצאו ריפוזיטוריז בחשבון.",
     noRepoMatch: "אין ריפו שתואם לחיפוש.",
-    select: "בחירה",
+    reposLoading: "טוען ריפוזיטוריז...",
+    allAudits: function (n) { return "כל האבחונים (" + n + ")"; },
+    filesPicked: function (n, root) {
+      return (root ? root + "/ — " : "") + n + (n === 1 ? " קובץ" : " קבצים");
+    },
     scanned: function (n) { return "נסרקו " + n + " קבצים"; },
     foundSignals: function (p, appl) { return "נמצאו " + p + " סימנים מתוך " + appl + " ישימים"; },
     errGeneric: "משהו השתבש. נסה שוב בעוד רגע.",
@@ -50,24 +51,24 @@
   } : {
     hi: "Hi, ",
     signout: "Sign out",
-    reading: "Reading files",
-    filtering: "Filtering out irrelevant files",
-    uploading: "Uploading for analysis",
-    fetching: "Fetching the repo",
-    diagnosing: "Running diagnosis against 108 signals...",
-    zipOnly: "Only .zip files.",
     zipTooBig: "File is larger than 5MB.",
-    zipEmpty: "No scannable files in the archive.",
+    zipEmpty: "No scannable files found.",
     urlFormat: "Invalid format. Example: https://github.com/user/repo",
     urlChecking: "Checking the repo...",
     urlOk: "Repo found and accessible.",
     urlNotFound: "Repo not found. Check the URL.",
-    urlPrivate: "Repo is private — connect GitHub (the 'Connect GitHub' tab) to access it.",
-    ghNotConnected: "GitHub is not connected. Use the 'Connect GitHub' tab to connect.",
+    urlPrivate: "Repo is private — connect GitHub to access it.",
+    ghNotConnected: "GitHub is not connected. Use the GitHub row to connect.",
     ghExpired: "GitHub connection expired. Reconnect with GitHub.",
+    ghConnectedLabel: "Your GitHub repositories",
+    ghDisconnectedLabel: "To scan a private repo, connect GitHub",
     reposEmpty: "No repositories found on the account.",
     noRepoMatch: "No repo matches your search.",
-    select: "Select",
+    reposLoading: "Loading repositories...",
+    allAudits: function (n) { return "All audits (" + n + ")"; },
+    filesPicked: function (n, root) {
+      return (root ? root + "/ — " : "") + n + (n === 1 ? " file" : " files");
+    },
     scanned: function (n) { return "Scanned " + n + " files"; },
     foundSignals: function (p, appl) { return "Found " + p + " signals of " + appl + " applicable"; },
     errGeneric: "Something went wrong. Try again in a moment.",
@@ -106,22 +107,24 @@
       showUser();
       return refreshGithubStatus();
     }).then(function () {
-      if (user) { wireTabs(); loadHistory(); }
+      if (user) { wireInputs(); loadHistory(); }
     }).catch(function () {
       window.location.replace(HOME);
     });
   });
 
   function cacheEls() {
-    ["app-user", "signout", "app-input", "report", "loading", "loading-line",
-     "err-banner", "panel-oauth", "panel-zip", "panel-url",
-     "dropzone", "zip-input", "zip-chosen", "zip-start",
+    ["app-user", "signout", "app-input", "report", "loading", "stages",
+     "err-banner",
+     "dropzone", "files-input", "dir-input", "pick-files", "pick-dir",
+     "picked", "picked-what", "picked-clear", "files-start",
      "url-input", "url-status", "url-start",
-     "gh-connected", "gh-disconnected", "gh-connect", "repo-search", "repo-list",
+     "gh-label", "gh-pick", "gh-connect",
+     "repo-dialog", "repo-search", "repo-list",
      "score", "report-caption", "report-body", "report-back",
-     "history", "history-list", "history-count"
+     "history", "history-list", "history-all", "history-dialog", "history-all-list"
     ].forEach(function (id) { els[id] = $(id); });
-    els.tabs = Array.prototype.slice.call(document.querySelectorAll(".tab"));
+    els.stageItems = Array.prototype.slice.call(document.querySelectorAll(".stages li"));
   }
 
   /* ===== auth helpers ===== */
@@ -148,7 +151,7 @@
       provider_token: session.provider_token,
       provider_refresh_token: session.provider_refresh_token || null,
       updated_at: new Date().toISOString()
-    }).then(function () { ghConnected = true; });
+    }).then(function () { ghConnected = true; paintGithubRow(); });
   }
 
   function refreshGithubStatus() {
@@ -166,95 +169,157 @@
     });
   }
 
-  /* ===== tabs ===== */
-  function wireTabs() {
-    if (els["gh-connect"]) els["gh-connect"].addEventListener("click", connectGithub);
-    els.tabs.forEach(function (tab) {
-      tab.addEventListener("click", function () { selectTab(tab.getAttribute("data-tab")); });
-    });
-    wireZip();
+  /* ===== wiring: three input paths, all live at once ===== */
+  function wireInputs() {
+    wireFiles();
     wireUrl();
-    if (els["repo-search"]) {
-      els["repo-search"].addEventListener("input", function () { renderRepos(this.value); });
-    }
-    /* default tab: GitHub if connected, else ZIP */
-    selectTab(ghConnected ? "oauth" : "zip");
+    wireGithubRow();
+    wireDialogs();
   }
 
-  function selectTab(name) {
-    hideError();
-    els.tabs.forEach(function (tab) {
-      var on = tab.getAttribute("data-tab") === name;
-      tab.setAttribute("aria-selected", on ? "true" : "false");
+  /* The GitHub row never disappears — only its button changes, so the
+     three paths stay in the same three places whatever the account state. */
+  function wireGithubRow() {
+    els["gh-connect"].addEventListener("click", connectGithub);
+    els["gh-pick"].addEventListener("click", openRepoDialog);
+    els["repo-search"].addEventListener("input", function () { renderRepos(this.value); });
+    paintGithubRow();
+  }
+
+  function paintGithubRow() {
+    els["gh-label"].textContent = ghConnected ? T.ghConnectedLabel : T.ghDisconnectedLabel;
+    els["gh-pick"].hidden = !ghConnected;
+    els["gh-connect"].hidden = ghConnected;
+  }
+
+  /* ===== path 1: files, folder, or zip ===== */
+  function wireFiles() {
+    var dz = els.dropzone;
+    els["pick-files"].addEventListener("click", function (e) { e.stopPropagation(); els["files-input"].click(); });
+    els["pick-dir"].addEventListener("click", function (e) { e.stopPropagation(); els["dir-input"].click(); });
+    dz.addEventListener("click", function () { els["files-input"].click(); });
+    dz.addEventListener("keydown", function (e) {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); els["files-input"].click(); }
     });
-    els["panel-oauth"].hidden = name !== "oauth";
-    els["panel-zip"].hidden = name !== "zip";
-    els["panel-url"].hidden = name !== "url";
-    if (name === "oauth") loadRepos();
-  }
-
-  /* ===== ZIP tab ===== */
-  function wireZip() {
-    var dz = els.dropzone, input = els["zip-input"];
-    dz.addEventListener("click", function () { input.click(); });
-    dz.addEventListener("keydown", function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); input.click(); } });
     ["dragenter", "dragover"].forEach(function (t) {
       dz.addEventListener(t, function (e) { e.preventDefault(); dz.classList.add("is-drag"); });
     });
     ["dragleave", "drop"].forEach(function (t) {
       dz.addEventListener(t, function (e) { e.preventDefault(); dz.classList.remove("is-drag"); });
     });
-    dz.addEventListener("drop", function (e) { if (e.dataTransfer.files[0]) pickZip(e.dataTransfer.files[0]); });
-    input.addEventListener("change", function () { if (input.files[0]) pickZip(input.files[0]); });
-    els["zip-start"].addEventListener("click", function () { if (zipFile) startZip(); });
+    dz.addEventListener("drop", function (e) {
+      collectFromDrop(e.dataTransfer).then(setPicked).catch(function () { showError(T.errGeneric); });
+    });
+    els["files-input"].addEventListener("change", function () {
+      setPicked(fromFileList(this.files, false));
+    });
+    els["dir-input"].addEventListener("change", function () {
+      setPicked(fromFileList(this.files, true));
+    });
+    els["picked-clear"].addEventListener("click", clearPicked);
+    els["files-start"].addEventListener("click", function () { if (picked.length) startFiles(); });
   }
 
-  var zipFile = null;
-  function pickZip(file) {
+  /* A picked entry is always {path, file} — the shape the bundler wants,
+     whichever of the four ways the user handed the files over. */
+  var picked = [], pickedRoot = "";
+
+  function fromFileList(list, fromDirectory) {
+    return Array.prototype.map.call(list, function (f) {
+      return { path: (fromDirectory && f.webkitRelativePath) || f.name, file: f };
+    });
+  }
+
+  /* Drag-and-drop is the only path that can carry a directory tree, and
+     only via the non-standard webkitGetAsEntry. Fall back to the flat
+     file list when the browser does not offer entries. */
+  function collectFromDrop(dt) {
+    var items = dt.items ? Array.prototype.slice.call(dt.items) : [];
+    var entries = items.map(function (it) {
+      return it.webkitGetAsEntry ? it.webkitGetAsEntry() : null;
+    }).filter(Boolean);
+    if (!entries.length) return Promise.resolve(fromFileList(dt.files, false));
+    return Promise.all(entries.map(function (en) { return walkEntry(en, ""); }))
+      .then(function (nested) { return [].concat.apply([], nested); });
+  }
+
+  function walkEntry(entry, prefix) {
+    var path = prefix + entry.name;
+    if (entry.isFile) {
+      return new Promise(function (resolve) {
+        entry.file(function (f) { resolve([{ path: path, file: f }]); }, function () { resolve([]); });
+      });
+    }
+    if (!entry.isDirectory) return Promise.resolve([]);
+    if (!keepPath(path + "/")) return Promise.resolve([]); /* skip node_modules etc. before reading */
+    return readAllEntries(entry.createReader()).then(function (children) {
+      return Promise.all(children.map(function (c) { return walkEntry(c, path + "/"); }))
+        .then(function (nested) { return [].concat.apply([], nested); });
+    });
+  }
+
+  /* readEntries returns at most ~100 per call, so it has to be drained. */
+  function readAllEntries(reader) {
+    var all = [];
+    return new Promise(function (resolve) {
+      (function next() {
+        reader.readEntries(function (batch) {
+          if (!batch.length) { resolve(all); return; }
+          all = all.concat(Array.prototype.slice.call(batch));
+          next();
+        }, function () { resolve(all); });
+      })();
+    });
+  }
+
+  function setPicked(entries) {
     hideError();
-    if (!/\.zip$/i.test(file.name)) { showError(T.zipOnly); return; }
-    if (file.size > MAX_ZIP_BYTES) { showError(T.zipTooBig); return; }
-    zipFile = file;
-    els["zip-chosen"].textContent = file.name;
-    els["zip-start"].disabled = false;
+    if (!entries || !entries.length) return;
+    var over = entries.filter(function (e) { return e.file.size > MAX_ZIP_BYTES; });
+    if (over.length) { showError(T.zipTooBig); return; }
+    picked = entries;
+    pickedRoot = commonRoot(entries);
+    var single = entries.length === 1 ? entries[0] : null;
+    els["picked-what"].textContent = single
+      ? single.file.name
+      : T.filesPicked(entries.length, pickedRoot);
+    els.picked.hidden = false;
   }
 
-  function startZip() {
+  function clearPicked() {
+    picked = []; pickedRoot = "";
+    els.picked.hidden = true;
+    els["files-input"].value = "";
+    els["dir-input"].value = "";
+    hideError();
+  }
+
+  function commonRoot(entries) {
+    var first = entries[0].path.split("/");
+    if (first.length < 2) return "";
+    var root = first[0];
+    return entries.every(function (e) { return e.path.indexOf(root + "/") === 0; }) ? root : "";
+  }
+
+  /* A lone .zip goes through JSZip; anything else is read directly.
+     Both converge on the same bundle format and the same upload. */
+  function startFiles() {
     if (busy) return;
     setBusy(true);
-    showLoading(T.reading + "…");
+    showStages();
+    setStage(0);
+    var lone = picked.length === 1 ? picked[0].file : null;
+    var isZip = lone && /\.zip$/i.test(lone.name);
+    var ref = isZip ? lone.name : T.filesPicked(picked.length, pickedRoot);
     var scanId = null;
-    createScan("zip", zipFile.name).then(function (id) {
+
+    createScan("zip", ref).then(function (id) {
       scanId = id;
-      return import(JSZIP_CDN);
-    }).then(function (mod) {
-      var JSZip = mod.default || mod;
-      return JSZip.loadAsync(zipFile);
-    }).then(function (zip) {
-      showLoading(T.filtering + "…");
-      var names = Object.keys(zip.files).filter(function (n) {
-        var f = zip.files[n];
-        return !f.dir && keepPath(n);
-      });
-      var parts = [], total = 0, count = 0;
-      var chain = Promise.resolve();
-      names.forEach(function (n) {
-        chain = chain.then(function () {
-          if (total >= MAX_BUNDLE_BYTES) return;
-          return zip.files[n].async("string").then(function (text) {
-            if (text.length > MAX_FILE_BYTES) return;
-            /* strip a single leading top-level dir (common in exported zips) */
-            var rel = n.replace(/^[^/]+\//, "");
-            var block = "=== FILE: " + rel + " ===\n" + text + "\n\n";
-            total += block.length; count += 1; parts.push(block);
-          }).catch(function () {});
-        });
-      });
-      return chain.then(function () {
-        if (count === 0) throw new Error("empty");
-        showLoading(T.uploading + "…");
-        return uploadBundle(scanId, parts.join(""));
-      });
+      return isZip ? bundleFromZip(lone) : bundleFromEntries(picked);
+    }).then(function (bundle) {
+      if (!bundle) throw new Error("empty");
+      setStage(2);
+      return uploadBundle(scanId, bundle);
     }).then(function () {
       return runDetect(scanId);
     }).catch(function (e) {
@@ -262,7 +327,65 @@
     });
   }
 
-  /* ===== URL tab ===== */
+  function bundleFromZip(file) {
+    return import(JSZIP_CDN).then(function (mod) {
+      var JSZip = mod.default || mod;
+      return JSZip.loadAsync(file);
+    }).then(function (zip) {
+      setStage(1);
+      var names = Object.keys(zip.files).filter(function (n) {
+        return !zip.files[n].dir && keepPath(n);
+      });
+      var parts = [], total = 0;
+      var chain = Promise.resolve();
+      names.forEach(function (n) {
+        chain = chain.then(function () {
+          if (total >= MAX_BUNDLE_BYTES) return;
+          return zip.files[n].async("string").then(function (text) {
+            if (text.length > MAX_FILE_BYTES) return;
+            /* strip a single leading top-level dir (common in exported zips) */
+            var block = fileBlock(n.replace(/^[^/]+\//, ""), text);
+            total += block.length; parts.push(block);
+          }).catch(function () {});
+        });
+      });
+      return chain.then(function () { return parts.length ? parts.join("") : null; });
+    });
+  }
+
+  function bundleFromEntries(entries) {
+    setStage(1);
+    var keep = entries.filter(function (e) { return keepPath(e.path); });
+    var parts = [], total = 0;
+    var chain = Promise.resolve();
+    keep.forEach(function (e) {
+      chain = chain.then(function () {
+        if (total >= MAX_BUNDLE_BYTES) return;
+        if (e.file.size > MAX_FILE_BYTES) return;
+        return readText(e.file).then(function (text) {
+          if (text == null || text.length > MAX_FILE_BYTES) return;
+          var rel = pickedRoot ? e.path.replace(pickedRoot + "/", "") : e.path;
+          var block = fileBlock(rel, text);
+          total += block.length; parts.push(block);
+        }).catch(function () {});
+      });
+    });
+    return chain.then(function () { return parts.length ? parts.join("") : null; });
+  }
+
+  function fileBlock(path, text) { return "=== FILE: " + path + " ===\n" + text + "\n\n"; }
+
+  function readText(file) {
+    if (file.text) return file.text();
+    return new Promise(function (resolve) {
+      var fr = new FileReader();
+      fr.onload = function () { resolve(String(fr.result || "")); };
+      fr.onerror = function () { resolve(null); };
+      fr.readAsText(file);
+    });
+  }
+
+  /* ===== path 2: public repo URL ===== */
   var urlTimer = null, urlValid = null;
   function wireUrl() {
     els["url-input"].addEventListener("input", function () {
@@ -302,77 +425,102 @@
   function setUrlStatus(msg, cls) {
     var s = els["url-status"];
     s.textContent = msg;
-    s.className = "field-status" + (cls ? " " + cls : "");
+    s.className = "row-status" + (cls ? " " + cls : "");
   }
 
-  function startUrl(v) {
-    if (busy) return;
-    setBusy(true);
-    showLoading(T.fetching + "…");
-    var scanId = null;
-    createScan("url", v.full).then(function (id) {
-      scanId = id;
-      return invokeFn("fetch-repo", { scan_id: id, owner: v.owner, repo: v.repo, ref: v.ref });
-    }).then(function () {
-      return runDetect(scanId);
-    }).catch(function (e) { handleFlowError(e, scanId); });
-  }
+  function startUrl(v) { startRemote("url", v); }
 
-  /* ===== OAuth (repo list) tab ===== */
+  /* ===== path 3: a repo from the connected account ===== */
   var repos = [];
+
+  function openRepoDialog() {
+    els["repo-dialog"].showModal();
+    loadRepos();
+    els["repo-search"].focus();
+  }
+
   function loadRepos() {
-    if (!ghConnected) {
-      els["gh-connected"].hidden = true;
-      els["gh-disconnected"].hidden = false;
-      return;
-    }
-    els["gh-disconnected"].hidden = true;
-    els["gh-connected"].hidden = false;
-    if (repos.length) return;
-    els["repo-list"].innerHTML = '<li class="repo-row"><span class="spin"></span></li>';
+    if (repos.length) { renderRepos(els["repo-search"].value); return; }
+    els["repo-list"].innerHTML = '<li><span class="repo-row is-note">' + esc(T.reposLoading) + "</span></li>";
     invokeFn("list-repos", {}).then(function (data) {
       repos = (data && data.repos) || [];
       renderRepos("");
     }).catch(function (e) {
-      if (e && e.status === 428) { ghConnected = false; loadRepos(); return; }
-      els["repo-list"].innerHTML = '<li class="repo-row">' + esc(T.errGeneric) + "</li>";
+      if (e && e.status === 428) {
+        /* the token went stale — send the row back to its connect state */
+        ghConnected = false;
+        paintGithubRow();
+        els["repo-dialog"].close();
+        showError(T.ghExpired);
+        return;
+      }
+      els["repo-list"].innerHTML = '<li><span class="repo-row is-note">' + esc(T.errGeneric) + "</span></li>";
     });
   }
 
   function renderRepos(query) {
     var q = (query || "").toLowerCase();
+    var note = function (msg) {
+      els["repo-list"].innerHTML = '<li><span class="repo-row is-note">' + esc(msg) + "</span></li>";
+    };
+    if (!repos.length) { note(T.reposEmpty); return; }
     var list = repos.filter(function (r) { return !q || (r.full_name || "").toLowerCase().indexOf(q) !== -1; });
-    if (!repos.length) { els["repo-list"].innerHTML = '<li class="repo-row">' + esc(T.reposEmpty) + "</li>"; return; }
-    if (!list.length) { els["repo-list"].innerHTML = '<li class="repo-row">' + esc(T.noRepoMatch) + "</li>"; return; }
+    if (!list.length) { note(T.noRepoMatch); return; }
+
     els["repo-list"].innerHTML = list.map(function (r) {
       var sub = [];
-      if (r.language) sub.push('<span class="lang-dot">●</span> ' + esc(r.language));
+      if (r.language) sub.push(esc(r.language));
       if (r.updated_at) sub.push(esc(fmtDate(r.updated_at)));
       if (r.private) sub.push(he ? "פרטי" : "private");
-      return '<li class="repo-row">' +
+      return '<li><button type="button" class="repo-row" data-repo="' + esc(r.full_name) +
+        '" data-branch="' + esc(r.default_branch || "") + '">' +
         '<span class="repo-meta"><span class="repo-name ltr">' + esc(r.full_name) + "</span>" +
         '<span class="repo-sub ltr">' + sub.join(" · ") + "</span></span>" +
-        '<button type="button" class="btn btn-quiet btn-sm" data-repo="' + esc(r.full_name) + '" data-branch="' + esc(r.default_branch || "") + '">' + esc(T.select) + "</button></li>";
+        '<span class="history-open" aria-hidden="true">' + (he ? "‹" : "›") + "</span></button></li>";
     }).join("");
+
     Array.prototype.forEach.call(els["repo-list"].querySelectorAll("[data-repo]"), function (btn) {
       btn.addEventListener("click", function () {
-        var full = btn.getAttribute("data-repo").split("/");
-        startGithub({ owner: full[0], repo: full[1], ref: btn.getAttribute("data-branch") || undefined, full: btn.getAttribute("data-repo") });
+        var full = btn.getAttribute("data-repo");
+        var parts = full.split("/");
+        els["repo-dialog"].close();
+        startRemote("github", {
+          owner: parts[0], repo: parts[1],
+          ref: btn.getAttribute("data-branch") || undefined,
+          full: full
+        });
       });
     });
   }
 
-  function startGithub(v) {
+  /* URL and GitHub differ only in the source_type they record. */
+  function startRemote(type, v) {
     if (busy) return;
     setBusy(true);
-    showLoading(T.fetching + "…");
+    showStages();
+    setStage(0); /* fetch-repo does the read/filter/upload trio server-side */
     var scanId = null;
-    createScan("github", v.full).then(function (id) {
+    createScan(type, v.full).then(function (id) {
       scanId = id;
       return invokeFn("fetch-repo", { scan_id: id, owner: v.owner, repo: v.repo, ref: v.ref });
     }).then(function () {
       return runDetect(scanId);
     }).catch(function (e) { handleFlowError(e, scanId); });
+  }
+
+  /* ===== dialogs ===== */
+  function wireDialogs() {
+    Array.prototype.forEach.call(document.querySelectorAll("[data-close-dialog]"), function (btn) {
+      btn.addEventListener("click", function () { btn.closest("dialog").close(); });
+    });
+    /* clicking the backdrop closes; clicking the sheet itself must not */
+    Array.prototype.forEach.call(document.querySelectorAll("dialog.sheet"), function (dlg) {
+      dlg.addEventListener("click", function (e) { if (e.target === dlg) dlg.close(); });
+    });
+    els["history-all"].addEventListener("click", function () {
+      renderHistoryInto(historyRows, els["history-all-list"]);
+      els["history-dialog"].showModal();
+    });
   }
 
   /* ===== shared flow ===== */
@@ -391,7 +539,7 @@
   }
 
   function runDetect(scanId) {
-    showLoading(T.diagnosing);
+    setStage(3);
     return invokeFn("detect", { scan_id: scanId }).then(function () {
       return loadReport(scanId);
     });
@@ -455,16 +603,16 @@
         var code = ev ? '<code>' + esc(clip(ev.snippet, 180)) + "</code>" : "";
         var file = ev ? '<span class="sig-file">' + esc(ev.file) + "</span>" : "";
         var w = s.weight === "very-high" ? "high" : s.weight;
-        return '<li><span class="sig-id">#' + s.id + "</span>" +
+        return '<li><span class="sig-id" dir="ltr">#' + s.id + "</span>" +
           '<span class="sig-body"><span class="sig-name">' + esc(s.name) + "</span>" + code + file + "</span>" +
-          '<span class="sig-flag w-' + esc(w || "medium") + '">' + esc(String(s.weight || "").toUpperCase()) + "</span></li>";
+          '<span class="sig-flag w-' + esc(w || "medium") + '" dir="ltr">' + esc(String(s.weight || "").toUpperCase()) + "</span></li>";
       }).join("");
       return '<div class="cat-group"><h3>' + esc(cat) + '</h3><ul class="led">' + rows + "</ul></div>";
     }).join("") || ("<p>" + esc(he ? "לא נמצאו סימנים במעבר הזה." : "No signals found in this pass.") + "</p>");
 
-    hideLoading();
+    els.loading.hidden = true;
     els["app-input"].hidden = true;
-    if (els.history) els.history.hidden = true;
+    els.history.hidden = true;
     els.report.hidden = false;
     setBusy(false);
     window.scrollTo(0, 0);
@@ -493,42 +641,46 @@
     return t || "";
   }
 
-  function scoreClass(score) {
-    if (score >= 67) return "bad";   /* strong AI fingerprint */
-    if (score >= 34) return "mid";
-    return "good";
+  /* Only the three most recent stay on the page — the rest are one click
+     away in the sheet, so the working screen never grows past one view. */
+  function renderHistory() {
+    renderHistoryInto(historyRows.slice(0, HISTORY_PREVIEW), els["history-list"]);
+    var overflow = historyRows.length > HISTORY_PREVIEW;
+    els["history-all"].hidden = !overflow;
+    if (overflow) els["history-all"].textContent = T.allAudits(historyRows.length);
   }
 
-  function renderHistory() {
-    if (els["history-count"]) {
-      els["history-count"].textContent = historyRows.length + (he ? " אבחונים" : (historyRows.length === 1 ? " audit" : " audits"));
-    }
+  function renderHistoryInto(rows, target) {
     var chevron = he ? "‹" : "›";
-    els["history-list"].innerHTML = historyRows.map(function (s) {
+    target.innerHTML = rows.map(function (s) {
       var score = s.ai_fingerprint_score != null ? s.ai_fingerprint_score : 0;
       var ref = s.source_ref || sourceLabel(s.source_type);
-      var sub = [fmtDate(s.created_at)];
+      var sub = [sourceLabel(s.source_type), fmtDate(s.created_at)];
       if (s.present_count != null) sub.push(s.present_count + (he ? " סימנים" : " signals"));
       return '<li><button type="button" class="history-row" data-id="' + esc(s.id) + '">' +
-        '<span class="history-score sev-' + scoreClass(score) + '">' + esc(String(score)) + "<small>/100</small></span>" +
+        '<span class="history-score" dir="ltr">' + esc(String(score)) + "<small>/100</small></span>" +
         '<span class="history-meta">' +
           '<span class="history-ref ltr">' + esc(ref) + "</span>" +
-          '<span class="history-sub"><span class="src-chip">' + esc(sourceLabel(s.source_type)) + "</span>" + esc(sub.join(" · ")) + "</span>" +
+          '<span class="history-sub">' + esc(sub.join(" · ")) + "</span>" +
         "</span>" +
         '<span class="history-open" aria-hidden="true">' + chevron + "</span></button></li>";
     }).join("");
-    Array.prototype.forEach.call(els["history-list"].querySelectorAll("[data-id]"), function (btn) {
+
+    Array.prototype.forEach.call(target.querySelectorAll("[data-id]"), function (btn) {
       btn.addEventListener("click", function () {
         var id = btn.getAttribute("data-id");
         var s = historyRows.filter(function (x) { return x.id === id; })[0];
-        if (s) { setBusy(true); renderReport(s); }
+        if (!s) return;
+        els["history-dialog"].close();
+        setBusy(true);
+        renderReport(s);
       });
     });
   }
 
   /* ===== error handling ===== */
   function handleFlowError(e, scanId) {
-    hideLoading();
+    hideStages();
     setBusy(false);
     var msg = T.errGeneric;
     var body = e && e.body;
@@ -552,15 +704,29 @@
 
   /* ===== ui state ===== */
   function setBusy(v) { busy = v; }
-  function showLoading(line) {
+
+  function showStages() {
     hideError();
     els["app-input"].hidden = true;
-    if (els.history) els.history.hidden = true;
+    els.history.hidden = true;
     els.report.hidden = true;
     els.loading.hidden = false;
-    els["loading-line"].textContent = line;
   }
-  function hideLoading() { els.loading.hidden = true; els["app-input"].hidden = false; }
+
+  /* Everything before `i` is done, `i` is running, the rest are waiting. */
+  function setStage(i) {
+    els.stageItems.forEach(function (li, n) {
+      li.classList.toggle("is-done", n < i);
+      li.classList.toggle("is-active", n === i);
+    });
+  }
+
+  function hideStages() {
+    els.loading.hidden = true;
+    setStage(-1);
+    els["app-input"].hidden = false;
+    if (historyRows.length) els.history.hidden = false;
+  }
 
   /* ===== small utils ===== */
   function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]; }); }
@@ -575,7 +741,8 @@
   function backToInput() {
     els.report.hidden = true;
     els["app-input"].hidden = false;
-    if (els.history && historyRows.length) els.history.hidden = false;
+    if (historyRows.length) els.history.hidden = false;
+    clearPicked();
     setBusy(false);
     window.scrollTo(0, 0);
     loadHistory(); /* refresh so a just-finished scan shows up */

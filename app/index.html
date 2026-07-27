@@ -18,7 +18,7 @@
     <div class="shell">
       <a class="app-brand" href="/">מחוץ לתבנית</a>
       <div class="app-header-actions">
-        <a class="btn btn-quiet btn-sm app-back" href="/"><span class="back-arrow" aria-hidden="true">←</span> Back to site</a>
+        <a class="app-back" href="/"><span class="back-arrow" aria-hidden="true">←</span> Back to site</a>
         <span class="app-user" id="app-user"></span>
         <button type="button" class="btn btn-quiet btn-sm" id="signout">Sign out</button>
         <a class="small" href="/he/app/" lang="he" dir="rtl">עברית</a>
@@ -27,109 +27,119 @@
   </header>
 
   <main class="app-main" id="app-main">
-    <div class="shell">
+    <div class="work">
 
-      <!-- ===== input selection ===== -->
+      <!-- ===== input: all three paths, all visible ===== -->
       <section id="app-input">
         <div class="app-head">
-          <h1>Where should we start?</h1>
-          <p>Point us at your site's source. We diagnose it against
-             <span class="nums">108 signals</span> across
-             <span class="nums">16 categories</span>.</p>
+          <h1>Where do we start?</h1>
+          <p>Point us at your site's source. We audit it against
+             <span class="nums">108 signals</span> across <span class="nums">16 categories</span>.</p>
         </div>
 
-        <div class="app-card">
-          <div class="tabs" role="tablist" aria-label="Input source">
-            <button class="tab" role="tab" data-tab="oauth" aria-selected="false" aria-controls="panel-oauth">
-              <svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0c4.42 0 8 3.58 8 8a8.01 8.01 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A8.01 8.01 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>
-              Connect GitHub
-            </button>
-            <button class="tab" role="tab" data-tab="zip" aria-selected="false" aria-controls="panel-zip">
-              <svg viewBox="0 0 20 20" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="M10 13V3m0 0L6.5 6.5M10 3l3.5 3.5M3.5 12.5V15a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-2.5"/></svg>
-              Upload ZIP
-            </button>
-            <button class="tab" role="tab" data-tab="url" aria-selected="false" aria-controls="panel-url">
-              <svg viewBox="0 0 20 20" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" d="M8 11a3.5 3.5 0 0 0 5 0l2-2a3.54 3.54 0 0 0-5-5l-1 1M12 9a3.5 3.5 0 0 0-5 0l-2 2a3.54 3.54 0 0 0 5 5l1-1"/></svg>
-              GitHub link
-            </button>
-          </div>
-
-          <!-- OAuth -->
-          <div class="tab-panel" id="panel-oauth" role="tabpanel" hidden>
-            <div id="gh-disconnected" class="connect-card" hidden>
-              <p class="panel-hint">Connect GitHub to read your repositories directly and scan a single one at a time.</p>
-              <button type="button" class="btn btn-primary" id="gh-connect">Connect GitHub</button>
-            </div>
-            <div id="gh-connected" hidden>
-              <div class="repo-search"><input type="text" id="repo-search" placeholder="Search repositories…" dir="ltr" /></div>
-              <ul class="repo-list" id="repo-list"></ul>
-            </div>
-          </div>
-
-          <!-- ZIP -->
-          <div class="tab-panel" id="panel-zip" role="tabpanel" hidden>
-            <p class="panel-hint">.zip only, up to 5MB. node_modules, .git and build folders are skipped automatically.</p>
-            <div class="dropzone" id="dropzone" role="button" tabindex="0" aria-label="Choose a .zip file">
-              <strong>Drop a .zip here</strong>
-              <span class="small">or click to choose a file</span>
-              <span class="small mono ltr" id="zip-chosen"></span>
-              <input type="file" id="zip-input" accept=".zip" />
-            </div>
-            <div class="card-actions">
-              <button type="button" class="btn btn-primary" id="zip-start" disabled>
-                Start diagnosis <span class="dir-arrow" aria-hidden="true">→</span>
-              </button>
-            </div>
-          </div>
-
-          <!-- URL -->
-          <div class="tab-panel" id="panel-url" role="tabpanel" hidden>
-            <label class="field">
-              <span class="field-label">Public GitHub repository</span>
-              <input type="url" id="url-input" placeholder="https://github.com/user/repo" dir="ltr" inputmode="url" />
-              <span class="field-status" id="url-status" aria-live="polite"></span>
-            </label>
-            <div class="card-actions">
-              <button type="button" class="btn btn-primary" id="url-start" disabled>
-                Start diagnosis <span class="dir-arrow" aria-hidden="true">→</span>
-              </button>
-            </div>
-          </div>
-
-          <p class="err-banner" id="err-banner" role="alert" hidden></p>
+        <!-- path 1 — files -->
+        <div class="drop" id="dropzone" role="button" tabindex="0"
+             aria-label="Choose files to audit">
+          <p class="drop-lead">Drop a folder, files, or a .zip here</p>
+          <p class="drop-acts">
+            <button type="button" class="linkbtn" id="pick-files">Choose files</button>
+            <span class="sep" aria-hidden="true">·</span>
+            <button type="button" class="linkbtn" id="pick-dir">Choose folder</button>
+          </p>
+          <p class="drop-note">Up to 5MB. node_modules, .git and build are never scanned.</p>
+          <input type="file" id="files-input" multiple />
+          <input type="file" id="dir-input" webkitdirectory directory />
         </div>
+
+        <div class="picked" id="picked" hidden>
+          <span class="picked-what mono ltr" id="picked-what"></span>
+          <span class="picked-acts">
+            <button type="button" class="linkbtn" id="picked-clear">Clear</button>
+            <button type="button" class="btn btn-primary btn-sm" id="files-start">
+              Start audit <span class="dir-arrow" aria-hidden="true">→</span>
+            </button>
+          </span>
+        </div>
+
+        <p class="or" aria-hidden="true"><span>or</span></p>
+
+        <!-- path 2 — public repo link -->
+        <div class="row">
+          <label class="row-field">
+            <span class="vh">Public GitHub repo URL</span>
+            <input type="url" id="url-input" placeholder="https://github.com/user/repo"
+                   dir="ltr" inputmode="url" autocomplete="off" />
+          </label>
+          <button type="button" class="btn btn-primary btn-sm" id="url-start" disabled>
+            Audit <span class="dir-arrow" aria-hidden="true">→</span>
+          </button>
+        </div>
+        <p class="row-status" id="url-status" aria-live="polite"></p>
+
+        <!-- path 3 — connected GitHub -->
+        <div class="row row-gh">
+          <span class="row-label">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0c4.42 0 8 3.58 8 8a8.01 8.01 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A8.01 8.01 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>
+            <span id="gh-label">Your GitHub repositories</span>
+          </span>
+          <button type="button" class="btn btn-quiet btn-sm" id="gh-pick" hidden>Pick a repo</button>
+          <button type="button" class="btn btn-quiet btn-sm" id="gh-connect" hidden>Connect GitHub</button>
+        </div>
+
+        <p class="err-banner" id="err-banner" role="alert" hidden></p>
       </section>
 
       <!-- ===== recent audits ===== -->
       <section id="history" hidden>
         <div class="history-head">
           <h2>Recent audits</h2>
-          <span class="history-count" id="history-count"></span>
+          <button type="button" class="linkbtn" id="history-all" hidden></button>
         </div>
         <ul class="history-list" id="history-list"></ul>
       </section>
 
       <!-- ===== loading ===== -->
       <section id="loading" hidden>
-        <div class="loading">
-          <span class="spin" aria-hidden="true"></span>
-          <p class="mono-line" id="loading-line"></p>
-        </div>
+        <ol class="stages" id="stages" aria-live="polite">
+          <li data-stage="0"><span class="stage-mark" aria-hidden="true"></span><span class="stage-name">Reading files</span></li>
+          <li data-stage="1"><span class="stage-mark" aria-hidden="true"></span><span class="stage-name">Filtering out irrelevant files</span></li>
+          <li data-stage="2"><span class="stage-mark" aria-hidden="true"></span><span class="stage-name">Uploading for analysis</span></li>
+          <li data-stage="3"><span class="stage-mark" aria-hidden="true"></span><span class="stage-name">Running diagnosis against 108 signals</span></li>
+        </ol>
       </section>
 
-      <!-- ===== detection report ===== -->
-      <section class="report" id="report" hidden aria-live="polite">
-        <button type="button" class="btn btn-quiet btn-sm report-back" id="report-back"><span class="back-arrow" aria-hidden="true">←</span> Back to audits</button>
+      <!-- ===== report ===== -->
+      <section class="report" id="report" hidden>
+        <button type="button" class="linkbtn report-back" id="report-back"><span class="back-arrow" aria-hidden="true">←</span> Back to audits</button>
         <div class="report-summary">
           <span class="score" id="score">0<small>/100</small></span>
           <span class="caption" id="report-caption"></span>
         </div>
         <div id="report-body"></div>
-        <p class="next-stage">Next stage: design direction &amp; fix proposals — coming soon.</p>
+        <p class="next-stage">Next stage: design direction and proposed fixes — coming soon.</p>
       </section>
 
     </div>
   </main>
+
+  <!-- repo picker -->
+  <dialog class="sheet" id="repo-dialog" aria-labelledby="repo-dialog-title">
+    <div class="sheet-head">
+      <h2 id="repo-dialog-title">Pick a repository</h2>
+      <button type="button" class="sheet-close" data-close-dialog aria-label="Close">&times;</button>
+    </div>
+    <input type="text" class="sheet-search" id="repo-search" placeholder="Search…" autocomplete="off" />
+    <ul class="repo-list" id="repo-list"></ul>
+  </dialog>
+
+  <!-- all audits -->
+  <dialog class="sheet" id="history-dialog" aria-labelledby="history-dialog-title">
+    <div class="sheet-head">
+      <h2 id="history-dialog-title">All audits</h2>
+      <button type="button" class="sheet-close" data-close-dialog aria-label="Close">&times;</button>
+    </div>
+    <ul class="history-list" id="history-all-list"></ul>
+  </dialog>
 
   <script src="/js/app.js" defer></script>
 </body>
