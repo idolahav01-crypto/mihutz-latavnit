@@ -224,3 +224,44 @@ Deno.test("parseClaudeJson flags a max_tokens truncation rather than returning j
   }
   assertEquals(threw, "max_tokens_truncated");
 });
+
+Deno.test("fast mode sends the beta header and the top-level speed field", async () => {
+  // Fast mode is the lever for calls bound by output throughput against the
+  // 150s edge-function wall clock. It needs THREE things together: the beta
+  // flag, `speed` as a top-level request field (not inside output_config), and
+  // an unchanged model id — getting any one wrong silently drops the speedup.
+  let captured: { headers: Record<string, string>; body: Record<string, unknown> } | null = null;
+  const ac = new AbortController();
+  const server = Deno.serve({ port: 0, signal: ac.signal, onListen: () => {} }, async (req) => {
+    captured = {
+      headers: Object.fromEntries(req.headers.entries()),
+      body: await req.json(),
+    };
+    return new Response(
+      JSON.stringify({ content: [{ type: "text", text: "{}" }], usage: {} }),
+      { headers: { "content-type": "application/json" } },
+    );
+  });
+  const { port } = server.addr as Deno.NetAddr;
+
+  await callClaude({
+    apiKey: "sk-test", model: "claude-opus-4-8", effort: "medium",
+    maxTokens: 4000, system: "S", userContent: "U", speed: "fast",
+    baseUrl: `http://127.0.0.1:${port}`,
+  });
+  ac.abort();
+  await server.finished;
+
+  assertEquals(captured!.headers["anthropic-beta"], "fast-mode-2026-02-01");
+  assertEquals(captured!.body.speed, "fast");
+  assertEquals(captured!.body.model, "claude-opus-4-8");
+  assertEquals((captured!.body.output_config as Record<string, unknown>).speed, undefined);
+});
+
+Deno.test("no beta header is sent when fast mode is off", () => {
+  const body = buildClaudeRequestBody({
+    apiKey: "k", model: "claude-opus-4-8", effort: "high",
+    maxTokens: 4000, system: "S", userContent: "U",
+  });
+  assertEquals(body.speed, undefined);
+});

@@ -10,6 +10,14 @@
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import signals from "./signals.json" with { type: "json" };
 import { assembleFinalFiles, parseBundle, serializeBundle } from "../_shared/pipeline.ts";
+import { callClaude } from "../_shared/anthropic.ts";
+import { buildEntry, recordStageUsage } from "../_shared/usage.ts";
+
+interface DetectionResult {
+  signals?: Array<Record<string, unknown>>;
+  site_profile?: unknown;
+  meta?: { files_scanned?: number };
+}
 
 // Secrets pasted through a dashboard often carry a trailing newline or space,
 // which makes fetch() reject the header as a non-ByteString. Clean it here.
@@ -265,6 +273,7 @@ Deno.serve(async (req) => {
       throw new Error("invalid_anthropic_api_key_characters");
     }
 
+    const startedAt = Date.now();
     const bundlePath = `${user.id}/${scanId}/bundle.txt`;
     const { data: file, error: dlErr } = await admin.storage
       .from("scans")
@@ -288,47 +297,36 @@ Deno.serve(async (req) => {
 
     const fileCount = (bundle.match(/^=== FILE: /gm) ?? []).length;
 
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "x-api-key": ANTHROPIC_API_KEY,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        model: MODEL,
-        max_tokens: 32000,
-        // effort medium keeps the single call bounded within the function's
-        // wall-clock while staying accurate on deterministic signals.
-        output_config: {
-          effort: "medium",
-          format: { type: "json_schema", schema: SCHEMA },
-        },
-        system: [
-          {
-            type: "text",
-            text: SYSTEM_PROMPT,
-            cache_control: { type: "ephemeral" },
-          },
-        ],
-        messages: [
-          {
-            role: "user",
-            content: `Audit this project. Return JSON per the schema.\n\n${bundle}`,
-          },
-        ],
-      }),
+    // Routed through the shared client so this stage gets the same treatment as
+    // 2/4/5: streaming (a 32k-token non-streaming response is an idle timeout
+    // waiting to happen), an abort budget that reports `stage_timeout_after_Ns`
+    // instead of an opaque 546, and schema sanitising.
+    //
+    // speed:"fast" is the load-bearing part. This call is bound by output
+    // throughput, not input size — it timed out on a TWO-file project — and the
+    // 150s edge-function wall clock is hard (EdgeRuntime.waitUntil does not
+    // extend it). Fast mode runs the same model at up to ~2.5x output tokens/sec
+    // for premium pricing, which is the one lever that buys headroom without
+    // giving up detection quality.
+    const claude = await callClaude({
+      apiKey: ANTHROPIC_API_KEY,
+      model: MODEL,
+      effort: "medium",
+      maxTokens: 32000,
+      speed: "fast",
+      system: SYSTEM_PROMPT,
+      userContent: `Audit this project. Return JSON per the schema.\n\n${bundle}`,
+      schema: SCHEMA,
+      timeoutMs: 130_000,
     });
+    const detection = claude.json as DetectionResult;
+    const usage = claude.usage;
 
-    if (!res.ok) throw new Error(`anthropic ${res.status}: ${await res.text()}`);
-    const data = await res.json();
-    if (data.stop_reason === "refusal") throw new Error("model refused");
-
-    const textBlock = (data.content ?? []).find(
-      (b: { type: string }) => b.type === "text",
+    await recordStageUsage(
+      admin,
+      scanId,
+      buildEntry(mode === "after" ? "detect_after" : "detect", MODEL, usage, Date.now() - startedAt, "medium"),
     );
-    if (!textBlock) throw new Error("no text block in response");
-    const detection = JSON.parse(textBlock.text);
 
     // Recompute the score deterministically from the returned signals.
     const { score, present } = computeScore(detection.signals ?? []);

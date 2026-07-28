@@ -30,6 +30,15 @@
 
 export const ANTHROPIC_VERSION = "2023-06-01";
 
+/**
+ * Fast mode runs the SAME model at up to ~2.5x output tokens/sec, at premium
+ * pricing. It is the direct lever for a call that is bound by output throughput
+ * against a hard wall clock — which is exactly the shape of every stage here,
+ * sitting inside Supabase's 150s edge-function limit. Requires the beta
+ * endpoint + flag + a top-level `speed` field. First-party API only.
+ */
+export const FAST_MODE_BETA = "fast-mode-2026-02-01";
+
 /** Effort levels accepted by `output_config.effort` on Opus 4.7+ / Sonnet 5. */
 export type Effort = "low" | "medium" | "high" | "xhigh" | "max";
 
@@ -67,6 +76,12 @@ export interface ClaudeCallOptions {
    * Turn it on per-stage where the quality is worth the latency.
    */
   thinking?: boolean;
+  /**
+   * "fast" trades money for output speed on Opus 4.8. Use it where the call
+   * would otherwise risk the edge-function wall clock; leave it off where the
+   * call is comfortably inside budget.
+   */
+  speed?: "fast";
   /** Wall-clock budget for the whole call. Defaults to DEFAULT_TIMEOUT_MS. */
   timeoutMs?: number;
   /** Force streaming on/off. Defaults to `maxTokens > STREAM_THRESHOLD_TOKENS`. */
@@ -156,6 +171,7 @@ export function buildClaudeRequestBody(opts: ClaudeCallOptions): Record<string, 
   body.output_config = outputConfig;
 
   if (opts.thinking) body.thinking = { type: "adaptive" };
+  if (opts.speed) body.speed = opts.speed;
   if (shouldStream(opts)) body.stream = true;
   return body;
 }
@@ -260,6 +276,8 @@ export async function callClaude(opts: ClaudeCallOptions): Promise<ClaudeResult>
         "x-api-key": opts.apiKey,
         "anthropic-version": ANTHROPIC_VERSION,
         "content-type": "application/json",
+        // Fast mode is a beta and must be requested on the beta endpoint.
+        ...(opts.speed === "fast" ? { "anthropic-beta": FAST_MODE_BETA } : {}),
       },
       body: JSON.stringify(buildClaudeRequestBody(opts)),
     });
