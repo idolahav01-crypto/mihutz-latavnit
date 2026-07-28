@@ -325,7 +325,7 @@ Deno.serve(async (req) => {
     await recordStageUsage(
       admin,
       scanId,
-      buildEntry(mode === "after" ? "detect_after" : "detect", MODEL, usage, Date.now() - startedAt, "medium"),
+      buildEntry(mode === "after" ? "detect_after" : "detect", MODEL, usage, Date.now() - startedAt, "medium", "fast"),
     );
 
     // Recompute the score deterministically from the returned signals.

@@ -95,6 +95,8 @@ export interface ClaudeUsage {
   output_tokens?: number;
   cache_read_input_tokens?: number;
   cache_creation_input_tokens?: number;
+  /** Which speed tier actually served the request — drives which rates apply. */
+  speed?: string;
 }
 
 export interface ClaudeResult {

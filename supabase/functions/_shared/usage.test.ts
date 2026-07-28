@@ -67,3 +67,35 @@ Deno.test("totalCost sums stage entries for the per-scan number", () => {
   ];
   assertEquals(totalCost(entries), 7.5); // $5.00 + $2.50
 });
+
+Deno.test("costUsd bills fast mode at its own rates, not standard", () => {
+  // Opus 4.8 fast mode is $10/$50 per MTok — exactly 2x standard. Pricing a
+  // fast-mode call at standard rates would under-report every detect run by
+  // half, which is worse than not tracking cost at all.
+  assertEquals(costUsd("claude-opus-4-8", { input_tokens: 1_000_000 }, "fast"), 10);
+  assertEquals(costUsd("claude-opus-4-8", { output_tokens: 1_000_000 }, "fast"), 50);
+  // cache multipliers stack on top of the FAST base, not the standard one
+  assertEquals(
+    costUsd("claude-opus-4-8", { cache_read_input_tokens: 1_000_000 }, "fast"),
+    1,
+  );
+});
+
+Deno.test("costUsd trusts what the API says it billed over what we requested", () => {
+  // A request can fall back to standard speed; the cost must follow reality.
+  assertEquals(
+    costUsd("claude-opus-4-8", { input_tokens: 1_000_000, speed: "standard" }, "fast"),
+    5,
+  );
+});
+
+Deno.test("costUsd falls back to standard rates for a model with no fast tier", () => {
+  // Better a correct standard price than a silent 0.
+  assertEquals(costUsd("claude-sonnet-5", { input_tokens: 1_000_000 }, "fast"), 3);
+});
+
+Deno.test("buildEntry records the speed tier that was billed", () => {
+  const e = buildEntry("detect", "claude-opus-4-8", { output_tokens: 1_000_000 }, 10, "medium", "fast");
+  assertEquals(e.speed, "fast");
+  assertEquals(e.cost_usd, 50);
+});

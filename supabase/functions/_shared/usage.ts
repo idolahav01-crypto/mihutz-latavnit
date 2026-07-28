@@ -21,6 +21,17 @@ export const PRICING: Record<string, { input: number; output: number }> = {
   "claude-haiku-4-5": { input: 1, output: 5 },
 };
 
+/**
+ * Fast mode is billed at its own rates — exactly 2x standard on Opus 4.8
+ * ($10/$50 per MTok vs $5/$25) — and the cache multipliers stack on top of
+ * THESE numbers, not the standard ones. detect runs in fast mode to fit the
+ * edge-function wall clock, so pricing it at standard rates would under-report
+ * every scan by half and make the whole cost metric misleading.
+ */
+export const FAST_PRICING: Record<string, { input: number; output: number }> = {
+  "claude-opus-4-8": { input: 10, output: 50 },
+};
+
 const CACHE_READ_MULTIPLIER = 0.1;
 const CACHE_WRITE_MULTIPLIER = 1.25;
 
@@ -28,6 +39,8 @@ export interface StageUsageEntry {
   stage: string;
   model: string;
   effort?: string;
+  /** "fast" when the call was billed at fast-mode rates. */
+  speed?: string;
   input_tokens: number;
   output_tokens: number;
   cache_read_input_tokens: number;
@@ -42,8 +55,11 @@ export interface StageUsageEntry {
  * cached portion is billed separately and much cheaper — so all three input
  * buckets are priced independently rather than summed.
  */
-export function costUsd(model: string, usage: ClaudeUsage): number {
-  const rate = PRICING[model];
+export function costUsd(model: string, usage: ClaudeUsage, speed?: string): number {
+  const isFast = (usage.speed ?? speed) === "fast";
+  // Fall back to standard rates if a model has no published fast tier, rather
+  // than silently pricing at 0.
+  const rate = (isFast ? FAST_PRICING[model] : undefined) ?? PRICING[model];
   if (!rate) return 0;
   const perM = (n: number, price: number) => ((n ?? 0) / 1_000_000) * price;
   return (
@@ -60,16 +76,21 @@ export function buildEntry(
   usage: ClaudeUsage,
   durationMs: number,
   effort?: string,
+  speed?: string,
 ): StageUsageEntry {
+  // Prefer what the API says it actually billed over what we asked for — a
+  // request can fall back to standard speed, and the cost must follow reality.
+  const billedSpeed = usage.speed ?? speed;
   return {
     stage,
     model,
     effort,
+    speed: billedSpeed,
     input_tokens: usage.input_tokens ?? 0,
     output_tokens: usage.output_tokens ?? 0,
     cache_read_input_tokens: usage.cache_read_input_tokens ?? 0,
     cache_creation_input_tokens: usage.cache_creation_input_tokens ?? 0,
-    cost_usd: Number(costUsd(model, usage).toFixed(6)),
+    cost_usd: Number(costUsd(model, usage, billedSpeed).toFixed(6)),
     duration_ms: durationMs,
     at: new Date().toISOString(),
   };
