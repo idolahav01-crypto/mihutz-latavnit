@@ -604,3 +604,34 @@ export function reconcileApply(
 
   return { files: out, reconciled, falseClaims };
 }
+
+
+// ---------- stage 1 multi-pass merge ----------
+
+export interface DetectionResult {
+  signals?: Array<Record<string, unknown>>;
+  site_profile?: unknown;
+  meta?: { files_scanned?: number; excluded_files?: string[] };
+}
+
+/**
+ * Merge a pass's signals into whatever earlier passes already recorded. Keyed
+ * by signal id so a re-run of the same pass overwrites rather than duplicates.
+ */
+export function mergeDetection(
+  prior: DetectionResult,
+  incoming: DetectionResult,
+): DetectionResult {
+  const byId = new Map<unknown, Record<string, unknown>>();
+  for (const s of prior.signals ?? []) byId.set(s.id, s);
+  for (const s of incoming.signals ?? []) byId.set(s.id, s);
+  return {
+    // site_profile and meta only ever come from the first pass.
+    site_profile: prior.site_profile ?? incoming.site_profile,
+    meta: prior.meta ?? incoming.meta,
+    signals: [...byId.values()].sort(
+      (a, b) => Number(a.id ?? 0) - Number(b.id ?? 0),
+    ),
+  };
+}
+

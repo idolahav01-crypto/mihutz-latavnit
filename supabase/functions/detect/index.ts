@@ -9,15 +9,16 @@
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import signals from "./signals.json" with { type: "json" };
-import { assembleFinalFiles, parseBundle, serializeBundle } from "../_shared/pipeline.ts";
+import {
+  assembleFinalFiles,
+  type DetectionResult,
+  mergeDetection,
+  parseBundle,
+  serializeBundle,
+} from "../_shared/pipeline.ts";
 import { callClaude } from "../_shared/anthropic.ts";
 import { buildEntry, recordStageUsage } from "../_shared/usage.ts";
 
-interface DetectionResult {
-  signals?: Array<Record<string, unknown>>;
-  site_profile?: unknown;
-  meta?: { files_scanned?: number };
-}
 
 // Secrets pasted through a dashboard often carry a trailing newline or space,
 // which makes fetch() reject the header as a non-ByteString. Clean it here.
@@ -205,6 +206,30 @@ const SCHEMA = {
 };
 
 // Deterministic recompute — never trust the model's own arithmetic.
+/**
+ * Schema for passes 2..N. site_profile / meta / score are produced once, on the
+ * first pass, so later passes return signals only — that is the whole point of
+ * splitting, and asking for the profile again would waste the tokens we are
+ * trying to save.
+ */
+const SIGNALS_ONLY_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: { signals: SCHEMA.properties.signals },
+  required: ["signals"],
+};
+
+/**
+ * How many passes to split the 108-signal audit across.
+ *
+ * Measured: wall-clock scales with the number of signals the model reports as
+ * PRESENT (output tokens), not with input size — a 322KB bundle with 4 present
+ * signals finished in 24s, while a 10.5KB bundle timed out past 150s. That
+ * makes the failure worst on the most heavily-templated sites, which are
+ * exactly this product's target. Splitting bounds the output per request.
+ */
+const DEFAULT_PARTS = 3;
+
 function computeScore(sigs: Array<Record<string, unknown>>): {
   score: number;
   present: number;
@@ -244,10 +269,15 @@ Deno.serve(async (req) => {
   // Everything about the audit is identical — same prompt, same schema, same
   // scoring — which is the only way the two numbers are comparable.
   let mode: "before" | "after" = "before";
+  // The audit is split across `parts` sequential requests; see DEFAULT_PARTS.
+  let part = 1;
+  let parts = DEFAULT_PARTS;
   try {
     const body = await req.json();
     scanId = body.scan_id;
     if (body.mode === "after") mode = "after";
+    if (Number.isInteger(body.parts) && body.parts >= 1) parts = body.parts;
+    if (Number.isInteger(body.part) && body.part >= 1) part = Math.min(body.part, parts);
   } catch {
     return json({ error: "invalid body" }, 400);
   }
@@ -255,14 +285,14 @@ Deno.serve(async (req) => {
 
   const { data: scan, error: scanErr } = await admin
     .from("scans")
-    .select("id, user_id")
+    .select("id, user_id, detection")
     .eq("id", scanId)
     .single();
   if (scanErr || !scan || scan.user_id !== user.id) {
     return json({ error: "scan not found" }, 404);
   }
 
-  if (mode === "before") {
+  if (mode === "before" && part === 1) {
     await admin.from("scans").update({ status: "detecting" }).eq("id", scanId);
   }
 
@@ -297,36 +327,70 @@ Deno.serve(async (req) => {
 
     const fileCount = (bundle.match(/^=== FILE: /gm) ?? []).length;
 
+    // Which signals this pass is responsible for. The SYSTEM prompt still
+    // carries all 108 (identical bytes every pass, so it stays prompt-cached);
+    // only the user turn narrows the scope.
+    const perPart = Math.ceil(signals.length / parts);
+    const slice = signals.slice((part - 1) * perPart, part * perPart);
+    const idList = slice.map((sg) => `#${sg.id}`).join(", ");
+
     // Routed through the shared client so this stage gets the same treatment as
     // 2/4/5: streaming (a 32k-token non-streaming response is an idle timeout
     // waiting to happen), an abort budget that reports `stage_timeout_after_Ns`
     // instead of an opaque 546, and schema sanitising.
     //
-    // speed:"fast" is the load-bearing part. This call is bound by output
-    // throughput, not input size — it timed out on a TWO-file project — and the
-    // 150s edge-function wall clock is hard (EdgeRuntime.waitUntil does not
-    // extend it). Fast mode runs the same model at up to ~2.5x output tokens/sec
-    // for premium pricing, which is the one lever that buys headroom without
-    // giving up detection quality.
+    // NOT fast mode: this org's fast-mode quota is 0 tokens/min, so speed:"fast"
+    // returns a hard 429. Splitting the work is what buys the headroom instead.
     const claude = await callClaude({
       apiKey: ANTHROPIC_API_KEY,
       model: MODEL,
       effort: "medium",
       maxTokens: 32000,
-      speed: "fast",
       system: SYSTEM_PROMPT,
-      userContent: `Audit this project. Return JSON per the schema.\n\n${bundle}`,
-      schema: SCHEMA,
+      userContent: `Audit this project. Return JSON per the schema.\n\n` +
+        `THIS PASS (${part} of ${parts}): evaluate ONLY these signals and return ` +
+        `no others: ${idList}\n` +
+        (part === 1
+          ? `Also return site_profile and meta on this pass.\n`
+          : `Do NOT return site_profile, meta, or scores on this pass.\n`) +
+        `\n${bundle}`,
+      schema: part === 1 ? SCHEMA : SIGNALS_ONLY_SCHEMA,
       timeoutMs: 130_000,
     });
-    const detection = claude.json as DetectionResult;
+    const partDetection = claude.json as DetectionResult;
     const usage = claude.usage;
+
+    // Fold this pass into whatever the earlier passes recorded.
+    const prior = (part === 1 ? {} : (scan.detection ?? {})) as DetectionResult;
+    const detection = mergeDetection(prior, partDetection);
 
     await recordStageUsage(
       admin,
       scanId,
-      buildEntry(mode === "after" ? "detect_after" : "detect", MODEL, usage, Date.now() - startedAt, "medium", "fast"),
+      buildEntry(
+        `${mode === "after" ? "detect_after" : "detect"}_part${part}`,
+        MODEL,
+        usage,
+        Date.now() - startedAt,
+        "medium",
+      ),
     );
+
+    // Intermediate pass: persist the partial audit and hand the baton back to
+    // the client, which drives the next pass. Status stays "detecting" so a
+    // half-finished scan can never look complete.
+    if (part < parts) {
+      await admin.from("scans").update({ detection }).eq("id", scanId);
+      return json({
+        ok: true,
+        scan_id: scanId,
+        mode,
+        part,
+        parts,
+        done: false,
+        signals_so_far: (detection.signals ?? []).length,
+      });
+    }
 
     // Recompute the score deterministically from the returned signals.
     const { score, present } = computeScore(detection.signals ?? []);
@@ -354,6 +418,9 @@ Deno.serve(async (req) => {
         ok: true,
         scan_id: scanId,
         mode,
+        part,
+        parts,
+        done: true,
         before: {
           ai_fingerprint_score: before?.ai_fingerprint_score ?? null,
           present_count: before?.present_count ?? null,
@@ -382,6 +449,9 @@ Deno.serve(async (req) => {
       ok: true,
       scan_id: scanId,
       mode,
+      part,
+      parts,
+      done: true,
       ai_fingerprint_score: score,
       present_count: present,
       files_scanned: detection.meta?.files_scanned ?? fileCount,
@@ -395,6 +465,6 @@ Deno.serve(async (req) => {
         .update({ status: "error", error: message })
         .eq("id", scanId);
     }
-    return json({ error: message, mode }, 500);
+    return json({ error: message, mode, part, parts }, 500);
   }
 });

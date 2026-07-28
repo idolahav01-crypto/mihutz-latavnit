@@ -189,3 +189,51 @@ Deno.test("reconcileApply preserves unrelated model edits while fixing the misse
   assertEquals(r.files.get("b.css"), ".btn { color: #b91c1c; }");
   assert(r.reconciled.every((x) => x.applied));
 });
+
+// ---------- mergeDetection: stage 1 multi-pass ----------
+
+import { type DetectionResult, mergeDetection } from "./pipeline.ts";
+
+Deno.test("mergeDetection accumulates signals across passes", () => {
+  const p1: DetectionResult = {
+    signals: [{ id: 1, present: true }, { id: 2, present: false }],
+    site_profile: { purpose: "bookshop" },
+    meta: { files_scanned: 2 },
+  };
+  const p2: DetectionResult = { signals: [{ id: 40, present: true }] };
+  const out = mergeDetection(p1, p2);
+  assertEquals(out.signals!.map((s) => s.id), [1, 2, 40]);
+  // site_profile and meta are produced once, on pass 1, and must survive
+  assertEquals(out.site_profile, { purpose: "bookshop" });
+  assertEquals(out.meta, { files_scanned: 2 });
+});
+
+Deno.test("mergeDetection sorts by signal id so the report order is stable", () => {
+  const out = mergeDetection(
+    { signals: [{ id: 40 }, { id: 9 }] },
+    { signals: [{ id: 20 }] },
+  );
+  assertEquals(out.signals!.map((s) => s.id), [9, 20, 40]);
+});
+
+Deno.test("mergeDetection overwrites rather than duplicates on a re-run of a pass", () => {
+  // A retried pass must not leave two entries for the same signal, which would
+  // double-count it in the deterministic score.
+  const out = mergeDetection(
+    { signals: [{ id: 9, present: false }] },
+    { signals: [{ id: 9, present: true }] },
+  );
+  assertEquals(out.signals!.length, 1);
+  assertEquals(out.signals![0].present, true);
+});
+
+Deno.test("mergeDetection takes site_profile from a later pass if pass 1 lacked it", () => {
+  const out = mergeDetection({ signals: [] }, { signals: [], site_profile: { purpose: "x" } });
+  assertEquals(out.site_profile, { purpose: "x" });
+});
+
+Deno.test("mergeDetection on an empty prior returns the incoming pass unchanged", () => {
+  const out = mergeDetection({}, { signals: [{ id: 3 }], site_profile: { a: 1 } });
+  assertEquals(out.signals!.map((s) => s.id), [3]);
+  assertEquals(out.site_profile, { a: 1 });
+});

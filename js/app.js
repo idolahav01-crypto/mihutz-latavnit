@@ -575,11 +575,36 @@
       .then(function (r) { if (r.error) throw r.error; });
   }
 
+  /* The 108-signal audit is split across sequential passes. Wall-clock scales
+     with how many signals come back PRESENT, not with project size, so a
+     heavily-templated site — the exact thing this product exists for — blows
+     the 150s edge-function limit in a single call. Each pass audits a slice and
+     the server merges; we drive them one at a time and only render at the end. */
   function runDetect(scanId) {
     setStage(3);
-    return invokeFn("detect", { scan_id: scanId }).then(function () {
+    var PARTS = 3;
+
+    function pass(n) {
+      return invokeFn("detect", { scan_id: scanId, part: n, parts: PARTS })
+        .then(function (data) {
+          if (data && data.done) return data;
+          setDetectProgress(n, PARTS);
+          return pass(n + 1);
+        });
+    }
+
+    return pass(1).then(function () {
       return loadReport(scanId);
     });
+  }
+
+  /* Keeps the user oriented across a multi-pass audit that can take a while.
+     Rewrites the diagnosis step's own label rather than adding new chrome. */
+  function setDetectProgress(done, total) {
+    var li = els.stageItems && els.stageItems[3];
+    if (!li) return;
+    var name = li.querySelector(".stage-name");
+    if (name) name.textContent = P.detectPass(done, total);
   }
 
   /* Invoke an edge function and, on failure, surface the server's own
@@ -670,6 +695,7 @@
     qaPass: "עבר בקרת איכות", qaFail: "בקרת האיכות מצאה בעיות — מריץ סבב תיקון…",
     needsHuman: "חלק מהתיקונים דורשים בדיקה ידנית.",
     applied: function (a, t) { return "הוחלו " + a + " מתוך " + t + " תיקונים"; },
+    detectPass: function (d, t) { return "סורק — מעבר " + d + " מתוך " + t; },
     noFixes: "אין תיקונים אוטומטיים ישימים בסריקה הזו.",
     err: "משהו השתבש בשלב התיקון. נסו שוב.", strategic: "המלצה אסטרטגית (דורשת אדם)",
     palette: "פלטה", typography: "טיפוגרפיה", layout: "עיקרון פריסה", personality: "אופי"
@@ -680,6 +706,7 @@
     qaPass: "Passed QA", qaFail: "QA found issues — running a fix round…",
     needsHuman: "Some fixes need manual review.",
     applied: function (a, t) { return "Applied " + a + " of " + t + " fixes"; },
+    detectPass: function (d, t) { return "Scanning — pass " + d + " of " + t; },
     noFixes: "No auto-applicable fixes in this scan.",
     err: "Something went wrong during the fix stage. Try again.", strategic: "Strategic recommendation (needs a human)",
     palette: "Palette", typography: "Typography", layout: "Layout principle", personality: "Personality"
