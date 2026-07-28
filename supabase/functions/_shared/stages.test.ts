@@ -47,7 +47,7 @@ const DETECTION = {
 
 // ---------- STAGE 2 ----------
 
-Deno.test("runStage2: correct model + effort/thinking (NOT temperature), cached system prompt", async () => {
+Deno.test("runStage2: correct model + effort, no temperature, cached system prompt", async () => {
   const { impl, calls } = mockCall({ design_direction: { palette: [] }, proposals: [] });
   await runStage2({
     apiKey: "k", siteProfile: { language_direction: "rtl" }, detection: DETECTION,
@@ -57,7 +57,10 @@ Deno.test("runStage2: correct model + effort/thinking (NOT temperature), cached 
   assertEquals(calls[0].model, MODEL);
   // temperature is a 400 on opus-4-8; effort replaces it.
   assertEquals(calls[0].effort, "high");
-  assertEquals(calls[0].thinking, true);
+  // Thinking is deliberately OFF here: stage 2 is output-bound against the
+  // 150s edge-function limit, and adaptive thinking spends that budget before
+  // a single proposal is emitted.
+  assertEquals(calls[0].thinking, undefined);
   assertEquals(calls[0].system, STAGE2_SYSTEM);
 
   // cache_control must sit on the system array, not the user message
@@ -139,10 +142,10 @@ Deno.test("runStage5: effort high, sends diffs + signals, NO prior rationale", a
   assertFalse(uc.includes("purple gradient")); // stage-1 explanation not forwarded
 });
 
-Deno.test("stage 2 streams: it sits on the token threshold but enables thinking", () => {
-  // Regression guard. With thinking on and 16000 max_tokens, the non-streaming
-  // path would wait through the whole thinking phase with no bytes on the wire
-  // and risk an idle timeout inside the ~150s edge-function budget.
+Deno.test("stage 2 streams even though it sits exactly on the token threshold", () => {
+  // Regression guard. 16000 max_tokens is ON the threshold, not above it, so
+  // without an explicit stream:true this stage would take the non-streaming
+  // path and risk an idle timeout inside the ~150s edge-function budget.
   const { impl, calls } = mockCall({ design_direction: {}, proposals: [] });
   return runStage2({
     apiKey: "k", siteProfile: {}, detection: DETECTION,
@@ -150,6 +153,67 @@ Deno.test("stage 2 streams: it sits on the token threshold but enables thinking"
   }).then(() => {
     const body = buildClaudeRequestBody(calls[0]) as Record<string, unknown>;
     assertEquals(body.stream, true);
-    assertEquals((body.thinking as { type: string }).type, "adaptive");
+    assertEquals(body.thinking, undefined);
   });
+});
+
+// ---------- stage 2 multi-pass ----------
+
+const MANY = {
+  signals: Array.from({ length: 9 }, (_, i) => ({
+    id: i + 1, name: `S${i + 1}`, present: true, applicable: true, weight: "low",
+    evidence: [{ file: "css/app.css", snippet: "x" }],
+  })),
+};
+
+Deno.test("runStage2 sends only its own slice of the present signals", async () => {
+  const { impl, calls } = mockCall({ design_direction: {}, proposals: [] });
+  await runStage2({
+    apiKey: "k", siteProfile: {}, detection: MANY,
+    files: parseBundle(BUNDLE), signals: SIGNALS, callImpl: impl,
+    part: 2, parts: 3,
+  });
+  const uc = calls[0].userContent;
+  // 9 present signals over 3 passes -> pass 2 owns #4..#6 only.
+  assert(uc.includes("#4 | S4") && uc.includes("#6 | S6"));
+  assertFalse(uc.includes("#1 | S1"));
+  assertFalse(uc.includes("#7 | S7"));
+});
+
+Deno.test("runStage2 pass 1 covers the first slice and gets no prior direction", async () => {
+  const { impl, calls } = mockCall({ design_direction: {}, proposals: [] });
+  await runStage2({
+    apiKey: "k", siteProfile: {}, detection: MANY,
+    files: parseBundle(BUNDLE), signals: SIGNALS, callImpl: impl,
+    part: 1, parts: 3,
+  });
+  const uc = calls[0].userContent;
+  assert(uc.includes("#1 | S1"));
+  assertFalse(uc.includes("<approved_design_direction>"));
+});
+
+Deno.test("runStage2 hands later passes the approved direction so proposals stay coherent", async () => {
+  // Without this, each batch would invent its own palette and typography and
+  // the "one coherent design direction" guarantee would quietly break.
+  const { impl, calls } = mockCall({ design_direction: {}, proposals: [] });
+  await runStage2({
+    apiKey: "k", siteProfile: {}, detection: MANY,
+    files: parseBundle(BUNDLE), signals: SIGNALS, callImpl: impl,
+    part: 3, parts: 3,
+    priorDirection: { brand_palette: [{ token: "--color-primary", hex: "#b91c1c" }] },
+  });
+  const uc = calls[0].userContent;
+  assert(uc.includes("<approved_design_direction>"));
+  assert(uc.includes("#b91c1c"));
+  assert(uc.includes("do NOT invent a new"));
+});
+
+Deno.test("runStage2 unsplit (parts=1) still sees every present signal", async () => {
+  const { impl, calls } = mockCall({ design_direction: {}, proposals: [] });
+  await runStage2({
+    apiKey: "k", siteProfile: {}, detection: MANY,
+    files: parseBundle(BUNDLE), signals: SIGNALS, callImpl: impl,
+  });
+  const uc = calls[0].userContent;
+  assert(uc.includes("#1 | S1") && uc.includes("#9 | S9"));
 });

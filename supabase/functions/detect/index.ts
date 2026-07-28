@@ -26,7 +26,12 @@ const ANTHROPIC_API_KEY = (Deno.env.get("ANTHROPIC_API_KEY") ?? "").trim();
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-const MODEL = "claude-opus-4-8";
+// Sonnet 5 is the right tier for diagnosis: it is a fixed-rubric classification
+// pass against a documented signal list, not open-ended design work. It is also
+// ~2.5x cheaper than Opus ($2/$10 vs $5/$25 per MTok at current rates) and
+// faster, which matters directly here because every pass races a 150s
+// edge-function wall clock.
+const MODEL = "claude-sonnet-5";
 const SIGNAL_COUNT = (signals as unknown[]).length; // 108
 
 const cors = {
@@ -207,19 +212,6 @@ const SCHEMA = {
 
 // Deterministic recompute — never trust the model's own arithmetic.
 /**
- * Schema for passes 2..N. site_profile / meta / score are produced once, on the
- * first pass, so later passes return signals only — that is the whole point of
- * splitting, and asking for the profile again would waste the tokens we are
- * trying to save.
- */
-const SIGNALS_ONLY_SCHEMA = {
-  type: "object",
-  additionalProperties: false,
-  properties: { signals: SCHEMA.properties.signals },
-  required: ["signals"],
-};
-
-/**
  * How many passes to split the 108-signal audit across.
  *
  * Measured: wall-clock scales with the number of signals the model reports as
@@ -354,7 +346,7 @@ Deno.serve(async (req) => {
           ? `Also return site_profile and meta on this pass.\n`
           : `Do NOT return site_profile, meta, or scores on this pass.\n`) +
         `\n${bundle}`,
-      schema: part === 1 ? SCHEMA : SIGNALS_ONLY_SCHEMA,
+      schema: SCHEMA,
       timeoutMs: 130_000,
     });
     const partDetection = claude.json as DetectionResult;

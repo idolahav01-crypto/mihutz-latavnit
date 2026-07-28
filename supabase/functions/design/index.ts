@@ -24,8 +24,14 @@ Deno.serve(async (req) => {
   if (!user) return json({ error: "unauthorized" }, 401);
 
   let scanId: string;
+  // Split across sequential passes, like stage 1 — see runStage2's `part` doc.
+  let part = 1;
+  let parts = 3;
   try {
-    ({ scan_id: scanId } = await req.json());
+    const body = await req.json();
+    scanId = body.scan_id;
+    if (Number.isInteger(body.parts) && body.parts >= 1) parts = body.parts;
+    if (Number.isInteger(body.part) && body.part >= 1) part = Math.min(body.part, parts);
   } catch {
     return json({ error: "invalid body" }, 400);
   }
@@ -33,7 +39,7 @@ Deno.serve(async (req) => {
 
   const { data: scan, error: scanErr } = await admin
     .from("scans")
-    .select("id, user_id, detection, site_profile")
+    .select("id, user_id, detection, site_profile, design_direction, proposals")
     .eq("id", scanId)
     .single();
   if (scanErr || !scan || scan.user_id !== user.id) {
@@ -60,28 +66,46 @@ Deno.serve(async (req) => {
       detection: scan.detection,
       files,
       signals: signals as Signal[],
+      part,
+      parts,
+      priorDirection: part > 1 ? scan.design_direction : undefined,
     });
     await recordStageUsage(
       admin,
       scanId,
-      buildEntry("design", MODEL, result.usage, Date.now() - startedAt, "high"),
+      buildEntry(`design_part${part}`, MODEL, result.usage, Date.now() - startedAt, "high"),
     );
+
+    // Merge this pass's proposals into the earlier ones, keyed by signal_id so
+    // a retried pass overwrites instead of duplicating a fix.
+    const prior = part === 1 ? [] : ((scan.proposals ?? []) as typeof result.proposals);
+    const byId = new Map(prior.map((p) => [p.signal_id, p]));
+    for (const p of result.proposals) byId.set(p.signal_id, p);
+    const merged = [...byId.values()].sort((a, b) => a.signal_id - b.signal_id);
+
+    const direction = part === 1 ? result.design_direction : scan.design_direction;
+    const done = part >= parts;
 
     await admin
       .from("scans")
       .update({
-        design_direction: result.design_direction,
-        proposals: result.proposals,
-        pipeline_status: "proposed",
+        design_direction: direction,
+        proposals: merged,
+        // Only claim "proposed" once every pass has landed; a half-built
+        // proposal set must never look ready to apply.
+        pipeline_status: done ? "proposed" : null,
       })
       .eq("id", scanId);
 
-    const applicable = result.proposals.filter((p) => p.applicable_edit).length;
+    const applicable = merged.filter((p) => p.applicable_edit).length;
     return json({
       ok: true,
       scan_id: scanId,
-      design_direction: result.design_direction,
-      proposals_count: result.proposals.length,
+      part,
+      parts,
+      done,
+      design_direction: direction,
+      proposals_count: merged.length,
       applicable_count: applicable,
       usage: result.usage,
     });

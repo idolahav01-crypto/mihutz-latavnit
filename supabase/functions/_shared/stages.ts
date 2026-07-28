@@ -197,18 +197,54 @@ export async function runStage2(opts: CommonOpts & {
   detection: { signals?: DetectedSignal[] };
   files: Map<string, string>;
   signals: Signal[];
+  /**
+   * Stage 2 is split the same way stage 1 is, and for the same measured reason:
+   * output volume, not input size, is what races the 150s edge-function limit.
+   * This stage emits a full old_code/new_code pair per PRESENT signal, so a
+   * heavily-templated site (25 present signals on the first real run) produces
+   * several times detect's output and blew the budget outright.
+   *
+   * Pass 1 sets the design direction; later passes are handed that same
+   * direction so every proposal still obeys one coherent design rather than
+   * each batch inventing its own.
+   */
+  part?: number;
+  parts?: number;
+  priorDirection?: unknown;
 }): Promise<Stage2Result> {
-  const present = presentSignals(opts.detection);
+  const part = opts.part ?? 1;
+  const parts = opts.parts ?? 1;
+  const allPresent = presentSignals(opts.detection);
+  const perPart = Math.ceil(allPresent.length / parts);
+  const present = parts > 1
+    ? allPresent.slice((part - 1) * perPart, part * perPart)
+    : allPresent;
   const regions = extractCodeRegions(opts.files, present);
   const autoFixableById = new Map(opts.signals.map((s) => [s.id, s.auto_fixable]));
-  const userContent = buildStage2UserContent(opts.siteProfile, present, regions, autoFixableById);
+  let userContent = buildStage2UserContent(opts.siteProfile, present, regions, autoFixableById);
+  if (part > 1 && opts.priorDirection) {
+    // Later passes do not re-derive the direction; they obey the approved one.
+    userContent = `<approved_design_direction>\n` +
+      `${JSON.stringify(opts.priorDirection, null, 2)}\n` +
+      `</approved_design_direction>\n\n` +
+      `This is pass ${part} of ${parts}. The design direction above is already ` +
+      `approved — reuse it verbatim as design_direction and do NOT invent a new ` +
+      `one. Propose fixes ONLY for the signals listed below.\n\n${userContent}`;
+  }
 
   const call = opts.callImpl ?? callClaude;
   const res = await call({
     apiKey: opts.apiKey,
     model: opts.model ?? MODEL,
     effort: opts.effort ?? "high",
-    thinking: true,
+    // Thinking is off: this stage is output-bound against a hard wall clock,
+    // and the prompt is already highly prescriptive about the process to
+    // follow. The latency it costs is better spent emitting proposals.
+    //
+    // Streaming is forced rather than left to the token threshold: 16000 sits
+    // exactly ON it, and a 16k-token response on a non-streaming connection is
+    // an idle timeout waiting to happen even without thinking.
+    stream: true,
     maxTokens: 16000,
     system: STAGE2_SYSTEM,
     schema: DESIGN_SCHEMA,

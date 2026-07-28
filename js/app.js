@@ -598,6 +598,22 @@
     });
   }
 
+  /* Stage 2 is split for the same reason stage 1 is: it emits a full code pair
+     per present signal, so a template-heavy site outruns the 150s function
+     limit in one call. Pass 1 sets the design direction; later passes reuse it. */
+  function designPass(n, total) {
+    return invokeFn("design", { scan_id: currentScanId, part: n, parts: total })
+      .then(function (data) {
+        if (data && data.done) return data;
+        setFixProgress(n, total);
+        return designPass(n + 1, total);
+      });
+  }
+
+  function setFixProgress(done, total) {
+    if (els["fix-hint"]) els["fix-hint"].textContent = P.designPass(done, total);
+  }
+
   /* Keeps the user oriented across a multi-pass audit that can take a while.
      Rewrites the diagnosis step's own label rather than adding new chrome. */
   function setDetectProgress(done, total) {
@@ -696,6 +712,7 @@
     needsHuman: "חלק מהתיקונים דורשים בדיקה ידנית.",
     applied: function (a, t) { return "הוחלו " + a + " מתוך " + t + " תיקונים"; },
     detectPass: function (d, t) { return "סורק — מעבר " + d + " מתוך " + t; },
+    designPass: function (d, t) { return "מגבש הצעות — מעבר " + d + " מתוך " + t; },
     noFixes: "אין תיקונים אוטומטיים ישימים בסריקה הזו.",
     err: "משהו השתבש בשלב התיקון. נסו שוב.", strategic: "המלצה אסטרטגית (דורשת אדם)",
     palette: "פלטה", typography: "טיפוגרפיה", layout: "עיקרון פריסה", personality: "אופי"
@@ -707,6 +724,7 @@
     needsHuman: "Some fixes need manual review.",
     applied: function (a, t) { return "Applied " + a + " of " + t + " fixes"; },
     detectPass: function (d, t) { return "Scanning — pass " + d + " of " + t; },
+    designPass: function (d, t) { return "Building proposals — pass " + d + " of " + t; },
     noFixes: "No auto-applicable fixes in this scan.",
     err: "Something went wrong during the fix stage. Try again.", strategic: "Strategic recommendation (needs a human)",
     palette: "Palette", typography: "Typography", layout: "Layout principle", personality: "Personality"
@@ -781,7 +799,7 @@
     if (!currentScanId) return;
     els["propose-fixes"].disabled = true;
     els["fix-hint"].textContent = P.proposing;
-    invokeFn("design", { scan_id: currentScanId }).then(function (data) {
+    designPass(1, 3).then(function (data) {
       els["fix-hint"].textContent = "";
       renderDesign(data && data.design_direction);
       /* design keeps its payload small (counts only); read the stored proposals */
