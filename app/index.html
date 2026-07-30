@@ -140,6 +140,12 @@
           </div>
           <div class="fix-stage" id="apply-result" hidden aria-live="polite"></div>
           <div class="fix-stage" id="qa-result" hidden aria-live="polite"></div>
+          <div class="deliver-actions" id="deliver-actions" hidden>
+            <button type="button" class="btn btn-primary" id="download-zip">Download the fixed project (.zip)</button>
+            <button type="button" class="btn" id="push-github">Open a pull request on GitHub</button>
+            <p class="deliver-note" id="deliver-note">The download changes nothing. A pull request goes to a new branch — never to your live site.</p>
+          </div>
+          <div class="fix-stage" id="deliver-result" hidden aria-live="polite"></div>
         </div>
       </section>
 

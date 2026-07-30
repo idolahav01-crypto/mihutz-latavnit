@@ -575,3 +575,24 @@ code, .mono { font-family: var(--font-mono); }
   }
   .drop, .history-row, .repo-row { transition: none; }
 }
+
+/* ---- stage 6: delivery ----
+   Sits after the QA verdict on purpose. The user reads what QA concluded, then
+   chooses what to do with it — the destructive-looking option is never the
+   primary one, and the note under the buttons states plainly that neither
+   touches their live site. */
+.deliver-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  margin-top: 1.25rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--rule, rgba(0, 0, 0, 0.12));
+}
+.deliver-note {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 0.85rem;
+  opacity: 0.72;
+}

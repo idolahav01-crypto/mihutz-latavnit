@@ -135,7 +135,8 @@
      "history", "history-list", "history-all", "history-empty",
      "history-dialog", "history-all-list",
      "fix-pipeline", "propose-fixes", "fix-hint", "design-direction",
-     "proposals", "fix-actions", "apply-fixes", "apply-result", "qa-result"
+     "proposals", "fix-actions", "apply-fixes", "apply-result", "qa-result",
+     "deliver-actions", "download-zip", "push-github", "deliver-result"
     ].forEach(function (id) { els[id] = $(id); });
     els.stageItems = Array.prototype.slice.call(document.querySelectorAll(".stages li"));
   }
@@ -713,6 +714,16 @@
     applied: function (a, t) { return "הוחלו " + a + " מתוך " + t + " תיקונים"; },
     detectPass: function (d, t) { return "סורק — מעבר " + d + " מתוך " + t; },
     designPass: function (d, t) { return "מגבש הצעות — מעבר " + d + " מתוך " + t; },
+    zipBuilding: "מכין את הקובץ...",
+    zipReady: function (n) { return "הורד. " + n + " קבצים שונו."; },
+    prOpening: "פותח Pull Request...",
+    prDone: "ה-Pull Request נפתח. פתחו אותו, קראו את השינויים, ורק אז מזגו.",
+    prNoGithub: "הסריקה הזאת לא הגיעה מ-GitHub, אז אפשר רק להוריד ZIP.",
+    prNoToken: "GitHub לא מחובר. התחברו עם GitHub כדי לפתוח Pull Request.",
+    prQaFailed: function (score) {
+      return "בדיקת האיכות לא עברה" + (score != null ? " (ציון " + score + " מתוך 100)" : "") +
+        ". אפשר לפתוח Pull Request בכל זאת — הוא ייפתח בענף נפרד ותוכלו לקרוא את השינויים לפני מיזוג. לפתוח?";
+    },
     noFixes: "אין תיקונים אוטומטיים ישימים בסריקה הזו.",
     err: "משהו השתבש בשלב התיקון. נסו שוב.", strategic: "המלצה אסטרטגית (דורשת אדם)",
     palette: "פלטה", typography: "טיפוגרפיה", layout: "עיקרון פריסה", personality: "אופי"
@@ -725,6 +736,16 @@
     applied: function (a, t) { return "Applied " + a + " of " + t + " fixes"; },
     detectPass: function (d, t) { return "Scanning — pass " + d + " of " + t; },
     designPass: function (d, t) { return "Building proposals — pass " + d + " of " + t; },
+    zipBuilding: "Preparing the file...",
+    zipReady: function (n) { return "Downloaded. " + n + " files changed."; },
+    prOpening: "Opening a pull request...",
+    prDone: "Pull request opened. Open it, read the diff, and only then merge.",
+    prNoGithub: "This scan didn't come from GitHub, so only the ZIP download applies.",
+    prNoToken: "GitHub isn't connected. Sign in with GitHub to open a pull request.",
+    prQaFailed: function (score) {
+      return "QA did not pass" + (score != null ? " (score " + score + "/100)" : "") +
+        ". You can still open a pull request — it goes to a separate branch and you can read the diff before merging. Open it?";
+    },
     noFixes: "No auto-applicable fixes in this scan.",
     err: "Something went wrong during the fix stage. Try again.", strategic: "Strategic recommendation (needs a human)",
     palette: "Palette", typography: "Typography", layout: "Layout principle", personality: "Personality"
@@ -743,6 +764,10 @@
     els["fix-actions"].hidden = true;
     els["apply-result"].hidden = true;
     els["qa-result"].hidden = true;
+    // Opening another scan must not leave the previous one's delivery buttons
+    // on screen — they act on currentScanId and would package the wrong run.
+    if (els["deliver-actions"]) els["deliver-actions"].hidden = true;
+    if (els["deliver-result"]) els["deliver-result"].hidden = true;
     els["fix-hint"].textContent = "";
     els["propose-fixes"].hidden = false;
     els["propose-fixes"].disabled = false;
@@ -818,11 +843,99 @@
     els["apply-result"].hidden = false;
     els["apply-result"].innerHTML = "<p>" + esc(P.applying) + "</p>";
     invokeFn("apply", { scan_id: currentScanId }).then(function (data) {
-      els["apply-result"].innerHTML = "<p>" + esc(P.applied(data.fixes_applied, data.fixes_total)) + "</p>";
+      renderApplyResult(data);
       return runQa();
     }).catch(function (e) {
       els["apply-result"].innerHTML = "<p>" + esc(P.err + fmtReason(e)) + "</p>";
     });
+  }
+
+  function renderApplyResult(data) {
+    els["apply-result"].hidden = false;
+    els["apply-result"].innerHTML = "<p>" +
+      esc(P.applied(data.fixes_applied, data.fixes_total)) + "</p>";
+  }
+
+  /* ===== stage 6: hand the result back to the user ===== */
+  function showDeliver() {
+    if (els["deliver-actions"]) els["deliver-actions"].hidden = false;
+  }
+
+  function deliverSay(msg, cls) {
+    var el = els["deliver-result"];
+    if (!el) return;
+    el.hidden = false;
+    el.innerHTML = "<p" + (cls ? ' class="' + cls + '"' : "") + ">" + esc(msg) + "</p>";
+  }
+
+  /* Builds the ZIP in the browser from the assembled project the `package`
+     function returns. Nothing is written anywhere on the way — the user gets a
+     file and decides what to do with it. */
+  function downloadZip() {
+    deliverSay(P.zipBuilding);
+    Promise.all([
+      invokeFn("package", { scan_id: currentScanId }),
+      import(JSZIP_CDN)
+    ]).then(function (r) {
+      var data = r[0], JSZip = r[1].default || r[1];
+      var zip = new JSZip();
+      data.files.forEach(function (f) { zip.file(f.path, f.content); });
+
+      /* A report beside the code, so the ZIP is self-explanatory later when
+         the browser tab that produced it is long gone. */
+      zip.file("MIHUTZ-LATAVNIT-REPORT.json", JSON.stringify({
+        source: data.source_ref,
+        score_before: data.score_before,
+        score_after: data.score_after,
+        pipeline_status: data.pipeline_status,
+        changed_files: data.changed_files,
+        change_log: data.change_log,
+        qa_verdict: data.qa_verdict,
+        design_direction: data.design_direction
+      }, null, 2));
+
+      return zip.generateAsync({ type: "blob" }).then(function (blob) {
+        var name = String(data.source_ref || "project").replace(/[^\w.-]+/g, "-");
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement("a");
+        a.href = url;
+        a.download = name + "-fixed.zip";
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+        deliverSay(P.zipReady((data.changed_files || []).length));
+      });
+    }).catch(function (e) {
+      deliverSay(P.err + fmtReason(e));
+    });
+  }
+
+  /* Opens a PR on a NEW branch. The server refuses outright when QA failed
+     unless we say we know — so the confirm() below is the user making that
+     call knowingly, not a checkbox they can miss. */
+  function pushToGithub(ack) {
+    deliverSay(P.prOpening);
+    invokeFn("push-github", { scan_id: currentScanId, acknowledge_qa_failed: !!ack })
+      .then(function (data) {
+        var el = els["deliver-result"];
+        el.hidden = false;
+        el.innerHTML = "<p>" + esc(P.prDone) + ' <a href="' + esc(data.pull_request_url) +
+          '" target="_blank" rel="noopener">#' + esc(String(data.pull_request_number)) +
+          "</a></p>";
+      })
+      .catch(function (e) {
+        var body = e && e.body;
+        var code = body && body.error;
+        if (code === "qa_did_not_pass" && !ack) {
+          if (window.confirm(P.prQaFailed(body.human_quality_score))) pushToGithub(true);
+          else deliverSay("");
+          return;
+        }
+        if (code === "not_a_github_scan") return deliverSay(P.prNoGithub);
+        if (code === "github_not_connected") return deliverSay(P.prNoToken);
+        deliverSay(P.err + fmtReason(e));
+      });
   }
 
   function runQa() {
@@ -833,15 +946,29 @@
       if (data.pass) {
         els["qa-result"].innerHTML = '<p class="qa-pass">' + esc(P.qaPass) +
           (score != null ? " · " + esc(String(score)) + "/100" : "") + "</p>";
+        showDeliver();
         return;
       }
       if (data.can_reapply) {
         els["qa-result"].innerHTML = "<p>" + esc(P.qaFail) + "</p>";
         var ids = ((data.verdict && data.verdict.recommend_reapply) || [])
           .map(function (x) { return x.signal_id; });
-        return invokeFn("apply", { scan_id: currentScanId, reapply_signal_ids: ids }).then(runQa);
+        return invokeFn("apply", { scan_id: currentScanId, reapply_signal_ids: ids })
+          .then(function (again) {
+            /* A reapply round changes how many fixes survive. Without this the
+               panel keeps showing the FIRST apply's count — which is how a run
+               that ended with 4 fixes and a failing QA score reported "9 of 12"
+               and read as a success. */
+            renderApplyResult(again);
+            return runQa();
+          });
       }
-      els["qa-result"].innerHTML = '<p class="qa-human">' + esc(P.needsHuman) + "</p>";
+      /* Terminal: QA rejected it and there are no rounds left. The delivery
+         buttons still appear — the user is entitled to inspect the output —
+         but the score is shown so the decision is an informed one. */
+      els["qa-result"].innerHTML = '<p class="qa-human">' + esc(P.needsHuman) +
+        (score != null ? " · " + esc(String(score)) + "/100" : "") + "</p>";
+      showDeliver();
     }).catch(function (e) {
       els["qa-result"].innerHTML = "<p>" + esc(P.err + fmtReason(e)) + "</p>";
     });
@@ -969,6 +1096,10 @@
     if (els["report-back"]) els["report-back"].addEventListener("click", backToInput);
     if (els["propose-fixes"]) els["propose-fixes"].addEventListener("click", proposeFixes);
     if (els["apply-fixes"]) els["apply-fixes"].addEventListener("click", applyFixes);
+    if (els["download-zip"]) els["download-zip"].addEventListener("click", downloadZip);
+    if (els["push-github"]) els["push-github"].addEventListener("click", function () {
+      pushToGithub(false);
+    });
   }
 
   /* return from a report (fresh or from history) to the input + history view */
