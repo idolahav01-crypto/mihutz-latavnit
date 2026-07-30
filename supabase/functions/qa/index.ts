@@ -106,7 +106,12 @@ Deno.serve(async (req) => {
     });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
-    await admin.from("scans").update({ pipeline_status: "applied" }).eq("id", scanId);
+    // Persist it: a stage that fails silently costs a real API call to
+    // diagnose, and the previous QA failure left nothing behind to read.
+    await admin
+      .from("scans")
+      .update({ pipeline_status: "applied", error: `qa: ${message}` })
+      .eq("id", scanId);
     return json({ error: message }, 500);
   }
 });

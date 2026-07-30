@@ -217,3 +217,20 @@ Deno.test("runStage2 unsplit (parts=1) still sees every present signal", async (
   const uc = calls[0].userContent;
   assert(uc.includes("#1 | S1") && uc.includes("#9 | S9"));
 });
+
+Deno.test("stage 5 streams: it also sits exactly on the token threshold", () => {
+  const { impl, calls } = mockCall({
+    pass: true, functional_issues: [], unapproved_changes: [], regressions: [],
+    signal_resolution: [], human_quality_score: 90, recommend_reapply: [],
+  });
+  const original = parseBundle(BUNDLE);
+  const edited = new Map(original);
+  edited.set("css/app.css", ".hero { background: #b91c1c; }");
+  return runStage5({
+    apiKey: "k", original, edited, targetedSignals: [SIGNALS[0]],
+    designDirection: {}, callImpl: impl,
+  }).then(() => {
+    const body = buildClaudeRequestBody(calls[0]) as Record<string, unknown>;
+    assertEquals(body.stream, true);
+  });
+});

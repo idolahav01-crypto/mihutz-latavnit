@@ -544,6 +544,10 @@ export async function runStage5(opts: CommonOpts & {
     apiKey: opts.apiKey,
     model: opts.model ?? MODEL,
     effort: opts.effort ?? "high",
+    // Same reasoning as stage 2: 16000 sits exactly ON the streaming
+    // threshold, so without this the verdict would come back over a
+    // non-streaming connection that can idle past the function's budget.
+    stream: true,
     maxTokens: 16000,
     system: STAGE5_SYSTEM,
     schema: QA_SCHEMA,

@@ -111,6 +111,7 @@ Deno.serve(async (req) => {
     });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
+    await admin.from("scans").update({ error: `design: ${message}` }).eq("id", scanId);
     return json({ error: message }, 500);
   }
 });

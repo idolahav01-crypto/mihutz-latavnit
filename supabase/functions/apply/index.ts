@@ -46,13 +46,30 @@ Deno.serve(async (req) => {
 
   const { data: scan, error: scanErr } = await admin
     .from("scans")
-    .select("id, user_id, proposals, design_direction")
+    .select("id, user_id, proposals, design_direction, pipeline_status")
     .eq("id", scanId)
     .single();
   if (scanErr || !scan || scan.user_id !== user.id) {
     return json({ error: "scan not found" }, 404);
   }
   if (!scan.proposals) return json({ error: "run_design_first" }, 409);
+
+  // Stage 2 runs as several passes and only sets pipeline_status="proposed"
+  // once every pass has landed. Applying before that edits the project using a
+  // fraction of the proposals while reporting success — which is exactly what
+  // happened when a browser held a one-deploy-old copy of the dashboard and
+  // called design a single time. The client is not allowed to be the only thing
+  // enforcing this. "qa_failed" is the legitimate re-entry point for a QA
+  // reapply round.
+  const readyToApply = scan.pipeline_status === "proposed" ||
+    scan.pipeline_status === "qa_failed";
+  if (!readyToApply) {
+    return json({
+      error: "proposals_incomplete",
+      pipeline_status: scan.pipeline_status,
+      hint: "stage 2 has not finished all of its passes for this scan",
+    }, 409);
+  }
 
   const requested = (body.approved_fixes && body.approved_fixes.length)
     ? body.approved_fixes
@@ -150,7 +167,10 @@ Deno.serve(async (req) => {
     });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
-    await admin.from("scans").update({ pipeline_status: "proposed" }).eq("id", scanId);
+    await admin
+      .from("scans")
+      .update({ pipeline_status: "proposed", error: `apply: ${message}` })
+      .eq("id", scanId);
     return json({ error: message }, 500);
   }
 });

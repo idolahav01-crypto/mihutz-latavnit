@@ -1,0 +1,18 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "headers": [
+    {
+      "comment": "The dashboard JS drives multi-pass pipeline stages: it calls the design and detect functions once per pass and knows how many passes there are. A browser holding a one-deploy-old copy therefore does not just look stale, it runs a DIFFERENT protocol against the current server — that is exactly how a run ended up applying a third of its proposals and still billing for the whole thing. There is no build step or content hash here, so revalidation is the only thing standing between a deploy and that class of bug.",
+      "source": "/js/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" }
+      ]
+    },
+    {
+      "source": "/css/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" }
+      ]
+    }
+  ]
+}
