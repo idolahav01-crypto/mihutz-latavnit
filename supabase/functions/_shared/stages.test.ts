@@ -234,3 +234,46 @@ Deno.test("stage 5 streams: it also sits exactly on the token threshold", () => 
     assertEquals(body.stream, true);
   });
 });
+
+Deno.test("runStage2 tells later passes which anchors are already taken", async () => {
+  // Measured on the first real run: signals 27, 30 and 61 all anchored their
+  // old_code on the same <title> tag because passes 2 and 3 could not see what
+  // pass 1 had claimed. Stage 4 then discards all but one as conflicts.
+  const { impl, calls } = mockCall({ design_direction: {}, proposals: [] });
+  await runStage2({
+    apiKey: "k", siteProfile: {}, detection: MANY,
+    files: parseBundle(BUNDLE), signals: SIGNALS, callImpl: impl,
+    part: 2, parts: 3,
+    claimedAnchors: [
+      { file: "index.html", old_code: "<title>יוני ספרים</title>" },
+      { file: "css/app.css", old_code: ".cta-row { display: flex; }" },
+    ],
+  });
+  const uc = calls[0].userContent;
+  assert(uc.includes("<already_claimed_anchors>"));
+  assert(uc.includes("<title>יוני ספרים</title>"));
+  assert(uc.includes(".cta-row"));
+  assert(uc.includes("anchor YOUR old_code"));
+});
+
+Deno.test("runStage2 pass 1 gets no claimed-anchor block at all", async () => {
+  const { impl, calls } = mockCall({ design_direction: {}, proposals: [] });
+  await runStage2({
+    apiKey: "k", siteProfile: {}, detection: MANY,
+    files: parseBundle(BUNDLE), signals: SIGNALS, callImpl: impl, part: 1, parts: 3,
+  });
+  assertFalse(calls[0].userContent.includes("<already_claimed_anchors>"));
+});
+
+Deno.test("runStage2 ignores strategic proposals with no anchor to claim", async () => {
+  const { impl, calls } = mockCall({ design_direction: {}, proposals: [] });
+  await runStage2({
+    apiKey: "k", siteProfile: {}, detection: MANY,
+    files: parseBundle(BUNDLE), signals: SIGNALS, callImpl: impl,
+    part: 2, parts: 3,
+    claimedAnchors: [{ file: null, old_code: null }, { file: "a.css", old_code: ".x{}" }],
+  });
+  const uc = calls[0].userContent;
+  assert(uc.includes(".x{}"));
+  assertFalse(uc.includes("null:"));
+});

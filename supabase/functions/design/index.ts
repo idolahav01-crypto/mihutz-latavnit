@@ -69,6 +69,9 @@ Deno.serve(async (req) => {
       part,
       parts,
       priorDirection: part > 1 ? scan.design_direction : undefined,
+      claimedAnchors: part > 1
+        ? ((scan.proposals ?? []) as Array<{ file?: string | null; old_code?: string | null }>)
+        : undefined,
     });
     await recordStageUsage(
       admin,

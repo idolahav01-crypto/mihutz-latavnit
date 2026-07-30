@@ -211,6 +211,14 @@ export async function runStage2(opts: CommonOpts & {
   part?: number;
   parts?: number;
   priorDirection?: unknown;
+  /**
+   * old_code regions earlier passes already claimed. Without this, a later
+   * pass re-anchors on the same unique line — measured on the first real run,
+   * where signals 27, 30 and 61 all anchored on the same <title> tag and 21
+   * and 75 both on the same .cta-row block. Stage 4 then has to throw 3 of 12
+   * fixes away as conflicts. The model cannot avoid a collision it cannot see.
+   */
+  claimedAnchors?: Array<{ file?: string | null; old_code?: string | null }>;
 }): Promise<Stage2Result> {
   const part = opts.part ?? 1;
   const parts = opts.parts ?? 1;
@@ -222,6 +230,19 @@ export async function runStage2(opts: CommonOpts & {
   const regions = extractCodeRegions(opts.files, present);
   const autoFixableById = new Map(opts.signals.map((s) => [s.id, s.auto_fixable]));
   let userContent = buildStage2UserContent(opts.siteProfile, present, regions, autoFixableById);
+  const claimed = (opts.claimedAnchors ?? [])
+    .filter((a) => a.file && a.old_code)
+    .map((a) => `- ${a.file}: ${JSON.stringify(String(a.old_code).slice(0, 160))}`);
+  if (claimed.length) {
+    userContent = `<already_claimed_anchors>\n` +
+      `Earlier passes already proposed edits anchored on these exact regions. ` +
+      `Two fixes cannot replace the same region, so anchor YOUR old_code ` +
+      `somewhere else — pick a different unique substring, even if the change ` +
+      `you want is nearby. If a fix genuinely cannot be expressed without ` +
+      `reusing one of these regions, make it a strategic recommendation ` +
+      `instead (fix_type "strategic", sample_new_code null).\n` +
+      `${claimed.join("\n")}\n</already_claimed_anchors>\n\n${userContent}`;
+  }
   if (part > 1 && opts.priorDirection) {
     // Later passes do not re-derive the direction; they obey the approved one.
     userContent = `<approved_design_direction>\n` +
