@@ -142,3 +142,43 @@ Deno.test("assembleFinalFiles overlays edited over original", () => {
   assertEquals(out.get("a"), "EDITED");
   assertEquals(out.get("b"), "2");
 });
+
+// ---------- signal #78: Hebrew currency order ----------
+
+import { invertsCurrencyOrder, validateProposals as vp } from "./pipeline.ts";
+
+Deno.test("invertsCurrencyOrder catches the regression that reached a pull request", () => {
+  // Shipped for real: ₪30 was correct and the fix made it 30 ₪.
+  assert(invertsCurrencyOrder("<span>₪30</span>", "<span>30 ₪</span>"));
+  assert(invertsCurrencyOrder("₪110", "110 ₪"));
+});
+
+Deno.test("invertsCurrencyOrder allows the correct direction", () => {
+  // Turning "30 ₪" into "₪30" is the fix this signal actually wants.
+  assertFalse(invertsCurrencyOrder("<span>30 ₪</span>", "<span>₪30</span>"));
+});
+
+Deno.test("invertsCurrencyOrder ignores edits that are not about currency", () => {
+  assertFalse(invertsCurrencyOrder("color: red", "color: blue"));
+  assertFalse(invertsCurrencyOrder("<h1>שלום</h1>", "<h1>ברוכים הבאים</h1>"));
+});
+
+Deno.test("invertsCurrencyOrder stays out of ambiguous edits", () => {
+  // Both orders present on either side — not a clean inversion, so not ours
+  // to reject. A deterministic guard that overreaches is worse than none.
+  assertFalse(invertsCurrencyOrder("₪30 and 40 ₪", "40 ₪ and ₪30"));
+});
+
+Deno.test("validateProposals rejects a currency-inverting fix before it can apply", () => {
+  const files = new Map([["index.html", '<span class="menu-price">₪30</span>']]);
+  const out = vp([{
+    signal_id: 78,
+    file: "index.html",
+    fix_type: "copy",
+    old_code: '<span class="menu-price">₪30</span>',
+    sample_new_code: '<span class="menu-price">30 ₪</span>',
+  }], files);
+  assertEquals(out[0].old_code_verbatim, true); // the anchor was fine
+  assertEquals(out[0].applicable_edit, false); // but the edit is a regression
+  assertEquals(out[0].rejected_reason, "inverts_currency_order");
+});

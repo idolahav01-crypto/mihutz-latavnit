@@ -139,6 +139,29 @@ export function isVerbatimUnique(haystack: string, needle: string): boolean {
 export interface ProposalValidation extends Proposal {
   old_code_verbatim: boolean;
   applicable_edit: boolean;
+  /** Set when a deterministic check rejected an otherwise-valid proposal. */
+  rejected_reason?: string;
+}
+
+/**
+ * Signal #78 is unambiguous: in Hebrew the currency symbol goes BEFORE the
+ * number ("₪30"), and the fix for it must never produce "30 ₪".
+ *
+ * A real run proposed exactly that inversion and shipped it into a pull
+ * request, taking correct markup and making it wrong. QA caught it after the
+ * fact and after the money was spent. The direction here is a documented rule
+ * with one correct answer, so it does not need a model's judgement — checking
+ * it costs nothing and turns a paid, after-the-fact catch into a free one.
+ *
+ * Exported for tests. Returns true when the proposal INVERTS the order.
+ */
+export function invertsCurrencyOrder(oldCode: string, newCode: string): boolean {
+  const symbolFirst = /[₪$€£]\s*\d/;
+  const numberFirst = /\d\s*[₪$€£]/;
+  // Only a change that had the symbol leading and now trails is a regression.
+  // A fix that leaves both forms present, or touches neither, is not our call.
+  return symbolFirst.test(oldCode) && !numberFirst.test(oldCode) &&
+    numberFirst.test(newCode) && !symbolFirst.test(newCode);
 }
 
 /**
@@ -158,6 +181,16 @@ export function validateProposals(
     }
     const content = p.file ? files.get(p.file) : undefined;
     const verbatim = content != null && isVerbatimUnique(content, String(p.old_code));
+
+    const newCode = String(p.sample_new_code ?? p.new_code ?? "");
+    if (verbatim && invertsCurrencyOrder(String(p.old_code), newCode)) {
+      return {
+        ...p,
+        old_code_verbatim: verbatim,
+        applicable_edit: false,
+        rejected_reason: "inverts_currency_order",
+      };
+    }
     return { ...p, old_code_verbatim: verbatim, applicable_edit: verbatim };
   });
 }
@@ -568,6 +601,23 @@ export function reconcileApply(
 
     // Given old_code WAS in the original, its absence now means the edit landed.
     if (!current.includes(fix.old_code)) {
+      reconciled.push({
+        signal_id: fix.signal_id,
+        file: fix.file,
+        applied: true,
+        applied_by: "model",
+        reason: null,
+      });
+      continue;
+    }
+
+    // old_code is still there, but that does not prove the edit is missing:
+    // the model may have INSERTED new_code (a JSON-LD block, a skip-link)
+    // rather than replacing, which leaves the anchor in place. Re-applying then
+    // writes the addition a second time — that is how a real PR ended up with
+    // the HairSalon schema and the skip-link duplicated. If new_code was absent
+    // from the original and is present now, the model put it there; leave it be.
+    if (fix.new_code && !before.includes(fix.new_code) && current.includes(fix.new_code)) {
       reconciled.push({
         signal_id: fix.signal_id,
         file: fix.file,

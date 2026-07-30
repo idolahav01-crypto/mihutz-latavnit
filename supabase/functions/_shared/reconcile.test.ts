@@ -237,3 +237,49 @@ Deno.test("mergeDetection on an empty prior returns the incoming pass unchanged"
   assertEquals(out.signals!.map((s) => s.id), [3]);
   assertEquals(out.site_profile, { a: 1 });
 });
+
+// ---------- the two defects the first pull request exposed ----------
+
+Deno.test("reconcileApply does not re-apply an INSERT the model already made", () => {
+  // The duplication bug, exactly as it shipped: the model inserted a JSON-LD
+  // block before the anchor instead of replacing it, so old_code was still
+  // present and the fallback wrote the whole block a second time.
+  const before = new Map([["index.html", "<head>\n<title>יוני ספרים</title>\n</head>"]]);
+  const inserted = '<script type="application/ld+json">{"@type":"HairSalon"}</script>';
+  const model = new Map([[
+    "index.html",
+    `<head>\n${inserted}\n<title>יוני ספרים</title>\n</head>`,
+  ]]);
+  const r = reconcileApply(before, model, [{
+    signal_id: 27,
+    file: "index.html",
+    old_code: "<title>יוני ספרים</title>",
+    new_code: `${inserted}\n<title>יוני ספרים</title>`,
+  }]);
+  assertEquals(r.reconciled[0].applied, true);
+  assertEquals(r.reconciled[0].applied_by, "model");
+  // exactly one copy, not two
+  assertEquals(r.files.get("index.html")!.split(inserted).length - 1, 1);
+});
+
+Deno.test("reconcileApply still rescues a fix the model genuinely dropped", () => {
+  // The guard above must not swallow the case it was built for.
+  const before = new Map([["a.css", ".hero { background: purple; }"]]);
+  const model = new Map(before);
+  const r = reconcileApply(before, model, [
+    { signal_id: 9, file: "a.css", old_code: "purple", new_code: "#b91c1c" },
+  ]);
+  assertEquals(r.reconciled[0].applied_by, "deterministic");
+  assertEquals(r.files.get("a.css"), ".hero { background: #b91c1c; }");
+});
+
+Deno.test("reconcileApply re-applies when new_code was already in the original", () => {
+  // If new_code existed before the run, its presence proves nothing, so the
+  // guard must not fire and the normal fallback has to take over.
+  const before = new Map([["a.css", ".a { color: red; }\n.b { color: blue; }"]]);
+  const model = new Map(before);
+  const r = reconcileApply(before, model, [
+    { signal_id: 9, file: "a.css", old_code: ".a { color: red; }", new_code: ".b { color: blue; }" },
+  ]);
+  assertEquals(r.reconciled[0].applied_by, "deterministic");
+});
