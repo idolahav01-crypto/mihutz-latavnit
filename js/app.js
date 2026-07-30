@@ -777,6 +777,33 @@
       renderDesign(scan.design_direction);
       renderProposals(scan.proposals || []);
     }
+    restoreDelivery(scan);
+  }
+
+  /* Everything the pipeline produced is persisted, so reopening a finished scan
+     must show its result — and above all the download button — without paying
+     for a single model call again. Anything at or past "applied" has an edited
+     bundle in Storage, which is all the packaging step needs. */
+  var DELIVERABLE = ["applied", "qa", "qa_passed", "qa_failed", "needs_human"];
+  function restoreDelivery(scan) {
+    if (DELIVERABLE.indexOf(scan.pipeline_status) === -1) return;
+
+    var log = scan.change_log || [];
+    if (log.length) {
+      var applied = log.filter(function (c) { return c.applied; }).length;
+      renderApplyResult({ fixes_applied: applied, fixes_total: log.length });
+    }
+
+    var v = scan.qa_verdict;
+    if (v) {
+      var score = v.human_quality_score;
+      var suffix = (score != null ? " · " + esc(String(score)) + "/100" : "");
+      els["qa-result"].hidden = false;
+      els["qa-result"].innerHTML = v.pass
+        ? '<p class="qa-pass">' + esc(P.qaPass) + suffix + "</p>"
+        : '<p class="qa-human">' + esc(P.needsHuman) + suffix + "</p>";
+    }
+    showDeliver();
   }
 
   function renderDesign(dd) {
@@ -979,7 +1006,7 @@
   function loadHistory() {
     if (!sb || !user || !els.history) return;
     sb.from("scans")
-      .select("id,source_type,source_ref,ai_fingerprint_score,present_count,files_scanned,detection,design_direction,proposals,created_at")
+      .select("id,source_type,source_ref,ai_fingerprint_score,present_count,files_scanned,detection,design_direction,proposals,pipeline_status,change_log,qa_verdict,created_at")
       .eq("user_id", user.id).eq("status", "done")
       .order("created_at", { ascending: false }).limit(20)
       .then(function (r) {
