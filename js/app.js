@@ -583,20 +583,32 @@
      the server merges; we drive them one at a time and only render at the end. */
   function runDetect(scanId) {
     setStage(3);
-    var PARTS = 3;
 
-    function pass(n) {
-      return invokeFn("detect", { scan_id: scanId, part: n, parts: PARTS })
+    function pass(n, total) {
+      return invokeFn("detect", { scan_id: scanId, part: n, parts: total })
         .then(function (data) {
           if (data && data.done) return data;
-          setDetectProgress(n, PARTS);
-          return pass(n + 1);
+          setDetectProgress(n, total);
+          return pass(n + 1, total);
         });
     }
 
-    return pass(1).then(function () {
-      return loadReport(scanId);
-    });
+    /* How long a pass takes is driven by how many signals come back PRESENT,
+       which we cannot know before running it. When a pass overruns the
+       function's budget, splitting finer is the fix — and doing it here beats
+       making the user pay for a dead end and come back. Once only: if six
+       passes still overrun, something else is wrong and retrying just burns
+       more money. */
+    return pass(1, 3)
+      .catch(function (e) {
+        var msg = (e && e.body && e.body.error) || "";
+        if (String(msg).indexOf("stage_timeout") === -1) throw e;
+        setDetectProgress(0, 6);
+        return pass(1, 6);
+      })
+      .then(function () {
+        return loadReport(scanId);
+      });
   }
 
   /* Stage 2 is split for the same reason stage 1 is: it emits a full code pair
@@ -712,7 +724,10 @@
     qaPass: "עבר בקרת איכות", qaFail: "בקרת האיכות מצאה בעיות — מריץ סבב תיקון…",
     needsHuman: "חלק מהתיקונים דורשים בדיקה ידנית.",
     applied: function (a, t) { return "הוחלו " + a + " מתוך " + t + " תיקונים"; },
-    detectPass: function (d, t) { return "סורק — מעבר " + d + " מתוך " + t; },
+    detectPass: function (d, t) {
+      return d === 0 ? "הסריקה ארוכה מהצפוי — מפצל לחלקים קטנים יותר..."
+                     : "סורק — מעבר " + d + " מתוך " + t;
+    },
     designPass: function (d, t) { return "מגבש הצעות — מעבר " + d + " מתוך " + t; },
     zipBuilding: "מכין את הקובץ...",
     zipReady: function (n) { return "הורד. " + n + " קבצים שונו."; },
@@ -734,7 +749,10 @@
     qaPass: "Passed QA", qaFail: "QA found issues — running a fix round…",
     needsHuman: "Some fixes need manual review.",
     applied: function (a, t) { return "Applied " + a + " of " + t + " fixes"; },
-    detectPass: function (d, t) { return "Scanning — pass " + d + " of " + t; },
+    detectPass: function (d, t) {
+      return d === 0 ? "Taking longer than expected — splitting into smaller passes..."
+                     : "Scanning — pass " + d + " of " + t;
+    },
     designPass: function (d, t) { return "Building proposals — pass " + d + " of " + t; },
     zipBuilding: "Preparing the file...",
     zipReady: function (n) { return "Downloaded. " + n + " files changed."; },
