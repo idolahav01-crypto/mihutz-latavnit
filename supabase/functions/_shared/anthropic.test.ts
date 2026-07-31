@@ -97,6 +97,25 @@ Deno.test("callClaude posts a real request with cache_control on system + correc
   assertEquals((oc.format as { type: string }).type, "json_schema");
   // 16000 is at the threshold and thinking is off here, so no streaming.
   assertEquals(body.stream, undefined);
+  // Thinking must be stated, never inferred — see below.
+  assertEquals((body.thinking as { type: string }).type, "disabled");
+});
+
+Deno.test("thinking is always explicit, because the default differs per model", () => {
+  // Omitting `thinking` runs WITHOUT it on Opus 4.8 but runs adaptive thinking
+  // on Sonnet 5. Relying on the default made a model swap silently change
+  // behaviour and blow the edge-function budget, so both states are sent.
+  const off = buildClaudeRequestBody({
+    apiKey: "k", model: "claude-sonnet-5", effort: "medium",
+    maxTokens: 32000, system: "S", userContent: "U",
+  });
+  assertEquals((off.thinking as { type: string }).type, "disabled");
+
+  const on = buildClaudeRequestBody({
+    apiKey: "k", model: "claude-opus-4-8", effort: "high",
+    maxTokens: 16000, system: "S", userContent: "U", thinking: true,
+  });
+  assertEquals((on.thinking as { type: string }).type, "adaptive");
 });
 
 Deno.test("sanitizeSchema rewrites union types as anyOf (structured outputs rejects unions)", () => {

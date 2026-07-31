@@ -60,7 +60,9 @@ Deno.test("runStage2: correct model + effort, no temperature, cached system prom
   // Thinking is deliberately OFF here: stage 2 is output-bound against the
   // 150s edge-function limit, and adaptive thinking spends that budget before
   // a single proposal is emitted.
-  assertEquals(calls[0].thinking, undefined);
+  assertEquals(calls[0].thinking, undefined); // not requested...
+  const b = buildClaudeRequestBody(calls[0]) as Record<string, unknown>;
+  assertEquals((b.thinking as { type: string }).type, "disabled"); // ...and sent as disabled
   assertEquals(calls[0].system, STAGE2_SYSTEM);
 
   // cache_control must sit on the system array, not the user message
@@ -153,7 +155,9 @@ Deno.test("stage 2 streams even though it sits exactly on the token threshold", 
   }).then(() => {
     const body = buildClaudeRequestBody(calls[0]) as Record<string, unknown>;
     assertEquals(body.stream, true);
-    assertEquals(body.thinking, undefined);
+    // Explicitly disabled, not merely absent — the two are different requests
+    // on Sonnet-family models.
+    assertEquals((body.thinking as { type: string }).type, "disabled");
   });
 });
 

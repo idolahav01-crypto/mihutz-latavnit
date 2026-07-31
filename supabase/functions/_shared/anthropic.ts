@@ -172,7 +172,13 @@ export function buildClaudeRequestBody(opts: ClaudeCallOptions): Record<string, 
   }
   body.output_config = outputConfig;
 
-  if (opts.thinking) body.thinking = { type: "adaptive" };
+  // ALWAYS explicit. Omitting `thinking` does not mean the same thing on every
+  // model: Opus 4.8 runs without it, but Sonnet 5 runs adaptive thinking by
+  // default. Moving detect to Sonnet therefore switched thinking ON silently
+  // and pushed a 36-signal pass past the 130s budget — the opposite of why the
+  // model was changed. (Note: an explicit "disabled" is a 400 on Fable 5, which
+  // this pipeline does not use.)
+  body.thinking = opts.thinking ? { type: "adaptive" } : { type: "disabled" };
   if (opts.speed) body.speed = opts.speed;
   if (shouldStream(opts)) body.stream = true;
   return body;
