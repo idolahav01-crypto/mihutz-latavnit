@@ -5,6 +5,7 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import {
   type ApprovedFix,
+  assembleFinalFiles,
   detectConflicts,
   orderFixes,
   reconcileApply,
@@ -282,4 +283,24 @@ Deno.test("reconcileApply re-applies when new_code was already in the original",
     { signal_id: 9, file: "a.css", old_code: ".a { color: red; }", new_code: ".b { color: blue; }" },
   ]);
   assertEquals(r.reconciled[0].applied_by, "deterministic");
+});
+
+// ---------- reapply must build on the work so far ----------
+
+Deno.test("a reapply base keeps earlier fixes instead of starting from pristine", () => {
+  // The shipped bug: round 1 applied a fix, QA asked to redo a DIFFERENT
+  // signal, and round 2 rebuilt from the untouched original — so round 1's
+  // work vanished from the output. assembleFinalFiles over the previous
+  // edited bundle is what makes round 2 additive.
+  const pristine = new Map([["index.html", "<a>x</a>\n<b>y</b>"]]);
+  const afterRound1 = new Map([["index.html", "<a>FIXED</a>\n<b>y</b>"]]);
+
+  const base = assembleFinalFiles(pristine, afterRound1);
+  const r = reconcileApply(base, new Map(base), [
+    { signal_id: 20, file: "index.html", old_code: "<b>y</b>", new_code: "<b>ALSO FIXED</b>" },
+  ]);
+
+  const out = r.files.get("index.html")!;
+  assert(out.includes("FIXED"), "round 1's fix must survive round 2");
+  assert(out.includes("ALSO FIXED"), "round 2's fix must be present");
 });

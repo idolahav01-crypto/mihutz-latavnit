@@ -14,6 +14,7 @@
 import { cleanApiKey } from "../_shared/anthropic.ts";
 import {
   type ApprovedFix,
+  assembleFinalFiles,
   deriveApprovedFixes,
   detectConflicts,
   filesTouchedByFixes,
@@ -46,7 +47,7 @@ Deno.serve(async (req) => {
 
   const { data: scan, error: scanErr } = await admin
     .from("scans")
-    .select("id, user_id, proposals, design_direction, pipeline_status")
+    .select("id, user_id, proposals, design_direction, pipeline_status, change_log")
     .eq("id", scanId)
     .single();
   if (scanErr || !scan || scan.user_id !== user.id) {
@@ -87,7 +88,22 @@ Deno.serve(async (req) => {
     const { data: file, error: dlErr } = await admin.storage
       .from("scans").download(bundlePath);
     if (dlErr || !file) throw new Error("bundle_not_found");
-    const original = parseBundle(await file.text());
+    const pristine = parseBundle(await file.text());
+
+    // A QA reapply round re-sends only the signals QA asked to redo. Building
+    // those on top of the PRISTINE bundle silently discards everything the
+    // earlier round achieved — measured: 16 applicable fixes became 5 in the
+    // shipped output, which is why a scan that changed 16 things produced a
+    // site that looked untouched. The base for a reapply is the work so far.
+    const isReapply = Boolean(body.reapply_signal_ids?.length);
+    let original = pristine;
+    if (isReapply) {
+      const { data: prevFile } = await admin.storage
+        .from("scans").download(`${user.id}/${scanId}/edited-bundle.txt`);
+      if (prevFile) {
+        original = assembleFinalFiles(pristine, parseBundle(await prevFile.text()));
+      }
+    }
 
     // Only the touched files are sent through the model (cost + focus).
     const touchedPaths = filesTouchedByFixes(fixes);
@@ -137,22 +153,31 @@ Deno.serve(async (req) => {
       });
     if (upErr) throw new Error(`storage: ${upErr.message}`);
 
+    // Merge, don't replace: the log has to describe every fix in the shipped
+    // bundle, not just the last round's subset.
+    const priorLog = isReapply
+      ? ((scan.change_log ?? []) as typeof recon.reconciled)
+      : [];
+    const logById = new Map(priorLog.map((c) => [c.signal_id, c]));
+    for (const c of recon.reconciled) logById.set(c.signal_id, c);
+    const mergedLog = [...logById.values()].sort((a, b) => a.signal_id - b.signal_id);
+
     await admin
       .from("scans")
       .update({
         approved_fixes: fixes,
-        change_log: recon.reconciled,
+        change_log: mergedLog,
         pipeline_status: "applied",
       })
       .eq("id", scanId);
 
-    const applied = recon.reconciled.filter((r) => r.applied).length;
+    const applied = mergedLog.filter((r) => r.applied).length;
     return json({
       ok: true,
       scan_id: scanId,
       files_edited: [...editedMap.keys()].filter((p) => editedMap.get(p) !== touched.get(p)).length,
       fixes_applied: applied,
-      fixes_total: requested.length,
+      fixes_total: isReapply ? mergedLog.length : requested.length,
       // Everything below is what the model got wrong; surfaced so a bad run is
       // visible immediately rather than at the QA stage.
       recovered_by_fallback: recon.reconciled.filter((r) => r.applied_by === "deterministic")
