@@ -26,6 +26,40 @@ import { buildEntry, recordStageUsage } from "../_shared/usage.ts";
 const MODEL = "claude-opus-4-8";
 const TRANSFORMABLE = /\.(html?|css|scss)$/i;
 
+// Pull every <script>…</script> out of an HTML file and leave a placeholder
+// comment in its place. The model then never sees or regenerates the JS, which
+// (1) keeps the output small so the call finishes inside the time budget, and
+// (2) guarantees the JavaScript is preserved byte-for-byte.
+function extractScripts(html: string): { stripped: string; scripts: string[] } {
+  const scripts: string[] = [];
+  const stripped = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, (m) => {
+    const token = `<!--__MIHUTZ_SCRIPT_${scripts.length}__-->`;
+    scripts.push(m);
+    return token;
+  });
+  return { stripped, scripts };
+}
+
+function restoreScripts(html: string, scripts: string[]): string {
+  let out = html;
+  const used = new Set<number>();
+  scripts.forEach((s, i) => {
+    const token = `<!--__MIHUTZ_SCRIPT_${i}__-->`;
+    if (out.indexOf(token) !== -1) {
+      out = out.replace(token, () => s); // function replacer: no $-pattern issues
+      used.add(i);
+    }
+  });
+  // Safety net: if the model dropped a placeholder, re-append that script so no
+  // JavaScript is ever lost.
+  const missing = scripts.filter((_, i) => !used.has(i));
+  if (missing.length) {
+    const inject = "\n" + missing.join("\n") + "\n";
+    out = out.indexOf("</body>") !== -1 ? out.replace("</body>", inject + "</body>") : out + inject;
+  }
+  return out;
+}
+
 const SYSTEM =
   `You are TransformDesigner, a world-class brand & web designer. You receive ONE file from a website, a factual profile of the site, and a list of "AI fingerprint" signals to eliminate. You return the SAME file, REWRITTEN, so the site looks like a top studio designed it — visibly different, premium, and coherent — with every listed signal resolved.
 
@@ -134,6 +168,11 @@ Deno.serve(async (req) => {
     if (part > parts) part = parts;
     const targetPath = fileList[part - 1];
     const targetContent = pristine.get(targetPath) ?? "";
+    // Strip <script> blocks from HTML so the model rewrites only markup + CSS.
+    const isHtml = /\.html?$/i.test(targetPath);
+    const extracted = isHtml
+      ? extractScripts(targetContent)
+      : { stripped: targetContent, scripts: [] as string[] };
 
     const present = presentSignals(scan.detection as { signals?: DetectedSignal[] });
     const checklist = present.map((s) => `#${s.id} ${s.name}`).join("\n");
@@ -144,22 +183,27 @@ Deno.serve(async (req) => {
         ? `<approved_design_direction>\n${JSON.stringify(priorDirection, null, 2)}\n</approved_design_direction>\n` +
           `Reuse this EXACT direction; return it unchanged as design_direction.\n\n`
         : "") +
+      (extracted.scripts.length
+        ? `Every <!--__MIHUTZ_SCRIPT_N__--> comment marks a JavaScript block removed for brevity. KEEP all of them in your output (normally where they appear); never delete one and never write <script> content yourself.\n\n`
+        : "") +
       `<site_profile>\n${JSON.stringify(scan.site_profile ?? {}, null, 2)}\n</site_profile>\n\n` +
       `<signals_to_resolve>\n${checklist}\n</signals_to_resolve>\n\n` +
-      `<file path="${targetPath}">\n${targetContent}\n</file>\n\n` +
+      `<file path="${targetPath}">\n${extracted.stripped}\n</file>\n\n` +
       `Rewrite the file above per your instructions. The returned file.path MUST be exactly "${targetPath}".`;
 
     const startedAt = Date.now();
     const res = await callClaude({
       apiKey,
       model: MODEL,
-      effort: "high",
+      // medium keeps the redesign well inside the time budget once the JS is
+      // stripped out; still Opus, so the design quality stays high.
+      effort: "medium",
       maxTokens: 32000,
       stream: true,
       system: SYSTEM,
       schema: SCHEMA,
       userContent,
-      timeoutMs: 130_000,
+      timeoutMs: 135_000,
     });
     await recordStageUsage(
       admin,
@@ -173,6 +217,8 @@ Deno.serve(async (req) => {
     };
     const newContent = out.file?.content;
     if (!newContent || typeof newContent !== "string") throw new Error("empty_transform_output");
+    // Put the original <script> blocks back, byte-for-byte.
+    const finalContent = isHtml ? restoreScripts(newContent, extracted.scripts) : newContent;
     const direction = part === 1 ? (out.design_direction ?? scan.design_direction ?? null) : scan.design_direction;
 
     // Accumulate the rewritten file into the edited-bundle.
@@ -182,7 +228,7 @@ Deno.serve(async (req) => {
       const { data: prev } = await admin.storage.from("scans").download(editedPath);
       if (prev) edited = parseBundle(await prev.text());
     }
-    edited.set(targetPath, newContent);
+    edited.set(targetPath, finalContent);
     const up = await admin.storage
       .from("scans")
       .upload(editedPath, new Blob([serializeBundle(edited)], { type: "text/plain" }), {
