@@ -41,6 +41,7 @@
     noRepoMatch: "אין ריפו שתואם לחיפוש.",
     reposLoading: "טוען ריפוזיטוריז...",
     allAudits: function (n) { return "כל האבחונים (" + n + ")"; },
+    deleteTitle: "מחיקה", confirmDelete: "למחוק את האבחון הזה? אי אפשר לשחזר.",
     filesPicked: function (n, root) {
       return (root ? root + "/ — " : "") + n + (n === 1 ? " קובץ" : " קבצים");
     },
@@ -76,6 +77,7 @@
     noRepoMatch: "No repo matches your search.",
     reposLoading: "Loading repositories...",
     allAudits: function (n) { return "All audits (" + n + ")"; },
+    deleteTitle: "Delete", confirmDelete: "Delete this audit? This can't be undone.",
     filesPicked: function (n, root) {
       return (root ? root + "/ — " : "") + n + (n === 1 ? " file" : " files");
     },
@@ -139,7 +141,8 @@
      "history-dialog", "history-all-list",
      "fix-pipeline", "propose-fixes", "fix-hint", "design-direction",
      "proposals", "fix-actions", "apply-fixes", "apply-result", "qa-result",
-     "deliver-actions", "download-zip", "push-github", "deliver-result"
+     "deliver-actions", "download-zip", "push-github", "deliver-result",
+     "add-features", "features-result", "review-bloat", "bloat-result"
     ].forEach(function (id) { els[id] = $(id); });
     els.stageItems = Array.prototype.slice.call(document.querySelectorAll(".stages li"));
   }
@@ -742,6 +745,15 @@
   var P = he ? {
     propose: "שדרג ועצב מחדש", proposing: "משדרג ומעצב את האתר מחדש…",
     transformDone: "העיצוב מחדש הושלם — אפשר להוריד ולראות את התוצאה.",
+    addFeatures: "הצע והוסף 5 פיצ'רים",
+    featuresProposing: "חושב על פיצ'רים חדשים לאתר…",
+    featurePass: function (i) { return "בונה פיצ'ר " + i + " מתוך 5…"; },
+    featuresTitle: "פיצ'רים חדשים שנוספו",
+    featuresDone: "נוספו פיצ'רים חדשים — אפשר להוריד ולראות.",
+    reviewBloat: "בדוק מה מיותר להסרה",
+    bloatChecking: "עובר על האתר — מה מיותר…",
+    bloatTitle: "הצעות להסרה — לא יימחק כלום בלי אישורך",
+    bloatNone: "לא נמצא משהו מיותר משמעותי — האתר נקי.",
     designTitle: "כיוון עיצובי", proposalsTitle: function (n) { return "הצעות תיקון (" + n + ")"; },
     apply: "החל תיקונים מאושרים", applying: "מחיל תיקונים…", qaRunning: "בקרת איכות…",
     qaPass: "עבר בקרת איכות", qaFail: "בקרת האיכות מצאה בעיות — מריץ סבב תיקון…",
@@ -772,6 +784,15 @@
   } : {
     propose: "Redesign the site", proposing: "Redesigning the site…",
     transformDone: "Redesign complete — download to see the result.",
+    addFeatures: "Suggest & add 5 features",
+    featuresProposing: "Thinking of new features for the site…",
+    featurePass: function (i) { return "Building feature " + i + " of 5…"; },
+    featuresTitle: "New features added",
+    featuresDone: "New features added — download to see them.",
+    reviewBloat: "Review what to remove",
+    bloatChecking: "Reviewing the site for clutter…",
+    bloatTitle: "Removal suggestions — nothing is removed without your approval",
+    bloatNone: "Nothing significant to remove — the site is lean.",
     designTitle: "Design direction", proposalsTitle: function (n) { return "Fix proposals (" + n + ")"; },
     apply: "Apply approved fixes", applying: "Applying fixes…", qaRunning: "Running QA…",
     qaPass: "Passed QA", qaFail: "QA found issues — running a fix round…",
@@ -822,6 +843,10 @@
     els["propose-fixes"].hidden = false;
     els["propose-fixes"].disabled = false;
     els["propose-fixes"].textContent = P.propose;
+    if (els["add-features"]) { els["add-features"].textContent = P.addFeatures; els["add-features"].disabled = false; els["add-features"].hidden = false; }
+    if (els["review-bloat"]) { els["review-bloat"].textContent = P.reviewBloat; els["review-bloat"].disabled = false; els["review-bloat"].hidden = false; }
+    if (els["features-result"]) els["features-result"].hidden = true;
+    if (els["bloat-result"]) els["bloat-result"].hidden = true;
     /* a scan opened from history may already carry a design direction (from a
        redesign) and/or proposals (from the older patch flow) */
     if (scan.design_direction) renderDesign(scan.design_direction);
@@ -938,6 +963,65 @@
     }).catch(function (e) {
       els["fix-hint"].textContent = P.err + " [transform]" + fmtReason(e);
       els["propose-fixes"].disabled = false;
+    });
+  }
+
+  /* ===== FeatureDesigner: propose 5 features and add them (one call each) ===== */
+  function renderFeatures(list) {
+    els["features-result"].hidden = false;
+    els["features-result"].innerHTML = "<h3>" + esc(P.featuresTitle) + "</h3><ul class=\"feat-list\">" +
+      list.map(function (f) {
+        return "<li><b>" + esc(f.name || "") + "</b> — " + esc(f.summary || "") + "</li>";
+      }).join("") + "</ul>";
+  }
+
+  function featuresPass(n) {
+    els["fix-hint"].textContent = n === 1 ? P.featuresProposing : P.featurePass(n - 1);
+    return invokeFn("features", { scan_id: currentScanId, part: n }).then(function (data) {
+      if (n === 1 && data && data.features) renderFeatures(data.features);
+      if (data && data.done) return data;
+      return featuresPass(n + 1);
+    });
+  }
+
+  function addFeaturesRun() {
+    if (!currentScanId) return;
+    els["add-features"].disabled = true;
+    els["fix-hint"].textContent = P.featuresProposing;
+    featuresPass(1).then(function () {
+      els["fix-hint"].textContent = P.featuresDone;
+      els["add-features"].disabled = false;
+      showDeliver();
+    }).catch(function (e) {
+      els["fix-hint"].textContent = P.err + " [features]" + fmtReason(e);
+      els["add-features"].disabled = false;
+    });
+  }
+
+  /* ===== declutter: review what's worth removing (SUGGESTS ONLY, never deletes) ===== */
+  function renderBloat(list) {
+    els["bloat-result"].hidden = false;
+    if (!list.length) {
+      els["bloat-result"].innerHTML = "<p class=\"qa-pass\">" + esc(P.bloatNone) + "</p>";
+      return;
+    }
+    els["bloat-result"].innerHTML = "<h3>" + esc(P.bloatTitle) + "</h3><ul class=\"feat-list\">" +
+      list.map(function (r) {
+        return "<li><b>" + esc(r.what || "") + "</b> — " + esc(r.why || "") + "</li>";
+      }).join("") + "</ul>";
+  }
+
+  function reviewBloat() {
+    if (!currentScanId) return;
+    els["review-bloat"].disabled = true;
+    els["bloat-result"].hidden = false;
+    els["bloat-result"].innerHTML = "<p>" + esc(P.bloatChecking) + "</p>";
+    invokeFn("declutter", { scan_id: currentScanId }).then(function (data) {
+      renderBloat((data && data.removals) || []);
+      els["review-bloat"].disabled = false;
+    }).catch(function (e) {
+      els["bloat-result"].innerHTML = "<p>" + esc(P.err + " [declutter]" + fmtReason(e)) + "</p>";
+      els["review-bloat"].disabled = false;
     });
   }
 
@@ -1179,13 +1263,16 @@
       var ref = s.source_ref || sourceLabel(s.source_type);
       var sub = [sourceLabel(s.source_type), fmtDate(s.created_at)];
       if (s.present_count != null) sub.push(s.present_count + (he ? " סימנים" : " signals"));
-      return '<li><button type="button" class="history-row" data-id="' + esc(s.id) + '">' +
+      return '<li class="history-item">' +
+        '<button type="button" class="history-row" data-id="' + esc(s.id) + '">' +
         '<span class="history-score" dir="ltr">' + esc(String(score)) + "<small>/100</small></span>" +
         '<span class="history-meta">' +
           '<span class="history-ref ltr">' + esc(ref) + "</span>" +
           '<span class="history-sub">' + esc(sub.join(" · ")) + "</span>" +
         "</span>" +
-        '<span class="history-open" aria-hidden="true">' + chevron + "</span></button></li>";
+        '<span class="history-open" aria-hidden="true">' + chevron + "</span></button>" +
+        '<button type="button" class="history-del" data-del="' + esc(s.id) + '" title="' + esc(T.deleteTitle) +
+        '" aria-label="' + esc(T.deleteTitle) + '">✕</button></li>';
     }).join("");
 
     Array.prototype.forEach.call(target.querySelectorAll("[data-id]"), function (btn) {
@@ -1197,6 +1284,30 @@
         setBusy(true);
         renderReport(s);
       });
+    });
+    Array.prototype.forEach.call(target.querySelectorAll("[data-del]"), function (btn) {
+      btn.addEventListener("click", function (ev) {
+        ev.stopPropagation();
+        deleteScan(btn.getAttribute("data-del"));
+      });
+    });
+  }
+
+  /* Delete an audit (RLS lets a user delete only their own). Best-effort clean
+     of its stored bundles too, then refresh the list in place. */
+  function deleteScan(id) {
+    if (!id || !window.confirm(T.confirmDelete)) return;
+    sb.from("scans").delete().eq("id", id).eq("user_id", user.id).then(function (r) {
+      if (r.error) { showError(T.errGeneric); return; }
+      var base = user.id + "/" + id + "/";
+      try {
+        sb.storage.from("scans").remove([base + "bundle.txt", base + "edited-bundle.txt", base + "features.json"]);
+      } catch (e) { /* best-effort */ }
+      historyRows = historyRows.filter(function (x) { return x.id !== id; });
+      renderHistory();
+      if (els["history-dialog"] && els["history-dialog"].open) {
+        renderHistoryInto(historyRows, els["history-all-list"]);
+      }
     });
   }
 
@@ -1261,6 +1372,8 @@
     // propose→apply patch handlers stay defined but are no longer wired.
     if (els["propose-fixes"]) els["propose-fixes"].addEventListener("click", transformSite);
     if (els["apply-fixes"]) els["apply-fixes"].addEventListener("click", applyFixes);
+    if (els["add-features"]) els["add-features"].addEventListener("click", addFeaturesRun);
+    if (els["review-bloat"]) els["review-bloat"].addEventListener("click", reviewBloat);
     if (els["download-zip"]) els["download-zip"].addEventListener("click", downloadZip);
     if (els["push-github"]) els["push-github"].addEventListener("click", function () {
       pushToGithub(false);

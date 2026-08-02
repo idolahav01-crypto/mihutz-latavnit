@@ -262,18 +262,40 @@ code, .mono { font-family: var(--font-mono); }
 .history-head .linkbtn { font-size: 0.85rem; }
 
 .history-list { list-style: none; margin: 0; padding: 0; }
+.history-item {
+  display: flex; align-items: stretch;
+  border-block-end: 1px solid var(--color-neutral-300);
+}
+.history-list li:last-child, .history-item:last-child { border-block-end: none; }
 .history-row {
   display: flex; align-items: center; gap: var(--s-2);
-  inline-size: 100%; text-align: start;
+  flex: 1; min-inline-size: 0; text-align: start;
   background: none; border: none;
-  border-block-end: 1px solid var(--color-neutral-300);
   padding: var(--s-1);
   line-height: 1.35;
   font: inherit; color: var(--color-ink); cursor: pointer;
   transition: background-color 120ms ease;
 }
 .history-row:hover { background: var(--color-paper-raised); }
-.history-list li:last-child .history-row { border-block-end: none; }
+.history-del {
+  flex-shrink: 0;
+  background: none; border: none;
+  padding: 0 var(--s-2);
+  color: var(--color-neutral-600); font-size: 1rem; line-height: 1;
+  cursor: pointer; border-radius: var(--r-control);
+  transition: color 120ms ease, background-color 120ms ease;
+}
+.history-del:hover { color: #fff; background: var(--color-error); }
+
+/* feature / removal suggestion lists */
+.feat-list { list-style: none; margin: var(--s-2) 0 0; padding: 0; }
+.feat-list li {
+  padding-block: var(--s-2);
+  border-block-end: 1px dashed var(--color-neutral-300);
+  font-size: 0.92rem; line-height: 1.5;
+}
+.feat-list li:last-child { border-block-end: none; }
+.feat-list b { color: var(--color-ink); }
 
 /* the score is data — monospace ink, never a coloured badge */
 .history-score {

@@ -131,7 +131,9 @@
 
         <!-- ===== fix pipeline: stage 2 (design) → 4 (apply) → 5 (QA) ===== -->
         <div class="fix-pipeline" id="fix-pipeline">
-          <button type="button" class="btn btn-primary" id="propose-fixes">Propose fixes</button>
+          <button type="button" class="btn btn-primary" id="propose-fixes">Redesign the site</button>
+          <button type="button" class="btn" id="add-features">Suggest & add 5 features</button>
+          <button type="button" class="btn" id="review-bloat">Review what to remove</button>
           <p class="fix-hint" id="fix-hint" aria-live="polite"></p>
           <div class="fix-stage" id="design-direction" hidden></div>
           <div class="fix-stage" id="proposals" hidden></div>
@@ -140,6 +142,8 @@
           </div>
           <div class="fix-stage" id="apply-result" hidden aria-live="polite"></div>
           <div class="fix-stage" id="qa-result" hidden aria-live="polite"></div>
+          <div class="fix-stage" id="features-result" hidden aria-live="polite"></div>
+          <div class="fix-stage" id="bloat-result" hidden aria-live="polite"></div>
           <div class="deliver-actions" id="deliver-actions" hidden>
             <button type="button" class="btn btn-primary" id="download-zip">Download the fixed project (.zip)</button>
             <button type="button" class="btn" id="push-github">Open a pull request on GitHub</button>
