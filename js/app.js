@@ -13,6 +13,9 @@
   var MAX_BUNDLE_BYTES = 300000;
   var MAX_FILE_BYTES = 60000;
   var HISTORY_PREVIEW = 3; /* rows shown inline; the rest live in the sheet */
+  /* Below this present-signal count, an AI-built site was almost certainly
+     under-detected, so we run one aggressive re-hunt pass (see detect/rehunt). */
+  var REHUNT_FLOOR = 25;
 
   var he = document.documentElement.lang === "he";
   var HOME = he ? "/he/" : "/";
@@ -606,7 +609,20 @@
         setDetectProgress(0, 6);
         return pass(1, 6);
       })
-      .then(function () {
+      .then(function (data) {
+        // Aggressive recall: a suspiciously-low count on an AI-built site almost
+        // always means the first look was too shy. Look once more, harder, only
+        // at the signals marked absent. The server only ADDS evidenced signals,
+        // so a re-hunt can never fabricate or lower the count.
+        var found = data && typeof data.present_count === "number" ? data.present_count : null;
+        if (found !== null && found < REHUNT_FLOOR) {
+          var li = els.stageItems && els.stageItems[3];
+          var nm = li && li.querySelector(".stage-name");
+          if (nm) nm.textContent = P.rehunting;
+          return invokeFn("detect", { scan_id: scanId, rehunt: true })
+            .catch(function () { /* non-fatal: keep the detection we have */ })
+            .then(function () { return loadReport(scanId); });
+        }
         return loadReport(scanId);
       });
   }
@@ -666,10 +682,11 @@
   /* ===== report view ===== */
   function renderReport(scan) {
     var det = scan.detection || {};
-    /* detect returns only the signals it found, plus the ids it ruled
-       inapplicable — absent ones are never sent, which is what keeps the
-       call inside the platform's time limit. */
-    var present = det.present_signals || det.signals || [];
+    /* The stored detection carries an entry for every signal (present & absent).
+       The report must show ONLY the ones actually present & applicable — not all
+       108 — so the page stays short and about what was actually found. */
+    var all = det.present_signals || det.signals || [];
+    var present = all.filter(function (s) { return s.present === true && s.applicable !== false; });
     var applicable = det.applicable_count != null
       ? det.applicable_count
       : 108 - ((det.not_applicable_ids || []).length);
@@ -688,7 +705,7 @@
       byCat[cat].push(s);
     });
 
-    els["report-body"].innerHTML = groups.map(function (cat) {
+    els["report-body"].innerHTML = groups.map(function (cat, i) {
       var rows = byCat[cat].map(function (s) {
         var ev = (s.evidence && s.evidence[0]) || null;
         var code = ev ? '<code>' + esc(clip(ev.snippet, 180)) + "</code>" : "";
@@ -698,8 +715,11 @@
           '<span class="sig-body"><span class="sig-name">' + esc(s.name) + "</span>" + code + file + "</span>" +
           '<span class="sig-flag w-' + esc(w || "medium") + '" dir="ltr">' + esc(String(s.weight || "").toUpperCase()) + "</span></li>";
       }).join("");
-      return '<div class="cat-group"><h3>' + esc(cat) + '</h3><ul class="led">' + rows + "</ul></div>";
-    }).join("") || ("<p>" + esc(he ? "לא נמצאו סימנים במעבר הזה." : "No signals found in this pass.") + "</p>");
+      return '<details class="cat-group"' + (i === 0 ? " open" : "") + ">" +
+        '<summary class="cat-summary"><span class="cat-title">' + esc(cat) + "</span>" +
+        '<span class="cat-count">' + byCat[cat].length + "</span></summary>" +
+        '<ul class="led">' + rows + "</ul></details>";
+    }).join("") || ("<p>" + esc(he ? "לא נמצאו סימנים." : "No signals found.") + "</p>");
 
     els.loading.hidden = true;
     els["app-input"].hidden = true;
@@ -716,6 +736,7 @@
      Stage 4 (apply) and Stage 5 (QA) with up to two automatic reapply rounds —
      the loop the server also caps. MVP auto-approves the applicable proposals. */
   var currentScanId = null;
+  var currentApplicable = 0; /* how many proposals are auto-applicable — sizes the apply split */
 
   var P = he ? {
     propose: "הצע תיקונים", proposing: "בונה כיוון עיצובי והצעות…",
@@ -723,12 +744,15 @@
     apply: "החל תיקונים מאושרים", applying: "מחיל תיקונים…", qaRunning: "בקרת איכות…",
     qaPass: "עבר בקרת איכות", qaFail: "בקרת האיכות מצאה בעיות — מריץ סבב תיקון…",
     needsHuman: "חלק מהתיקונים דורשים בדיקה ידנית.",
+    qaSkipped: "בקרת האיכות לא הושלמה — אבל התיקונים כבר הוחלו. אפשר להוריד ולבדוק.",
     applied: function (a, t) { return "הוחלו " + a + " מתוך " + t + " תיקונים"; },
     detectPass: function (d, t) {
       return d === 0 ? "הסריקה ארוכה מהצפוי — מפצל לחלקים קטנים יותר..."
                      : "סורק — מעבר " + d + " מתוך " + t;
     },
     designPass: function (d, t) { return "מגבש הצעות — מעבר " + d + " מתוך " + t; },
+    applyPass: function (d, t) { return "מחיל תיקונים — מעבר " + d + " מתוך " + t; },
+    rehunting: "מחפש לעומק — עוד סימני AI...",
     zipBuilding: "מכין את הקובץ...",
     zipReady: function (n) { return "הורד. " + n + " קבצים שונו."; },
     prOpening: "פותח Pull Request...",
@@ -740,7 +764,7 @@
         ". אפשר לפתוח Pull Request בכל זאת — הוא ייפתח בענף נפרד ותוכלו לקרוא את השינויים לפני מיזוג. לפתוח?";
     },
     noFixes: "אין תיקונים אוטומטיים ישימים בסריקה הזו.",
-    err: "משהו השתבש בשלב התיקון. נסו שוב.", strategic: "המלצה אסטרטגית (דורשת אדם)",
+    err: "משהו השתבש בשלב התיקון. נסו שוב.", strategic: "לא יושם — לא נמצא עוגן מדויק בקוד",
     palette: "פלטה", typography: "טיפוגרפיה", layout: "עיקרון פריסה", personality: "אופי"
   } : {
     propose: "Propose fixes", proposing: "Building design direction and proposals…",
@@ -748,12 +772,15 @@
     apply: "Apply approved fixes", applying: "Applying fixes…", qaRunning: "Running QA…",
     qaPass: "Passed QA", qaFail: "QA found issues — running a fix round…",
     needsHuman: "Some fixes need manual review.",
+    qaSkipped: "QA couldn't finish — but the fixes are already applied. You can download and inspect.",
     applied: function (a, t) { return "Applied " + a + " of " + t + " fixes"; },
     detectPass: function (d, t) {
       return d === 0 ? "Taking longer than expected — splitting into smaller passes..."
                      : "Scanning — pass " + d + " of " + t;
     },
     designPass: function (d, t) { return "Building proposals — pass " + d + " of " + t; },
+    applyPass: function (d, t) { return "Applying fixes — pass " + d + " of " + t; },
+    rehunting: "Digging deeper — more AI signals...",
     zipBuilding: "Preparing the file...",
     zipReady: function (n) { return "Downloaded. " + n + " files changed."; },
     prOpening: "Opening a pull request...",
@@ -765,7 +792,7 @@
         ". You can still open a pull request — it goes to a separate branch and you can read the diff before merging. Open it?";
     },
     noFixes: "No auto-applicable fixes in this scan.",
-    err: "Something went wrong during the fix stage. Try again.", strategic: "Strategic recommendation (needs a human)",
+    err: "Something went wrong during the fix stage. Try again.", strategic: "Not applied — no exact anchor in the code",
     palette: "Palette", typography: "Typography", layout: "Layout principle", personality: "Personality"
   };
 
@@ -842,6 +869,7 @@
 
   function renderProposals(list) {
     var applicable = list.filter(function (p) { return p.applicable_edit; });
+    currentApplicable = applicable.length;
     els["proposals"].innerHTML = "<h3>" + esc(P.proposalsTitle(list.length)) + "</h3>" +
       '<ul class="prop-list">' + list.map(function (p) {
         var strategic = !p.applicable_edit;
@@ -865,20 +893,60 @@
     }
   }
 
+  /* Bold "fix every present signal" proposals are output-heavy, and OUTPUT — not
+     input — is what races the function's 150s wall clock. So size the split to
+     the number of present signals (aim for ~5 per pass), and if a pass still
+     times out, double the split and start over. design resets its proposals on
+     part 1, so restarting is safe and never duplicates. */
+  function runDesign(parts) {
+    return designPass(1, parts).catch(function (e) {
+      var msg = (e && e.body && e.body.error) || "";
+      if (String(msg).indexOf("stage_timeout") === -1 || parts >= 12) throw e;
+      return runDesign(Math.min(12, parts * 2));
+    });
+  }
+
   function proposeFixes() {
     if (!currentScanId) return;
     els["propose-fixes"].disabled = true;
     els["fix-hint"].textContent = P.proposing;
-    designPass(1, 3).then(function (data) {
-      els["fix-hint"].textContent = "";
-      renderDesign(data && data.design_direction);
-      /* design keeps its payload small (counts only); read the stored proposals */
-      return sb.from("scans").select("design_direction,proposals").eq("id", currentScanId).single();
-    }).then(function (r) {
-      if (r && r.data) { renderDesign(r.data.design_direction); renderProposals(r.data.proposals || []); }
-    }).catch(function (e) {
-      els["fix-hint"].textContent = P.err + fmtReason(e);
-      els["propose-fixes"].disabled = false;
+    sb.from("scans").select("present_count").eq("id", currentScanId).single()
+      .then(function (r) {
+        var n = (r && r.data && r.data.present_count) || 0;
+        var parts = Math.min(12, Math.max(3, Math.ceil(n / 5)));
+        return runDesign(parts);
+      })
+      .then(function (data) {
+        els["fix-hint"].textContent = "";
+        renderDesign(data && data.design_direction);
+        /* design keeps its payload small (counts only); read the stored proposals */
+        return sb.from("scans").select("design_direction,proposals").eq("id", currentScanId).single();
+      }).then(function (r) {
+        if (r && r.data) { renderDesign(r.data.design_direction); renderProposals(r.data.proposals || []); }
+      }).catch(function (e) {
+        els["fix-hint"].textContent = P.err + " [design]" + fmtReason(e);
+        els["propose-fixes"].disabled = false;
+      });
+  }
+
+  /* Apply is split into client-driven passes for the same reason detect/design
+     are: each pass is a SEPARATE HTTP call with its own 150s budget, so bold
+     whole-file rewrites can't blow one call. Each pass builds on the previous
+     one's edits (server-side), so dependent fixes still see earlier work. */
+  function applyPass(n, total) {
+    els["apply-result"].innerHTML = "<p>" + esc(P.applyPass(n, total)) + "</p>";
+    return invokeFn("apply", { scan_id: currentScanId, part: n, parts: total })
+      .then(function (data) {
+        if (data && data.done) return data;
+        return applyPass(n + 1, total);
+      });
+  }
+
+  function runApply(total) {
+    return applyPass(1, total).catch(function (e) {
+      var msg = (e && e.body && e.body.error) || "";
+      if (String(msg).indexOf("stage_timeout") === -1 || total >= 12) throw e;
+      return runApply(Math.min(12, total * 2));
     });
   }
 
@@ -887,12 +955,22 @@
     els["fix-actions"].hidden = true;
     els["apply-result"].hidden = false;
     els["apply-result"].innerHTML = "<p>" + esc(P.applying) + "</p>";
-    invokeFn("apply", { scan_id: currentScanId }).then(function (data) {
-      renderApplyResult(data);
-      return runQa();
-    }).catch(function (e) {
-      els["apply-result"].innerHTML = "<p>" + esc(P.err + fmtReason(e)) + "</p>";
-    });
+    /* Count applicable fixes from the server (robust after a reload), then split
+       ~4 per pass so each call stays well under the limit even for bold edits. */
+    sb.from("scans").select("proposals").eq("id", currentScanId).single()
+      .then(function (r) {
+        var props = (r && r.data && r.data.proposals) || [];
+        var applicable = props.filter(function (p) { return p.applicable_edit; }).length ||
+          currentApplicable || 1;
+        var total = Math.min(12, Math.max(1, Math.ceil(applicable / 4)));
+        return runApply(total);
+      })
+      .then(function (data) {
+        renderApplyResult(data);
+        return runQa();
+      }).catch(function (e) {
+        els["apply-result"].innerHTML = "<p>" + esc(P.err + " [apply]" + fmtReason(e)) + "</p>";
+      });
   }
 
   function renderApplyResult(data) {
@@ -1015,7 +1093,12 @@
         (score != null ? " · " + esc(String(score)) + "/100" : "") + "</p>";
       showDeliver();
     }).catch(function (e) {
-      els["qa-result"].innerHTML = "<p>" + esc(P.err + fmtReason(e)) + "</p>";
+      /* QA is a safety check, not a gate — the fixes are already applied
+         deterministically (exact string replacements). If QA can't finish
+         (e.g. a very large diff), don't block: surface it softly and still let
+         the user download and inspect the result. */
+      els["qa-result"].innerHTML = '<p class="qa-human">' + esc(P.qaSkipped + fmtReason(e)) + "</p>";
+      showDeliver();
     });
   }
 

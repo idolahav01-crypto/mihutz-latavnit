@@ -111,7 +111,12 @@ export function presentSignals(detection: { signals?: DetectedSignal[] }): Detec
 export function extractCodeRegions(
   files: Map<string, string>,
   present: DetectedSignal[],
-  maxBytesPerFile = 12_000,
+  // Send the WHOLE flagged file, not a 12KB slice. A truncated region was the
+  // main reason Stage 2 quoted an old_code that wasn't a verbatim substring of
+  // the real file, so validateProposals rejected it and the fix silently
+  // vanished ("45 found, 5 fixed"). The bundler already caps each file at 60KB
+  // (MAX_FILE_BYTES), so this is bounded.
+  maxBytesPerFile = 60_000,
 ): Array<{ file: string; content: string }> {
   const wanted = new Set<string>();
   for (const s of present) {
@@ -174,16 +179,25 @@ export function validateProposals(
   files: Map<string, string>,
 ): ProposalValidation[] {
   return proposals.map((p) => {
-    const isStrategic = p.fix_type === "strategic" || p.needs_human_decision === true ||
-      p.old_code == null || p.old_code === "";
-    if (isStrategic) {
+    // Only a missing anchor makes a fix impossible to apply. "strategic" /
+    // needs_human no longer opt a fix out of auto-apply — the product now fixes
+    // everything it can quote verbatim, with no human-approval step.
+    const noAnchor = p.old_code == null || p.old_code === "";
+    if (noAnchor) {
       return { ...p, old_code_verbatim: false, applicable_edit: false };
     }
     const content = p.file ? files.get(p.file) : undefined;
-    const verbatim = content != null && isVerbatimUnique(content, String(p.old_code));
+    const oldCode = String(p.old_code);
+    const verbatim = content != null && isVerbatimUnique(content, oldCode);
+    // A fix is applicable if apply() could land it — that includes the exact
+    // match AND the whitespace-insensitive unique match apply() falls back to.
+    // Validating only the exact form was rejecting fixes the editor could apply,
+    // which showed up in the UI as bogus "needs a human" entries.
+    const applicable = content != null &&
+      (verbatim || findWhitespaceInsensitiveUnique(content, oldCode) != null);
 
     const newCode = String(p.sample_new_code ?? p.new_code ?? "");
-    if (verbatim && invertsCurrencyOrder(String(p.old_code), newCode)) {
+    if (applicable && invertsCurrencyOrder(oldCode, newCode)) {
       return {
         ...p,
         old_code_verbatim: verbatim,
@@ -191,7 +205,7 @@ export function validateProposals(
         rejected_reason: "inverts_currency_order",
       };
     }
-    return { ...p, old_code_verbatim: verbatim, applicable_edit: verbatim };
+    return { ...p, old_code_verbatim: verbatim, applicable_edit: applicable };
   });
 }
 

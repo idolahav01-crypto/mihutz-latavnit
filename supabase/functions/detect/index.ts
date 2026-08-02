@@ -69,7 +69,10 @@ function buildSignalList(): string {
 
 const SYSTEM_PROMPT = `You are FingerprintAuditor, an automated static-analysis auditor that detects the "AI fingerprint" in websites built with AI site builders. You audit against a FIXED list of ${SIGNAL_COUNT} signals. In this pass you do exactly TWO things and fix NOTHING: (1) diagnose every signal, (2) build a factual profile of the site.
 
-Your output feeds three downstream stages (fix proposal, code editing, QA). A false positive here poisons the entire pipeline and can cause a working site to be "fixed" into a broken one. When in doubt, report absent with low confidence.
+Your output feeds three downstream stages (fix proposal, code editing, QA). Two rules govern everything and they do NOT conflict:
+(1) HUNT AGGRESSIVELY. Sites built by AI builders carry MANY fingerprints — typically dozens. Your job is to find all of them, not to be cautious. If you finish a pass with only a handful of signals present, you have not looked hard enough: go back through the categories you skimmed.
+(2) NEVER FABRICATE. present=true ALWAYS requires a verbatim snippet copied exactly from the code. A claim with no exact snippet is the one thing that poisons the pipeline (a fabricated signal cannot even be fixed downstream), so evidence is non-negotiable.
+Aggressive recall means looking HARDER in the real code, never inventing evidence. Genuine, evidenced signals must be reported generously — never withheld out of caution.
 
 <signal_list>
 ${buildSignalList()}
@@ -84,7 +87,7 @@ Search EVERY file and EVERY language: HTML, CSS, SCSS, JS/TS, JSX/TSX, Vue, Svel
 <process>
 STEP 1 — INVENTORY. Note vendored/minified/framework-reset files; EXCLUDE them from diagnosis (signals must be in the site's own code). Record them in meta.excluded_files.
 STEP 2 — SITE PROFILE FIRST. Read the real content and design before hunting for problems, so diagnosis has context.
-STEP 3 — DIAGNOSE BY CATEGORY, in signal ID order. Actively search each signal's detection criteria in every relevant file before deciding.
+STEP 3 — DIAGNOSE BY CATEGORY, in signal ID order. For EACH signal, actively search its detection criteria across every relevant file before deciding — do not skim. Assume a template-built site is LIKELY to have the signal and try to prove it with a verbatim snippet; only mark absent after you have genuinely looked and found nothing to quote.
 STEP 4 — APPLICABILITY. RTL/Hebrew signals apply only if the site has Hebrew/Arabic content or dir="rtl". Israeli-regulation signals apply only for the Israeli market. Dark-mode #000 signals apply only if a dark mode exists. applicable=false is NOT a defect and must not affect the score.
 STEP 5 — SCORE deterministically: score = round(100 * sum(weight_points of present & applicable) / sum(weight_points of all applicable)). weight_points: high/very-high=3, medium=2, low=1. present_count = count of present=true.
 </process>
@@ -92,11 +95,11 @@ STEP 5 — SCORE deterministically: score = round(100 * sum(weight_points of pre
 <evidence_rules>
 - Return an entry for ALL ${SIGNAL_COUNT} signals, in ID order. Never skip one.
 - present=true requires concrete evidence: file path + a VERBATIM code snippet (max ~200 chars, copied exactly) + a one-line explanation of how it meets the criteria. Cap at 5 representative locations, note total_occurrences.
-- Never infer problems not literally in the code. If an absence-type signal cannot be verified because the file wasn't provided, mark present=false, confidence <= 0.3, note "insufficient input".
+- Report EVERY signal you can back with a verbatim snippet as present — do not withhold a genuinely-evidenced signal out of caution. The only thing you must never do is claim a signal with no exact snippet to quote. If an absence-type signal cannot be verified because the file wasn't provided, mark present=false, confidence <= 0.3, note "insufficient input".
 </evidence_rules>
 
 <confidence_calibration>
-0.95-1.0 exact literal match; 0.7-0.9 clear interpretation; 0.4-0.7 ambiguous judgment call; <0.4 weak — prefer present=false unless verbatim.
+0.95-1.0 exact literal match; 0.7-0.9 clear interpretation backed by a verbatim snippet → report PRESENT; 0.4-0.7 evidenced judgment call → lean PRESENT if you can quote it; <0.4 nothing to quote → present=false. Simple rule: if you can quote it verbatim, report it present.
 </confidence_calibration>
 
 Return ONLY valid JSON matching the provided schema. No prose outside the JSON.`;
@@ -264,10 +267,15 @@ Deno.serve(async (req) => {
   // The audit is split across `parts` sequential requests; see DEFAULT_PARTS.
   let part = 1;
   let parts = DEFAULT_PARTS;
+  // A re-hunt takes a completed "before" detection and looks HARDER, only at the
+  // signals currently marked absent, to raise recall on a suspiciously-low count
+  // without ever fabricating (it can only ADD present signals, never remove one).
+  let rehunt = false;
   try {
     const body = await req.json();
     scanId = body.scan_id;
     if (body.mode === "after") mode = "after";
+    if (body.rehunt === true) rehunt = true;
     if (Number.isInteger(body.parts) && body.parts >= 1) parts = body.parts;
     if (Number.isInteger(body.part) && body.part >= 1) part = Math.min(body.part, parts);
   } catch {
@@ -282,6 +290,67 @@ Deno.serve(async (req) => {
     .single();
   if (scanErr || !scan || scan.user_id !== user.id) {
     return json({ error: "scan not found" }, 404);
+  }
+
+  // ---- re-hunt: one aggressive extra look over the currently-absent signals ----
+  if (rehunt) {
+    try {
+      if (!ANTHROPIC_API_KEY) throw new Error("missing_anthropic_api_key");
+      if (!/^[\x20-\x7E]+$/.test(ANTHROPIC_API_KEY)) {
+        throw new Error("invalid_anthropic_api_key_characters");
+      }
+      const startedAt = Date.now();
+      const prior = (scan.detection ?? {}) as DetectionResult;
+      const absentIds = (prior.signals ?? [])
+        .filter((s) => s.present !== true && s.applicable !== false)
+        .map((s) => Number(s.id));
+      if (!absentIds.length) {
+        const { score, present } = computeScore(prior.signals ?? []);
+        return json({ ok: true, scan_id: scanId, mode: "rehunt", done: true, ai_fingerprint_score: score, present_count: present });
+      }
+
+      const bundlePath = `${user.id}/${scanId}/bundle.txt`;
+      const { data: file, error: dlErr } = await admin.storage.from("scans").download(bundlePath);
+      if (dlErr || !file) throw new Error("bundle not found in storage");
+      const bundle = await file.text();
+
+      const idList = absentIds.map((id) => `#${id}`).join(", ");
+      const claude = await callClaude({
+        apiKey: ANTHROPIC_API_KEY,
+        model: MODEL,
+        effort: "medium",
+        maxTokens: 32000,
+        system: SYSTEM_PROMPT,
+        userContent: `RE-HUNT PASS. On an earlier pass these signals were marked ABSENT for this site. ` +
+          `Look again, HARDER — a template-built site usually hits most of these, and a low count means the first look was too shy. ` +
+          `For EACH, either find a VERBATIM snippet in the code and mark present=true, or leave it out if it is genuinely absent. ` +
+          `Return entries ONLY for signals you can now mark present=true with a verbatim snippet; omit all others. ` +
+          `Do NOT return site_profile, meta, or scores.\n\n` +
+          `Signals to re-examine: ${idList}\n\n${bundle}`,
+        schema: SCHEMA,
+        timeoutMs: 130_000,
+      });
+
+      // Additive only: keep just the newly-present signals and merge over prior.
+      const found = claude.json as DetectionResult;
+      const additions = (found.signals ?? []).filter((s) => s.present === true);
+      const merged = mergeDetection(prior, { signals: additions });
+      const { score, present } = computeScore(merged.signals ?? []);
+
+      await recordStageUsage(
+        admin, scanId,
+        buildEntry("detect_rehunt", MODEL, claude.usage, Date.now() - startedAt, "medium"),
+      );
+      await admin.from("scans")
+        .update({ detection: merged, ai_fingerprint_score: score, present_count: present })
+        .eq("id", scanId);
+
+      return json({ ok: true, scan_id: scanId, mode: "rehunt", done: true, ai_fingerprint_score: score, present_count: present, newly_found: additions.length });
+    } catch (e) {
+      // Non-fatal: a failed re-hunt must never damage the existing good scan.
+      const message = e instanceof Error ? e.message : String(e);
+      return json({ error: message, mode: "rehunt" }, 500);
+    }
   }
 
   if (mode === "before" && part === 1) {
