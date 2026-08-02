@@ -737,9 +737,11 @@
      the loop the server also caps. MVP auto-approves the applicable proposals. */
   var currentScanId = null;
   var currentApplicable = 0; /* how many proposals are auto-applicable — sizes the apply split */
+  var transformTotal = 0;    /* number of files the redesign pass walks through */
 
   var P = he ? {
-    propose: "הצע תיקונים", proposing: "בונה כיוון עיצובי והצעות…",
+    propose: "שדרג ועצב מחדש", proposing: "משדרג ומעצב את האתר מחדש…",
+    transformDone: "העיצוב מחדש הושלם — אפשר להוריד ולראות את התוצאה.",
     designTitle: "כיוון עיצובי", proposalsTitle: function (n) { return "הצעות תיקון (" + n + ")"; },
     apply: "החל תיקונים מאושרים", applying: "מחיל תיקונים…", qaRunning: "בקרת איכות…",
     qaPass: "עבר בקרת איכות", qaFail: "בקרת האיכות מצאה בעיות — מריץ סבב תיקון…",
@@ -752,6 +754,7 @@
     },
     designPass: function (d, t) { return "מגבש הצעות — מעבר " + d + " מתוך " + t; },
     applyPass: function (d, t) { return "מחיל תיקונים — מעבר " + d + " מתוך " + t; },
+    transformPass: function (d, t) { return "משדרג ומעצב מחדש — קובץ " + d + " מתוך " + t; },
     rehunting: "מחפש לעומק — עוד סימני AI...",
     zipBuilding: "מכין את הקובץ...",
     zipReady: function (n) { return "הורד. " + n + " קבצים שונו."; },
@@ -767,7 +770,8 @@
     err: "משהו השתבש בשלב התיקון. נסו שוב.", strategic: "לא יושם — לא נמצא עוגן מדויק בקוד",
     palette: "פלטה", typography: "טיפוגרפיה", layout: "עיקרון פריסה", personality: "אופי"
   } : {
-    propose: "Propose fixes", proposing: "Building design direction and proposals…",
+    propose: "Redesign the site", proposing: "Redesigning the site…",
+    transformDone: "Redesign complete — download to see the result.",
     designTitle: "Design direction", proposalsTitle: function (n) { return "Fix proposals (" + n + ")"; },
     apply: "Apply approved fixes", applying: "Applying fixes…", qaRunning: "Running QA…",
     qaPass: "Passed QA", qaFail: "QA found issues — running a fix round…",
@@ -780,6 +784,7 @@
     },
     designPass: function (d, t) { return "Building proposals — pass " + d + " of " + t; },
     applyPass: function (d, t) { return "Applying fixes — pass " + d + " of " + t; },
+    transformPass: function (d, t) { return "Redesigning — file " + d + " of " + t; },
     rehunting: "Digging deeper — more AI signals...",
     zipBuilding: "Preparing the file...",
     zipReady: function (n) { return "Downloaded. " + n + " files changed."; },
@@ -817,11 +822,10 @@
     els["propose-fixes"].hidden = false;
     els["propose-fixes"].disabled = false;
     els["propose-fixes"].textContent = P.propose;
-    /* a scan opened from history may already carry stage-2 output */
-    if (scan.design_direction || (scan.proposals && scan.proposals.length)) {
-      renderDesign(scan.design_direction);
-      renderProposals(scan.proposals || []);
-    }
+    /* a scan opened from history may already carry a design direction (from a
+       redesign) and/or proposals (from the older patch flow) */
+    if (scan.design_direction) renderDesign(scan.design_direction);
+    if (scan.proposals && scan.proposals.length) renderProposals(scan.proposals);
     restoreDelivery(scan);
   }
 
@@ -903,6 +907,37 @@
       var msg = (e && e.body && e.body.error) || "";
       if (String(msg).indexOf("stage_timeout") === -1 || parts >= 12) throw e;
       return runDesign(Math.min(12, parts * 2));
+    });
+  }
+
+  /* ===== TransformDesigner: whole-file redesign (the primary flow) =====
+     One server call per file (each a fresh 150s budget); the design direction is
+     locked on the first file and reused for the rest so the site stays coherent.
+     No proposals, no per-signal patches, no human step — the file is rewritten. */
+  function transformPass(n) {
+    els["fix-hint"].textContent = P.transformPass(n, transformTotal || n);
+    return invokeFn("transform", { scan_id: currentScanId, part: n }).then(function (data) {
+      transformTotal = (data && data.parts) || transformTotal;
+      if (data && data.done) return data;
+      return transformPass(n + 1);
+    });
+  }
+
+  function transformSite() {
+    if (!currentScanId) return;
+    els["propose-fixes"].disabled = true;
+    els["proposals"].hidden = true;
+    els["fix-actions"].hidden = true;
+    els["fix-hint"].textContent = P.proposing;
+    transformTotal = 0;
+    transformPass(1).then(function (data) {
+      els["fix-hint"].textContent = P.transformDone;
+      els["propose-fixes"].hidden = true;
+      renderDesign(data && data.design_direction);
+      showDeliver(); /* the redesigned bundle is saved — offer download / PR */
+    }).catch(function (e) {
+      els["fix-hint"].textContent = P.err + " [transform]" + fmtReason(e);
+      els["propose-fixes"].disabled = false;
     });
   }
 
@@ -1222,7 +1257,9 @@
 
   function wireStatic() {
     if (els["report-back"]) els["report-back"].addEventListener("click", backToInput);
-    if (els["propose-fixes"]) els["propose-fixes"].addEventListener("click", proposeFixes);
+    // Primary flow is now the whole-file redesign (TransformDesigner). The old
+    // propose→apply patch handlers stay defined but are no longer wired.
+    if (els["propose-fixes"]) els["propose-fixes"].addEventListener("click", transformSite);
     if (els["apply-fixes"]) els["apply-fixes"].addEventListener("click", applyFixes);
     if (els["download-zip"]) els["download-zip"].addEventListener("click", downloadZip);
     if (els["push-github"]) els["push-github"].addEventListener("click", function () {
