@@ -47,6 +47,16 @@
     },
     scanned: function (n) { return "נסרקו " + n + " קבצים"; },
     foundSignals: function (p, appl) { return "נמצאו " + p + " סימנים מתוך " + appl + " ישימים"; },
+    /* cats: [{ name, count }], כבר ממוינות מהגדולה לקטנה */
+    findingsSummary: function (total, cats) {
+      var head = total === 1 ? "נמצא סימן אחד " : "נמצאו " + total + " סימנים ";
+      var where = cats.length === 1 ? "בקטגוריה אחת" : "ב-" + cats.length + " קטגוריות";
+      var top = cats.slice(0, 3).map(function (c) { return c.name + " (" + c.count + ")"; }).join(", ");
+      var rest = cats.length - 3;
+      return head + where + ": " + top + (rest > 0 ? ", ועוד " + rest : "") + ".";
+    },
+    expandFindings: "הרחבת התקלות",
+    collapseFindings: "סגירת התקלות",
     errGeneric: "השרת לא ענה. נסו שוב — ואם זה חוזר, שלחו לנו את שם הריפו.",
     errRepoPrivate: "הריפו פרטי או שאין הרשאה. התחבר עם GitHub.",
     errNoFiles: "אין כאן קוד לסרוק — רק קבצים שמסוננים ממילא (node_modules,‏ ‎.git, תמונות).",
@@ -83,6 +93,16 @@
     },
     scanned: function (n) { return "Scanned " + n + " files"; },
     foundSignals: function (p, appl) { return "Found " + p + " signals of " + appl + " applicable"; },
+    /* cats: [{ name, count }], already sorted largest first */
+    findingsSummary: function (total, cats) {
+      var head = total === 1 ? "Found 1 signal " : "Found " + total + " signals ";
+      var where = cats.length === 1 ? "in one category" : "across " + cats.length + " categories";
+      var top = cats.slice(0, 3).map(function (c) { return c.name + " (" + c.count + ")"; }).join(", ");
+      var rest = cats.length - 3;
+      return head + where + ": " + top + (rest > 0 ? ", and " + rest + " more" : "") + ".";
+    },
+    expandFindings: "Expand the findings",
+    collapseFindings: "Collapse the findings",
     errGeneric: "The server didn't answer. Try again — and if it keeps happening, send us the repo name.",
     errRepoPrivate: "Repo is private or you lack access. Connect GitHub.",
     errNoFiles: "There's no code here to scan — only files we filter out anyway (node_modules, .git, images).",
@@ -106,6 +126,13 @@
   var els = {};
   var sb = null, user = null, ghConnected = false, busy = false;
 
+  /* Dev-only auth bypass, kept deliberately so the dashboard can be worked on
+     locally without a Supabase session. Gated on the hostname, so it is dead
+     code on any deployed origin. It only fakes the client-side shell — every
+     read still goes through Supabase and returns nothing without a real
+     session, so there is no data behind it either way. */
+  var DEV_NO_AUTH = /^(localhost|127\.0\.0\.1)$/.test(location.hostname);
+
   /* ===== boot ===== */
   document.addEventListener("DOMContentLoaded", function () {
     cacheEls();
@@ -115,6 +142,12 @@
       return sb.auth.getSession();
     }).then(function (res) {
       var session = res.data && res.data.session;
+      /* localhost only — renders the shell with a stand-in user */
+      if (!session && DEV_NO_AUTH) {
+        user = { email: "dev@localhost", user_metadata: { full_name: "Dev" } };
+        showUser(); wireInputs();
+        return;
+      }
       if (!session) { window.location.replace(HOME); return; }
       user = session.user;
       persistGithubToken(session);
@@ -124,6 +157,7 @@
     }).then(function () {
       if (user) { wireInputs(); loadHistory(); }
     }).catch(function () {
+      if (DEV_NO_AUTH) return;
       window.location.replace(HOME);
     });
   });
@@ -708,7 +742,7 @@
       byCat[cat].push(s);
     });
 
-    els["report-body"].innerHTML = groups.map(function (cat, i) {
+    var full = groups.map(function (cat, i) {
       var rows = byCat[cat].map(function (s) {
         var ev = (s.evidence && s.evidence[0]) || null;
         var code = ev ? '<code>' + esc(clip(ev.snippet, 180)) + "</code>" : "";
@@ -722,7 +756,28 @@
         '<summary class="cat-summary"><span class="cat-title">' + esc(cat) + "</span>" +
         '<span class="cat-count">' + byCat[cat].length + "</span></summary>" +
         '<ul class="led">' + rows + "</ul></details>";
-    }).join("") || ("<p>" + esc(he ? "לא נמצאו סימנים." : "No signals found.") + "</p>");
+    }).join("");
+
+    /* The findings stay folded into one card: the summary paragraph says where
+       the problems are, and the full per-signal list opens under it on request,
+       so the fix pipeline above it is what the eye lands on first. */
+    if (full) {
+      var cats = groups.map(function (cat) { return { name: cat, count: byCat[cat].length }; })
+        .sort(function (a, b) { return b.count - a.count; });
+      els["report-body"].innerHTML =
+        '<div class="findings">' +
+          '<div class="findings-head">' +
+            '<p class="findings-sum">' + esc(T.findingsSummary(present.length, cats)) + "</p>" +
+            '<button type="button" class="linkbtn findings-toggle" id="findings-toggle" ' +
+              'aria-expanded="false" aria-controls="findings-full">' + esc(T.expandFindings) + "</button>" +
+          "</div>" +
+          '<div class="findings-full" id="findings-full" hidden>' + full + "</div>" +
+        "</div>";
+      wireFindingsToggle();
+    } else {
+      els["report-body"].innerHTML =
+        "<p>" + esc(he ? "לא נמצאו סימנים." : "No signals found.") + "</p>";
+    }
 
     els.loading.hidden = true;
     els["app-input"].hidden = true;
@@ -731,6 +786,23 @@
     renderFixPipeline(scan);
     setBusy(false);
     window.scrollTo(0, 0);
+  }
+
+  /* lets a fixture scan be pushed into the report view locally, so the layout
+     can be checked without running a real audit */
+  if (DEV_NO_AUTH) { window.__devRenderReport = renderReport; }
+
+  /* The card is rebuilt on every render, so the toggle is wired here rather
+     than cached in cacheEls. */
+  function wireFindingsToggle() {
+    var btn = $("findings-toggle"), panel = $("findings-full");
+    if (!btn || !panel) return;
+    btn.addEventListener("click", function () {
+      var open = panel.hidden;
+      panel.hidden = !open;
+      btn.setAttribute("aria-expanded", String(open));
+      btn.textContent = open ? T.collapseFindings : T.expandFindings;
+    });
   }
 
   /* ===== fix pipeline: stage 2 (design) → 4 (apply) → 5 (QA) =====

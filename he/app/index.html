@@ -33,8 +33,7 @@
       <section id="app-input">
         <div class="app-head">
           <h1>מאיפה מתחילים?</h1>
-          <p>הפנו אותנו לקוד המקור של האתר. אנחנו מאבחנים אותו מול
-             <span class="nums">108 סימנים</span> ב-<span class="nums">16 קטגוריות</span>.</p>
+          <p>הפנו אותנו לקוד המקור של האתר.</p>
         </div>
 
         <!-- דרך 1 — קבצים -->
@@ -127,9 +126,9 @@
           <span class="score" id="score">0<small>/100</small></span>
           <span class="caption" id="report-caption"></span>
         </div>
-        <div id="report-body"></div>
-
-        <!-- ===== צינור התיקון: שלב 2 (עיצוב) ← 4 (יישום) ← 5 (QA) ===== -->
+        <!-- ===== צינור התיקון: שלב 2 (עיצוב) ← 4 (יישום) ← 5 (QA) =====
+             יושב מעל הממצאים: הצעד הבא הוא הדבר הראשון על המסך, והרשימה
+             המלאה נפתחת מתחתיו רק למי שרוצה אותה. ===== -->
         <div class="fix-pipeline" id="fix-pipeline">
           <button type="button" class="btn btn-primary" id="propose-fixes">שדרג ועצב מחדש</button>
           <button type="button" class="btn" id="add-features">הצע והוסף 5 פיצ'רים</button>
@@ -151,6 +150,8 @@
           </div>
           <div class="fix-stage" id="deliver-result" hidden aria-live="polite"></div>
         </div>
+
+        <div id="report-body"></div>
       </section>
 
     </div>

@@ -74,7 +74,6 @@
   color: var(--color-neutral-600); margin: 0; font-size: 0.95rem;
   max-width: 64ch; margin-inline: auto;
 }
-.app-head .nums { color: var(--color-ink); font-weight: 700; }
 
 /* code / URLs stay LTR inside an RTL context */
 .ltr { direction: ltr; unicode-bidi: isolate; }
@@ -137,7 +136,7 @@ code, .mono { font-family: var(--font-mono); }
 /* ---------- the "or" hairline between path 1 and the rows ---------- */
 .or {
   display: flex; align-items: center; gap: var(--s-2);
-  margin-block: 6px;
+  margin-block: 2px;
   color: var(--color-neutral-600);
   font-size: 0.8rem;
   max-width: none;
@@ -155,7 +154,7 @@ code, .mono { font-family: var(--font-mono); }
    (proximity, #88) while paths are a full step apart, so the grouping is
    legible without a box around it. The label is visible, never a
    placeholder standing in for one (#89). */
-.path + .path { margin-block-start: var(--s-2); }
+.path + .path { margin-block-start: var(--s-1); }
 .path-label {
   display: block;
   font-size: 0.82rem; font-weight: 600;
@@ -192,7 +191,9 @@ code, .mono { font-family: var(--font-mono); }
 [dir="rtl"] .row-field input { text-align: right; }
 
 .row-status {
-  min-block-size: 1.3em;
+  /* keeps part of a line reserved so a validation message does not shove
+     the GitHub path down — the full line was most of the gap between them */
+  min-block-size: 0.7em;
   margin-block: 4px 0;
   font-size: 0.82rem;
   color: var(--color-neutral-600);
@@ -378,6 +379,36 @@ code, .mono { font-family: var(--font-mono); }
 .score small { font-size: 0.36em; font-weight: 400; color: var(--color-neutral-600); }
 .report-summary .caption { color: var(--color-neutral-600); font-size: 0.9rem; }
 
+/* ---------- the findings card ----------
+   One contained block: a summary sentence and the control that opens the
+   full list. Collapsed by default so the fix pipeline above it stays the
+   first thing on screen. */
+.findings {
+  background: var(--color-paper-raised);
+  border: 1px solid var(--color-neutral-300);
+  border-radius: var(--r-surface);
+  padding: var(--s-2) var(--s-3);
+}
+.findings-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: var(--s-2); flex-wrap: wrap;
+}
+/* the summary takes the room it needs and the control stays beside it,
+   dropping under it only when there is no width left for both */
+.findings-sum { flex: 1 1 16rem; margin: 0; max-width: none; font-size: 0.95rem; }
+/* a comfortable touch target (#59) — the text alone is only ~23px tall */
+.findings-toggle {
+  flex-shrink: 0; font-size: 0.9rem;
+  display: inline-flex; align-items: center;
+  min-block-size: 44px;
+}
+.findings-full {
+  margin-block-start: var(--s-3);
+  padding-block-start: var(--s-3);
+  border-block-start: 1px solid var(--color-neutral-300);
+}
+.findings-full[hidden] { display: none; }
+
 /* collapsible category accordion — keeps the report short, no endless scroll */
 .cat-group {
   margin-block-end: var(--s-2);
@@ -386,6 +417,16 @@ code, .mono { font-family: var(--font-mono); }
   background: var(--color-paper-raised);
   overflow: hidden;
 }
+/* inside the findings card the accordions are already contained, so they
+   drop their own card chrome and read as rows rather than boxes in a box */
+.findings-full .cat-group {
+  border: none; border-radius: 0; background: none;
+  margin-block-end: 0;
+  border-block-end: 1px solid var(--color-neutral-300);
+}
+.findings-full .cat-group:last-child { border-block-end: none; }
+.findings-full .cat-summary { padding-inline: 0; }
+.findings-full .led { padding-inline: 0; }
 .cat-summary {
   display: flex; align-items: center; gap: var(--s-2);
   padding: var(--s-2) var(--s-3);
@@ -465,11 +506,10 @@ code, .mono { font-family: var(--font-mono); }
 /* ============================================================
    FIX PIPELINE — stage 2 (design) → 4 (apply) → 5 (QA)
    ============================================================ */
-.fix-pipeline {
-  margin-block-start: var(--s-4);
-  padding-block-start: var(--s-3);
-  border-block-start: 1px solid var(--color-neutral-300);
-}
+/* Sits directly under .report-summary, which already ends in a rule — a
+   second border here would double it. The findings card below gets the gap. */
+.fix-pipeline { margin-block-start: 0; }
+#report-body { margin-block-start: var(--s-4); }
 .fix-hint { color: var(--color-neutral-600); font-size: 0.9rem; }
 .fix-stage { margin-block-start: var(--s-3); }
 .fix-stage h3 { font-size: 1rem; margin-block-end: var(--s-2); }

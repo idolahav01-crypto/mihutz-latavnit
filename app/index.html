@@ -33,8 +33,7 @@
       <section id="app-input">
         <div class="app-head">
           <h1>Where do we start?</h1>
-          <p>Point us at your site's source. We audit it against
-             <span class="nums">108 signals</span> across <span class="nums">16 categories</span>.</p>
+          <p>Point us at your site's source.</p>
         </div>
 
         <!-- path 1 — files -->
@@ -127,9 +126,9 @@
           <span class="score" id="score">0<small>/100</small></span>
           <span class="caption" id="report-caption"></span>
         </div>
-        <div id="report-body"></div>
-
-        <!-- ===== fix pipeline: stage 2 (design) → 4 (apply) → 5 (QA) ===== -->
+        <!-- ===== fix pipeline: stage 2 (design) → 4 (apply) → 5 (QA) =====
+             Sits above the findings: the next move is the first thing on
+             screen, and the full list opens below it only on request. ===== -->
         <div class="fix-pipeline" id="fix-pipeline">
           <button type="button" class="btn btn-primary" id="propose-fixes">Redesign the site</button>
           <button type="button" class="btn" id="add-features">Suggest & add 5 features</button>
@@ -151,6 +150,8 @@
           </div>
           <div class="fix-stage" id="deliver-result" hidden aria-live="polite"></div>
         </div>
+
+        <div id="report-body"></div>
       </section>
 
     </div>
