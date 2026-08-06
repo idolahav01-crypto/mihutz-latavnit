@@ -115,7 +115,7 @@
           <li data-stage="0"><span class="stage-mark" aria-hidden="true"></span><span class="stage-name">קורא קבצים</span></li>
           <li data-stage="1"><span class="stage-mark" aria-hidden="true"></span><span class="stage-name">מסנן קבצים לא רלוונטיים</span></li>
           <li data-stage="2"><span class="stage-mark" aria-hidden="true"></span><span class="stage-name">מעלה לניתוח</span></li>
-          <li data-stage="3"><span class="stage-mark" aria-hidden="true"></span><span class="stage-name">מריץ אבחון מול 108 סימנים</span></li>
+          <li data-stage="3"><span class="stage-mark" aria-hidden="true"></span><span class="stage-name">מריץ אבחון מול 110 סימנים</span></li>
         </ol>
       </section>
 
@@ -130,10 +130,12 @@
              יושב מעל הממצאים: הצעד הבא הוא הדבר הראשון על המסך, והרשימה
              המלאה נפתחת מתחתיו רק למי שרוצה אותה. ===== -->
         <div class="fix-pipeline" id="fix-pipeline">
-          <button type="button" class="btn btn-primary" id="propose-fixes">שדרג ועצב מחדש</button>
-          <button type="button" class="btn" id="add-features">הצע והוסף 5 פיצ'רים</button>
-          <button type="button" class="btn" id="review-bloat">בדוק מה מיותר להסרה</button>
+          <button type="button" class="btn btn-primary" id="rebuild-site">בנה מחדש מאפס</button>
+          <button type="button" class="btn" id="add-features">הצע 5 פיצ'רים</button>
+          <button type="button" class="btn" id="propose-fixes">שדרג ועצב מחדש (ישן)</button>
           <p class="fix-hint" id="fix-hint" aria-live="polite"></p>
+          <div class="rb-progress" id="rb-progress" hidden aria-live="polite"></div>
+          <div class="fix-stage" id="score-delta" hidden aria-live="polite"></div>
           <div class="fix-stage" id="design-direction" hidden></div>
           <div class="fix-stage" id="proposals" hidden></div>
           <div class="fix-actions" id="fix-actions" hidden>
@@ -142,7 +144,6 @@
           <div class="fix-stage" id="apply-result" hidden aria-live="polite"></div>
           <div class="fix-stage" id="qa-result" hidden aria-live="polite"></div>
           <div class="fix-stage" id="features-result" hidden aria-live="polite"></div>
-          <div class="fix-stage" id="bloat-result" hidden aria-live="polite"></div>
           <div class="deliver-actions" id="deliver-actions" hidden>
             <button type="button" class="btn btn-primary" id="download-zip">הורדת הפרויקט המתוקן (‎.zip)</button>
             <button type="button" class="btn" id="push-github">פתיחת Pull Request ב-GitHub</button>

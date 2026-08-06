@@ -32,7 +32,7 @@ const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 // faster, which matters directly here because every pass races a 150s
 // edge-function wall clock.
 const MODEL = "claude-sonnet-5";
-const SIGNAL_COUNT = (signals as unknown[]).length; // 108
+const SIGNAL_COUNT = (signals as unknown[]).length; // 110
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
@@ -215,7 +215,7 @@ const SCHEMA = {
 
 // Deterministic recompute — never trust the model's own arithmetic.
 /**
- * How many passes to split the 108-signal audit across.
+ * How many passes to split the 110-signal audit across.
  *
  * Measured: wall-clock scales with the number of signals the model reports as
  * PRESENT (output tokens), not with input size — a 322KB bundle with 4 present
@@ -285,7 +285,7 @@ Deno.serve(async (req) => {
 
   const { data: scan, error: scanErr } = await admin
     .from("scans")
-    .select("id, user_id, detection")
+    .select("id, user_id, detection, detection_after")
     .eq("id", scanId)
     .single();
   if (scanErr || !scan || scan.user_id !== user.id) {
@@ -389,7 +389,7 @@ Deno.serve(async (req) => {
     const fileCount = (bundle.match(/^=== FILE: /gm) ?? []).length;
 
     // Which signals this pass is responsible for. The SYSTEM prompt still
-    // carries all 108 (identical bytes every pass, so it stays prompt-cached);
+    // carries all 110 (identical bytes every pass, so it stays prompt-cached);
     // only the user turn narrows the scope.
     const perPart = Math.ceil(signals.length / parts);
     const slice = signals.slice((part - 1) * perPart, part * perPart);
@@ -421,8 +421,13 @@ Deno.serve(async (req) => {
     const partDetection = claude.json as DetectionResult;
     const usage = claude.usage;
 
-    // Fold this pass into whatever the earlier passes recorded.
-    const prior = (part === 1 ? {} : (scan.detection ?? {})) as DetectionResult;
+    // Fold this pass into whatever the earlier passes recorded. In "after" mode
+    // the partials accumulate in detection_after so the original "before"
+    // detection (scan.detection) is never touched or corrupted mid-rescan.
+    const priorStored = mode === "after"
+      ? (scan as { detection_after?: unknown }).detection_after
+      : scan.detection;
+    const prior = (part === 1 ? {} : (priorStored ?? {})) as DetectionResult;
     const detection = mergeDetection(prior, partDetection);
 
     await recordStageUsage(
@@ -441,7 +446,9 @@ Deno.serve(async (req) => {
     // the client, which drives the next pass. Status stays "detecting" so a
     // half-finished scan can never look complete.
     if (part < parts) {
-      await admin.from("scans").update({ detection }).eq("id", scanId);
+      await admin.from("scans")
+        .update(mode === "after" ? { detection_after: detection } : { detection })
+        .eq("id", scanId);
       return json({
         ok: true,
         scan_id: scanId,

@@ -173,10 +173,10 @@
      "score", "report-caption", "report-body", "report-back",
      "history", "history-list", "history-all", "history-empty",
      "history-dialog", "history-all-list",
-     "fix-pipeline", "propose-fixes", "fix-hint", "design-direction",
+     "fix-pipeline", "rebuild-site", "propose-fixes", "fix-hint", "design-direction",
      "proposals", "fix-actions", "apply-fixes", "apply-result", "qa-result",
      "deliver-actions", "download-zip", "push-github", "deliver-result",
-     "add-features", "features-result", "review-bloat", "bloat-result"
+     "add-features", "features-result", "rb-progress", "score-delta"
     ].forEach(function (id) { els[id] = $(id); });
     els.stageItems = Array.prototype.slice.call(document.querySelectorAll(".stages li"));
   }
@@ -616,7 +616,7 @@
       .then(function (r) { if (r.error) throw r.error; });
   }
 
-  /* The 108-signal audit is split across sequential passes. Wall-clock scales
+  /* The 110-signal audit is split across sequential passes. Wall-clock scales
      with how many signals come back PRESENT, not with project size, so a
      heavily-templated site — the exact thing this product exists for — blows
      the 150s edge-function limit in a single call. Each pass audits a slice and
@@ -721,12 +721,12 @@
     var det = scan.detection || {};
     /* The stored detection carries an entry for every signal (present & absent).
        The report must show ONLY the ones actually present & applicable — not all
-       108 — so the page stays short and about what was actually found. */
+       110 — so the page stays short and about what was actually found. */
     var all = det.present_signals || det.signals || [];
     var present = all.filter(function (s) { return s.present === true && s.applicable !== false; });
     var applicable = det.applicable_count != null
       ? det.applicable_count
-      : 108 - ((det.not_applicable_ids || []).length);
+      : 110 - ((det.not_applicable_ids || []).length);
 
     els.score.innerHTML = esc(String(scan.ai_fingerprint_score != null ? scan.ai_fingerprint_score : 0)) + "<small>/100</small>";
     els["report-caption"].textContent =
@@ -817,15 +817,35 @@
   var P = he ? {
     propose: "שדרג ועצב מחדש", proposing: "משדרג ומעצב את האתר מחדש…",
     transformDone: "העיצוב מחדש הושלם — אפשר להוריד ולראות את התוצאה.",
-    addFeatures: "הצע והוסף 5 פיצ'רים",
-    featuresProposing: "חושב על פיצ'רים חדשים לאתר…",
+    rebuildSpec: "לומד את האתר — מה יש בו בדיוק…",
+    rebuildShell: "בונה את שפת העיצוב (צבעים, פונטים, מבנה)…",
+    rebuildSection: function (d, t) { return "בונה מאפס — סקשן " + d + " מתוך " + t + "…"; },
+    rebuildDone: "האתר נבנה מחדש מאפס — אפשר להוריד ולראות את התוצאה.",
+    addFeatures: "הצע 5 פיצ'רים",
+    featuresProposing: "קורא ומבין את האתר — חושב על 5 פיצ'רים…",
     featurePass: function (i) { return "בונה פיצ'ר " + i + " מתוך 5…"; },
     featuresTitle: "פיצ'רים חדשים שנוספו",
     featuresDone: "נוספו פיצ'רים חדשים — אפשר להוריד ולראות.",
-    reviewBloat: "בדוק מה מיותר להסרה",
-    bloatChecking: "עובר על האתר — מה מיותר…",
-    bloatTitle: "הצעות להסרה — לא יימחק כלום בלי אישורך",
-    bloatNone: "לא נמצא משהו מיותר משמעותי — האתר נקי.",
+    /* propose → select → add */
+    featuresPick: "בחר אילו פיצ'רים להוסיף לאתר:",
+    featuresAddBtn: "הוסף את הנבחרים",
+    featuresNoneSelected: "בחר לפחות פיצ'ר אחד.",
+    featuresAdding: function (d, t) { return "מוסיף פיצ'ר " + d + " מתוך " + t + "…"; },
+    featuresAddedN: function (n) { return "נוספו " + n + " פיצ'רים — אפשר להוריד ולראות."; },
+    /* interactive progress */
+    rbStepUnderstand: "מבין את האתר",
+    rbStepDesign: "בונה שפת עיצוב",
+    rbStepSection: function (i) { return "בונה סקשן " + i; },
+    rbStepAssemble: "מרכיב את האתר",
+    /* AI score before/after */
+    scoreScanning: function (d, t) { return t ? "מודד כמה AI האתר עכשיו — מעבר " + d + " מתוך " + t + "…" : "מודד כמה AI האתר עכשיו…"; },
+    scoreTitle: "כמה AI האתר",
+    scoreHint: "0 = אנושי לגמרי · 100 = AI מובהק",
+    scoreBefore: "לפני",
+    scoreAfter: "אחרי",
+    scoreImproved: function (d) { return "ירידה של " + d + " נקודות ברמת ה-AI."; },
+    scoreSame: "אין שינוי מדיד בציון.",
+    scoreWorse: function (d) { return "עלייה של " + d + " נקודות — כדאי לבדוק."; },
     designTitle: "כיוון עיצובי", proposalsTitle: function (n) { return "הצעות תיקון (" + n + ")"; },
     apply: "החל תיקונים מאושרים", applying: "מחיל תיקונים…", qaRunning: "בקרת איכות…",
     qaPass: "עבר בקרת איכות", qaFail: "בקרת האיכות מצאה בעיות — מריץ סבב תיקון…",
@@ -856,15 +876,35 @@
   } : {
     propose: "Redesign the site", proposing: "Redesigning the site…",
     transformDone: "Redesign complete — download to see the result.",
-    addFeatures: "Suggest & add 5 features",
-    featuresProposing: "Thinking of new features for the site…",
+    rebuildSpec: "Learning the site — exactly what it contains…",
+    rebuildShell: "Building the design language (colors, fonts, layout)…",
+    rebuildSection: function (d, t) { return "Rebuilding from scratch — section " + d + " of " + t + "…"; },
+    rebuildDone: "The site was rebuilt from scratch — download to see the result.",
+    addFeatures: "Suggest 5 features",
+    featuresProposing: "Reading & understanding the site — thinking of 5 features…",
     featurePass: function (i) { return "Building feature " + i + " of 5…"; },
     featuresTitle: "New features added",
     featuresDone: "New features added — download to see them.",
-    reviewBloat: "Review what to remove",
-    bloatChecking: "Reviewing the site for clutter…",
-    bloatTitle: "Removal suggestions — nothing is removed without your approval",
-    bloatNone: "Nothing significant to remove — the site is lean.",
+    /* propose → select → add */
+    featuresPick: "Pick which features to add to the site:",
+    featuresAddBtn: "Add selected",
+    featuresNoneSelected: "Select at least one feature.",
+    featuresAdding: function (d, t) { return "Adding feature " + d + " of " + t + "…"; },
+    featuresAddedN: function (n) { return "Added " + n + " features — download to see them."; },
+    /* interactive progress */
+    rbStepUnderstand: "Understanding the site",
+    rbStepDesign: "Building the design language",
+    rbStepSection: function (i) { return "Building section " + i; },
+    rbStepAssemble: "Assembling the site",
+    /* AI score before/after */
+    scoreScanning: function (d, t) { return t ? "Measuring how AI the site is now — pass " + d + " of " + t + "…" : "Measuring how AI the site is now…"; },
+    scoreTitle: "How AI the site is",
+    scoreHint: "0 = fully human · 100 = obvious AI",
+    scoreBefore: "Before",
+    scoreAfter: "After",
+    scoreImproved: function (d) { return d + " points less AI."; },
+    scoreSame: "No measurable change in score.",
+    scoreWorse: function (d) { return d + " points higher — worth a look."; },
     designTitle: "Design direction", proposalsTitle: function (n) { return "Fix proposals (" + n + ")"; },
     apply: "Apply approved fixes", applying: "Applying fixes…", qaRunning: "Running QA…",
     qaPass: "Passed QA", qaFail: "QA found issues — running a fix round…",
@@ -916,9 +956,16 @@
     els["propose-fixes"].disabled = false;
     els["propose-fixes"].textContent = P.propose;
     if (els["add-features"]) { els["add-features"].textContent = P.addFeatures; els["add-features"].disabled = false; els["add-features"].hidden = false; }
-    if (els["review-bloat"]) { els["review-bloat"].textContent = P.reviewBloat; els["review-bloat"].disabled = false; els["review-bloat"].hidden = false; }
     if (els["features-result"]) els["features-result"].hidden = true;
-    if (els["bloat-result"]) els["bloat-result"].hidden = true;
+    if (els["rb-progress"]) els["rb-progress"].hidden = true;
+    if (els["score-delta"]) els["score-delta"].hidden = true;
+    /* a scan re-opened from history may already carry a measured after-score */
+    if (scan.ai_fingerprint_score_after != null) {
+      renderScoreDelta(
+        { ai_fingerprint_score: scan.ai_fingerprint_score },
+        { ai_fingerprint_score: scan.ai_fingerprint_score_after }
+      );
+    }
     /* a scan opened from history may already carry a design direction (from a
        redesign) and/or proposals (from the older patch flow) */
     if (scan.design_direction) renderDesign(scan.design_direction);
@@ -1038,62 +1085,207 @@
     });
   }
 
-  /* ===== FeatureDesigner: propose 5 features and add them (one call each) ===== */
-  function renderFeatures(list) {
-    els["features-result"].hidden = false;
-    els["features-result"].innerHTML = "<h3>" + esc(P.featuresTitle) + "</h3><ul class=\"feat-list\">" +
-      list.map(function (f) {
-        return "<li><b>" + esc(f.name || "") + "</b> — " + esc(f.summary || "") + "</li>";
-      }).join("") + "</ul>";
+  /* ===== interactive progress: a live checklist of steps done / active / left,
+     shared by the rebuild flow and the add-features flow. ===== */
+  function renderProgress(steps) {
+    var el = els["rb-progress"];
+    if (!el) return;
+    el.hidden = false;
+    el.innerHTML = '<ol class="rb-steps">' + steps.map(function (s) {
+      var mark = s.state === "done" ? "✓" : "";
+      return '<li class="rb-step is-' + s.state + '">' +
+        '<span class="rb-dot" aria-hidden="true">' + mark + '</span>' +
+        '<span class="rb-label">' + esc(s.label) + "</span></li>";
+    }).join("") + "</ol>";
   }
-
-  function featuresPass(n) {
-    els["fix-hint"].textContent = n === 1 ? P.featuresProposing : P.featurePass(n - 1);
-    return invokeFn("features", { scan_id: currentScanId, part: n }).then(function (data) {
-      if (n === 1 && data && data.features) renderFeatures(data.features);
-      if (data && data.done) return data;
-      return featuresPass(n + 1);
+  function hideProgress() { if (els["rb-progress"]) els["rb-progress"].hidden = true; }
+  /* Map a flat list of step labels + how many are complete into progress rows. */
+  function stepsWithState(labels, completed) {
+    return labels.map(function (label, i) {
+      return { label: label, state: i < completed ? "done" : (i === completed ? "active" : "pending") };
     });
   }
 
-  function addFeaturesRun() {
+  function reenableFixButtons() {
+    if (els["rebuild-site"]) els["rebuild-site"].disabled = false;
+    if (els["add-features"]) els["add-features"].disabled = false;
+    if (els["propose-fixes"]) els["propose-fixes"].disabled = false;
+  }
+  function busyFixButtons() {
+    if (els["rebuild-site"]) els["rebuild-site"].disabled = true;
+    if (els["add-features"]) els["add-features"].disabled = true;
+    if (els["propose-fixes"]) els["propose-fixes"].disabled = true;
+  }
+
+  /* ===== honest AI score: re-run the SAME audit on the rebuilt/updated site
+     (detect mode:"after") and show before → after. The scoring is the exact same
+     deterministic, weight-based formula used for the original scan, so the two
+     numbers are directly comparable and the "after" is measured, not asserted. */
+  function afterScanPass(n, total) {
+    els["fix-hint"].textContent = P.scoreScanning(n, total);
+    return invokeFn("detect", { scan_id: currentScanId, mode: "after", part: n, parts: total })
+      .then(function (data) {
+        if (data && data.done) return data;
+        return afterScanPass(n + 1, total);
+      });
+  }
+  function runAfterScan() {
+    els["fix-hint"].textContent = P.scoreScanning(0, 0);
+    return afterScanPass(1, 3).then(function (data) {
+      renderScoreDelta(data && data.before, data && data.after);
+      return data;
+    }).catch(function () {
+      /* non-fatal: the rebuild already delivered; we just couldn't measure after */
+      return null;
+    });
+  }
+  function renderScoreDelta(before, after) {
+    var el = els["score-delta"];
+    if (!el || !after || after.ai_fingerprint_score == null) return;
+    var b = (before && before.ai_fingerprint_score != null) ? before.ai_fingerprint_score : null;
+    var a = after.ai_fingerprint_score;
+    var delta = b == null ? null : (b - a); /* positive = less AI = better */
+    var msg = delta == null ? "" :
+      (delta > 0 ? P.scoreImproved(delta) : (delta < 0 ? P.scoreWorse(-delta) : P.scoreSame));
+    el.hidden = false;
+    el.innerHTML =
+      "<h3>" + esc(P.scoreTitle) + "</h3>" +
+      '<p class="score-hint">' + esc(P.scoreHint) + "</p>" +
+      '<div class="score-ba">' +
+        (b != null ? '<div class="score-chip"><span class="score-k">' + esc(P.scoreBefore) +
+          '</span><span class="score-v" dir="ltr">' + esc(String(b)) + "</span></div>" : "") +
+        '<div class="score-chip is-after"><span class="score-k">' + esc(P.scoreAfter) +
+          '</span><span class="score-v" dir="ltr">' + esc(String(a)) + "</span></div>" +
+      "</div>" +
+      (msg ? '<p class="score-msg">' + esc(msg) + "</p>" : "");
+  }
+
+  /* ===== RebuildDesigner: understand the site, then build it again from
+     scratch in our own clean format (the flagship flow). One server call per
+     step (spec → shell → one per section), each a fresh 150s budget; the final
+     step assembles a complete, self-contained page. Progress is shown live. ===== */
+  var rebuildTotal = 0;
+  var rbSectionNames = null;
+  function rbLabels() {
+    var labels = [P.rbStepUnderstand, P.rbStepDesign];
+    if (rbSectionNames) {
+      rbSectionNames.forEach(function (nm, i) { labels.push(nm || P.rbStepSection(i + 1)); });
+    }
+    return labels;
+  }
+  function rebuildPass(n) {
+    renderProgress(stepsWithState(rbLabels(), n - 1)); /* step n is active */
+    els["fix-hint"].textContent = n === 1 ? P.rebuildSpec
+      : (n === 2 ? P.rebuildShell
+                 : P.rebuildSection(n - 2, rebuildTotal ? rebuildTotal - 2 : n - 2));
+    return invokeFn("rebuild", { scan_id: currentScanId, part: n }).then(function (data) {
+      rebuildTotal = (data && data.parts) || rebuildTotal;
+      if (n === 1 && data && data.spec_summary && data.spec_summary.sections) {
+        rbSectionNames = data.spec_summary.sections.map(function (s) { return s.heading || s.type || ""; });
+      }
+      renderProgress(stepsWithState(rbLabels(), n)); /* step n done */
+      if (data && data.done) return data;
+      return rebuildPass(n + 1);
+    });
+  }
+
+  function rebuildSite() {
     if (!currentScanId) return;
-    els["add-features"].disabled = true;
+    busyFixButtons();
+    els["proposals"].hidden = true;
+    els["fix-actions"].hidden = true;
+    if (els["score-delta"]) els["score-delta"].hidden = true;
+    rebuildTotal = 0;
+    rbSectionNames = null;
+    rebuildPass(1).then(function (data) {
+      hideProgress();
+      renderDesign(data && data.design_direction);
+      showDeliver(); /* the rebuilt bundle is saved — offer download / PR */
+      return runAfterScan(); /* measure the honest before/after AI score */
+    }).then(function () {
+      els["fix-hint"].textContent = P.rebuildDone;
+      reenableFixButtons();
+    }).catch(function (e) {
+      hideProgress();
+      els["fix-hint"].textContent = P.err + " [rebuild]" + fmtReason(e);
+      reenableFixButtons();
+    });
+  }
+
+  /* ===== FeatureDesigner: propose 5 features → user picks 1+ → add the picked
+     ones (one server call each, shown as live progress) → re-score. ===== */
+  var proposedFeatures = [];
+  function renderFeatureChoices(list) {
+    proposedFeatures = list || [];
+    els["features-result"].hidden = false;
+    els["features-result"].innerHTML =
+      "<h3>" + esc(P.featuresTitle) + "</h3>" +
+      "<p>" + esc(P.featuresPick) + "</p>" +
+      '<ul class="feat-choose">' + proposedFeatures.map(function (f, i) {
+        return '<li><label class="feat-opt">' +
+          '<input type="checkbox" class="feat-cb" value="' + i + '" checked> ' +
+          "<span><b>" + esc(f.name || "") + "</b> — " + esc(f.summary || "") + "</span></label></li>";
+      }).join("") + "</ul>" +
+      '<button type="button" class="btn btn-primary" id="features-add">' + esc(P.featuresAddBtn) + "</button>";
+    var addBtn = $("features-add");
+    if (addBtn) addBtn.addEventListener("click", addSelectedFeatures);
+  }
+
+  /* Step 1: read/understand the site (server also uses the scan's profile) and
+     propose 5 features. Nothing is added yet — the user chooses. */
+  function proposeFeatures() {
+    if (!currentScanId) return;
+    busyFixButtons();
+    if (els["score-delta"]) els["score-delta"].hidden = true;
     els["fix-hint"].textContent = P.featuresProposing;
-    featuresPass(1).then(function () {
-      els["fix-hint"].textContent = P.featuresDone;
-      els["add-features"].disabled = false;
-      showDeliver();
+    invokeFn("features", { scan_id: currentScanId, part: 1 }).then(function (data) {
+      els["fix-hint"].textContent = "";
+      renderFeatureChoices((data && data.features) || []);
+      reenableFixButtons();
     }).catch(function (e) {
       els["fix-hint"].textContent = P.err + " [features]" + fmtReason(e);
-      els["add-features"].disabled = false;
+      reenableFixButtons();
     });
   }
 
-  /* ===== declutter: review what's worth removing (SUGGESTS ONLY, never deletes) ===== */
-  function renderBloat(list) {
-    els["bloat-result"].hidden = false;
-    if (!list.length) {
-      els["bloat-result"].innerHTML = "<p class=\"qa-pass\">" + esc(P.bloatNone) + "</p>";
-      return;
-    }
-    els["bloat-result"].innerHTML = "<h3>" + esc(P.bloatTitle) + "</h3><ul class=\"feat-list\">" +
-      list.map(function (r) {
-        return "<li><b>" + esc(r.what || "") + "</b> — " + esc(r.why || "") + "</li>";
-      }).join("") + "</ul>";
-  }
-
-  function reviewBloat() {
+  /* Step 2: implement only the selected features, one call each, with progress. */
+  function addSelectedFeatures() {
     if (!currentScanId) return;
-    els["review-bloat"].disabled = true;
-    els["bloat-result"].hidden = false;
-    els["bloat-result"].innerHTML = "<p>" + esc(P.bloatChecking) + "</p>";
-    invokeFn("declutter", { scan_id: currentScanId }).then(function (data) {
-      renderBloat((data && data.removals) || []);
-      els["review-bloat"].disabled = false;
+    var boxes = els["features-result"].querySelectorAll(".feat-cb");
+    var selected = [];
+    Array.prototype.forEach.call(boxes, function (b) { if (b.checked) selected.push(Number(b.value)); });
+    if (!selected.length) { els["fix-hint"].textContent = P.featuresNoneSelected; return; }
+
+    var addBtn = $("features-add");
+    if (addBtn) addBtn.disabled = true;
+    busyFixButtons();
+    var labels = selected.map(function (i) {
+      return (proposedFeatures[i] && proposedFeatures[i].name) || P.rbStepSection(i + 1);
+    });
+
+    function step(k) {
+      if (k >= selected.length) return Promise.resolve();
+      renderProgress(stepsWithState(labels, k));
+      els["fix-hint"].textContent = P.featuresAdding(k + 1, selected.length);
+      return invokeFn("features", { scan_id: currentScanId, feature_index: selected[k] })
+        .then(function () {
+          renderProgress(stepsWithState(labels, k + 1));
+          return step(k + 1);
+        });
+    }
+
+    step(0).then(function () {
+      hideProgress();
+      els["fix-hint"].textContent = P.featuresAddedN(selected.length);
+      showDeliver();
+      return runAfterScan();
+    }).then(function () {
+      reenableFixButtons();
     }).catch(function (e) {
-      els["bloat-result"].innerHTML = "<p>" + esc(P.err + " [declutter]" + fmtReason(e)) + "</p>";
-      els["review-bloat"].disabled = false;
+      hideProgress();
+      els["fix-hint"].textContent = P.err + " [features]" + fmtReason(e);
+      reenableFixButtons();
+      if (addBtn) addBtn.disabled = false;
     });
   }
 
@@ -1401,6 +1593,18 @@
     else if (reason && /anthropic|model|bundle/.test(reason)) msg = T.errDetect;
     /* this is a work tool: never hide the concrete reason behind a generic line */
     else if (reason) msg = T.errGeneric + " (" + reason + ")";
+    else {
+      /* No JSON {error} body — this is a DB/storage error or a function that
+         crashed/timed out without a JSON response. Surface whatever we have
+         (HTTP status + message) so we're never flying blind. */
+      var detail = "";
+      if (e) {
+        if (e.status) detail += "status " + e.status;
+        if (e.message && e.message !== "invoke_error") detail += (detail ? " · " : "") + e.message;
+      }
+      if (detail) msg = T.errGeneric + " (" + detail + ")";
+    }
+    if (e) { try { console.error("[audit flow error]", e, e && e.body); } catch (_) {} }
     showError(msg);
   }
 
@@ -1442,10 +1646,10 @@
     if (els["report-back"]) els["report-back"].addEventListener("click", backToInput);
     // Primary flow is now the whole-file redesign (TransformDesigner). The old
     // propose→apply patch handlers stay defined but are no longer wired.
+    if (els["rebuild-site"]) els["rebuild-site"].addEventListener("click", rebuildSite);
     if (els["propose-fixes"]) els["propose-fixes"].addEventListener("click", transformSite);
     if (els["apply-fixes"]) els["apply-fixes"].addEventListener("click", applyFixes);
-    if (els["add-features"]) els["add-features"].addEventListener("click", addFeaturesRun);
-    if (els["review-bloat"]) els["review-bloat"].addEventListener("click", reviewBloat);
+    if (els["add-features"]) els["add-features"].addEventListener("click", proposeFeatures);
     if (els["download-zip"]) els["download-zip"].addEventListener("click", downloadZip);
     if (els["push-github"]) els["push-github"].addEventListener("click", function () {
       pushToGithub(false);

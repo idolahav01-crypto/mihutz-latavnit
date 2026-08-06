@@ -80,6 +80,7 @@ const IMPL_SYSTEM =
 
 Return a self-contained implementation of just this one feature: html (the markup block to add), css (its styles), js (its behavior). Requirements:
 - It MUST look hand-crafted and match the site's existing design system — reuse its colors, spacing, type and component styles. NEVER introduce a generic AI look (no purple gradients, no "Get Started", no default Inter, no symmetric three-card row).
+- ABSOLUTELY NO EMOJI anywhere in the feature — not as icons, not in headings, buttons, or labels. Emoji are the #1 AI fingerprint. Use a real inline SVG icon or none.
 - Plain client-side HTML/CSS/JS only. No external libraries, no API keys, no network calls to third parties.
 - Genuinely functional and interactive. Use localStorage where persistence helps. Never invent facts — use the site's real data, or interactive inputs the user fills.
 - Keep selectors unique to this feature (prefix classes/ids) so it can't collide with the page.
@@ -123,7 +124,7 @@ Deno.serve(async (req) => {
   const user = await requireUser(admin, req);
   if (!user) return json({ error: "unauthorized" }, 401);
 
-  let body: { scan_id?: string; part?: number };
+  let body: { scan_id?: string; part?: number; feature_index?: number };
   try {
     body = await req.json();
   } catch {
@@ -133,6 +134,10 @@ Deno.serve(async (req) => {
   if (!scanId) return json({ error: "scan_id required" }, 400);
   let part = Number.isInteger(body.part) && (body.part as number) >= 1 ? (body.part as number) : 1;
   if (part > PARTS) part = PARTS;
+  // The client now proposes first, lets the user pick, then asks to implement
+  // specific features by index. feature_index (0-based) implements exactly that
+  // feature; when absent we fall back to the old sequential part-based order.
+  const wantImpl = Number.isInteger(body.feature_index) && (body.feature_index as number) >= 0;
 
   const { data: scan, error: scanErr } = await admin
     .from("scans")
@@ -168,7 +173,7 @@ Deno.serve(async (req) => {
 
     const startedAt = Date.now();
 
-    if (part === 1) {
+    if (part === 1 && !wantImpl) {
       // Propose the 5 features (no code yet).
       const userContent =
         `<site_profile>\n${JSON.stringify(scan.site_profile ?? {}, null, 2)}\n</site_profile>\n\n` +
@@ -192,12 +197,14 @@ Deno.serve(async (req) => {
       return json({ ok: true, scan_id: scanId, part, parts: PARTS, done: false, features });
     }
 
-    // parts 2..6 — implement feature (part-1).
+    // Implement ONE feature — the one the user picked (feature_index), or the
+    // sequential fallback (part-2).
     const { data: planFile } = await admin.storage.from("scans").download(planPath);
     if (!planFile) throw new Error("feature_plan_missing");
     const features = JSON.parse(await planFile.text()) as Array<{ name: string; summary: string }>;
-    const feat = features[part - 2];
-    if (!feat) return json({ ok: true, scan_id: scanId, part, parts: PARTS, done: part >= PARTS, features });
+    const idx = wantImpl ? (body.feature_index as number) : part - 2;
+    const feat = features[idx];
+    if (!feat) return json({ error: "feature_index_out_of_range", index: idx, count: features.length }, 409);
 
     const userContent =
       `<site_profile>\n${JSON.stringify(scan.site_profile ?? {}, null, 2)}\n</site_profile>\n\n` +
@@ -208,7 +215,7 @@ Deno.serve(async (req) => {
       apiKey, model: MODEL, effort: "high", maxTokens: 12000, stream: false,
       system: IMPL_SYSTEM, schema: IMPL_SCHEMA, userContent, timeoutMs: 120_000,
     });
-    await recordStageUsage(admin, scanId, buildEntry(`features_impl_${part - 1}`, MODEL, res.usage, Date.now() - startedAt, "high"));
+    await recordStageUsage(admin, scanId, buildEntry(`features_impl_${idx + 1}`, MODEL, res.usage, Date.now() - startedAt, "high"));
 
     const impl = (res.json ?? {}) as { html?: string; css?: string; js?: string };
     const injected = injectFeature(stripped, impl);
@@ -221,11 +228,11 @@ Deno.serve(async (req) => {
     );
     if (up.error) throw new Error(`storage: ${up.error.message}`);
 
-    const done = part >= PARTS;
-    // Keep the scan deliverable (download/PR available).
+    // Each call fully implements ONE feature; the client drives the loop over
+    // the features the user selected, so this call is "done" on its own.
     await admin.from("scans").update({ pipeline_status: "applied" }).eq("id", scanId);
 
-    return json({ ok: true, scan_id: scanId, part, parts: PARTS, done, feature: feat, features });
+    return json({ ok: true, scan_id: scanId, index: idx, done: true, feature: feat, features });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     await admin.from("scans").update({ error: `features: ${message}` }).eq("id", scanId);

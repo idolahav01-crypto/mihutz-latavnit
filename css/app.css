@@ -548,6 +548,61 @@ code, .mono { font-family: var(--font-mono); }
 .qa-human { color: #8a5a00; font-weight: 600; }
 
 /* ============================================================
+   INTERACTIVE PROGRESS — live step checklist (rebuild / add features)
+   ============================================================ */
+.rb-progress { margin-block-start: var(--s-3); }
+.rb-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.rb-step {
+  display: flex; align-items: center; gap: 10px;
+  font-size: 0.92rem; line-height: 1.35;
+  color: var(--color-neutral-600);
+}
+.rb-dot {
+  flex: 0 0 auto;
+  inline-size: 18px; block-size: 18px; border-radius: 999px;
+  border: 2px solid var(--color-neutral-300);
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 0.7rem; font-weight: 700; color: #fff; background: transparent;
+}
+.rb-step.is-done { color: var(--color-ink); }
+.rb-step.is-done .rb-dot { background: #14612a; border-color: #14612a; }
+.rb-step.is-active { color: var(--color-ink); font-weight: 600; }
+.rb-step.is-active .rb-dot {
+  border-color: var(--color-primary, #c0392b);
+  border-block-start-color: transparent;
+  animation: rb-spin 0.7s linear infinite;
+}
+.rb-step.is-pending { opacity: 0.6; }
+@keyframes rb-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .rb-step.is-active .rb-dot { animation: none; } }
+
+/* ===== feature picker — choose which proposed features to add ===== */
+.feat-choose { list-style: none; margin: var(--s-2) 0; padding: 0; display: grid; gap: 8px; }
+.feat-opt {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: var(--s-2);
+  border: 1px solid var(--color-neutral-300); border-radius: 10px;
+  cursor: pointer; font-size: 0.92rem; line-height: 1.5;
+}
+.feat-opt:hover { border-color: var(--color-ink); }
+.feat-opt input { margin-block-start: 3px; flex: 0 0 auto; }
+.feat-opt b { color: var(--color-ink); }
+
+/* ===== AI score before → after ===== */
+.score-hint { font-size: 0.82rem; color: var(--color-neutral-600); margin-block: 2px var(--s-2); }
+.score-ba { display: flex; gap: var(--s-2); flex-wrap: wrap; }
+.score-chip {
+  display: flex; flex-direction: column; align-items: center;
+  min-inline-size: 96px; padding: var(--s-2);
+  border: 1px solid var(--color-neutral-300); border-radius: 12px;
+}
+.score-chip.is-after { border-color: #14612a; }
+.score-k { font-size: 0.8rem; color: var(--color-neutral-600); }
+.score-v { font-family: var(--font-mono); font-weight: 800; font-size: 1.8rem; color: var(--color-ink); }
+.score-chip.is-after .score-v { color: #14612a; }
+.score-msg { margin-block-start: var(--s-2); font-weight: 600; color: var(--color-ink); }
+
+/* ============================================================
    SHEETS — repo picker and the full audit list
    ============================================================ */
 .sheet {
