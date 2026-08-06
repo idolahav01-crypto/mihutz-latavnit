@@ -288,15 +288,26 @@ code, .mono { font-family: var(--font-mono); }
 }
 .history-del:hover { color: #fff; background: var(--color-error); }
 
-/* feature / removal suggestion lists */
-.feat-list { list-style: none; margin: var(--s-2) 0 0; padding: 0; }
-.feat-list li {
-  padding-block: var(--s-2);
-  border-block-end: 1px dashed var(--color-neutral-300);
-  font-size: 0.92rem; line-height: 1.5;
+/* ---------- the proposed feature ----------
+   One card holding the idea and the decision about it, so the choice to
+   build is attached to the thing being built rather than floating above it. */
+.feat-proposal {
+  margin-block-start: var(--s-2);
+  padding: var(--s-2) var(--s-3);
+  background: var(--color-paper-raised);
+  border: 1px solid var(--color-neutral-300);
+  border-radius: var(--r-surface);
 }
-.feat-list li:last-child { border-block-end: none; }
-.feat-list b { color: var(--color-ink); }
+.feat-name { margin: 0; font-weight: 600; color: var(--color-ink); }
+:lang(he) .feat-name { font-weight: 700; }
+.feat-summary {
+  margin-block: 4px 0; max-width: none;
+  font-size: 0.92rem; line-height: 1.5; color: var(--color-neutral-600);
+}
+.feat-actions {
+  display: flex; flex-wrap: wrap; gap: var(--s-2);
+  margin-block-start: var(--s-3);
+}
 
 /* the score is data — monospace ink, never a coloured badge */
 .history-score {
@@ -575,18 +586,6 @@ code, .mono { font-family: var(--font-mono); }
 .rb-step.is-pending { opacity: 0.6; }
 @keyframes rb-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .rb-step.is-active .rb-dot { animation: none; } }
-
-/* ===== feature picker — choose which proposed features to add ===== */
-.feat-choose { list-style: none; margin: var(--s-2) 0; padding: 0; display: grid; gap: 8px; }
-.feat-opt {
-  display: flex; align-items: flex-start; gap: 10px;
-  padding: var(--s-2);
-  border: 1px solid var(--color-neutral-300); border-radius: 10px;
-  cursor: pointer; font-size: 0.92rem; line-height: 1.5;
-}
-.feat-opt:hover { border-color: var(--color-ink); }
-.feat-opt input { margin-block-start: 3px; flex: 0 0 auto; }
-.feat-opt b { color: var(--color-ink); }
 
 /* ===== AI score before → after ===== */
 .score-hint { font-size: 0.82rem; color: var(--color-neutral-600); margin-block: 2px var(--s-2); }

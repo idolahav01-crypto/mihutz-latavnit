@@ -1,16 +1,20 @@
-// Stage F — FeatureDesigner: propose 5 content-fit features and add them.
+// Stage F — FeatureDesigner: propose ONE content-fit feature, then build it.
 //
-// Client-driven, one call per part (each a separate 150s budget):
-//   part 1        — propose EXACTLY 5 new features that fit this site's content;
-//                   stored to features.json (no code yet, small + fast output).
-//   parts 2..6    — implement ONE feature each (self-contained html/css/js that
-//                   matches the site's design) and inject it into the page.
+// Two user-gated calls, each with its own 150s budget:
+//   action "propose" — propose ONE new feature that fits this site's content;
+//                      stored to features.json (no code yet, small + fast).
+//                      Touches nothing in the site — the user has not said yes.
+//   action "build"   — implement that one feature (self-contained html/css/js
+//                      matching the site's design) and inject it into the page.
 //
-// Features are ADDED to the primary HTML file, building on the redesigned bundle
-// if one exists. Existing <script> blocks are extracted and restored byte-for-
-// byte; each feature's own JS is appended as a new <script>.
+// Proposing and building are separate so the user sees what is coming before it
+// lands in their site, and can ask for a different idea instead.
 //
-// Body: { scan_id, part? } — response returns parts (6) and done.
+// The feature is ADDED to the primary HTML file, building on the redesigned
+// bundle if one exists. Existing <script> blocks are extracted and restored
+// byte-for-byte; the feature's own JS is appended as a new <script>.
+//
+// Body: { scan_id, action, exclude? } — exclude carries already-rejected names.
 
 import { parseBundle, serializeBundle } from "../_shared/pipeline.ts";
 import { callClaude, cleanApiKey } from "../_shared/anthropic.ts";
@@ -18,8 +22,6 @@ import { adminClient, cors, json, requireUser } from "../_shared/http.ts";
 import { buildEntry, recordStageUsage } from "../_shared/usage.ts";
 
 const MODEL = "claude-opus-4-8";
-const FEATURE_COUNT = 5;
-const PARTS = FEATURE_COUNT + 1; // 1 plan + 5 implementations
 
 function extractScripts(html: string): { stripped: string; scripts: string[] } {
   const scripts: string[] = [];
@@ -67,13 +69,17 @@ function injectFeature(
 }
 
 const PLAN_SYSTEM =
-  `You are FeatureDesigner. Given a website's content and profile, propose EXACTLY 5 NEW features that genuinely fit THIS site's content and audience and would delight its users — features it does NOT already have.
+  `You are FeatureDesigner. Given a website's content and profile, propose EXACTLY ONE NEW feature that genuinely fits THIS site's content and audience and would delight its users — a feature it does NOT already have.
 
-Be specific and content-aware, not generic. (For a football fan site, good ideas are things like: a live next-match countdown, a head-to-head player comparison, a fan prediction poll that saves results, a trivia streak leaderboard, a fixtures filter — NOT "a newsletter signup" or "a contact form".) Each feature must be implementable in plain client-side HTML/CSS/JS with no backend, no external API keys, and no invented facts.
+This is your single best idea for this site, and the user sees it before deciding whether to build it. Make it the one you would argue for.
 
-For each feature return: name, and a one-line summary of what it does and why it fits this site.
+Be specific and content-aware, not generic. (For a football fan site, good ideas are things like: a live next-match countdown, a head-to-head player comparison, a fan prediction poll that saves results, a trivia streak leaderboard, a fixtures filter — NOT "a newsletter signup" or "a contact form".) It must be implementable in plain client-side HTML/CSS/JS with no backend, no external API keys, and no invented facts.
 
-Return ONLY valid JSON: { "features": [ { "name": "...", "summary": "..." } x5 ] }. No prose.`;
+If an <already_rejected> block is present, the user has turned those ideas down. Do not propose them again, and do not propose a reskin of the same idea under another name — go somewhere genuinely different.
+
+Return: name, and a one-line summary of what it does and why it fits this site.
+
+Return ONLY valid JSON: { "feature": { "name": "...", "summary": "..." } }. No prose.`;
 
 const IMPL_SYSTEM =
   `You are FeatureDesigner, implementing ONE feature for an existing website. You are given the site's HTML for design context (its classes, design tokens, and style — <script> blocks are shown as placeholders) and the feature to build.
@@ -92,17 +98,14 @@ const PLAN_SCHEMA = {
   type: "object",
   additionalProperties: false,
   properties: {
-    features: {
-      type: "array",
-      items: {
-        type: "object",
-        additionalProperties: false,
-        properties: { name: { type: "string" }, summary: { type: "string" } },
-        required: ["name", "summary"],
-      },
+    feature: {
+      type: "object",
+      additionalProperties: false,
+      properties: { name: { type: "string" }, summary: { type: "string" } },
+      required: ["name", "summary"],
     },
   },
-  required: ["features"],
+  required: ["feature"],
 };
 
 const IMPL_SCHEMA = {
@@ -124,7 +127,7 @@ Deno.serve(async (req) => {
   const user = await requireUser(admin, req);
   if (!user) return json({ error: "unauthorized" }, 401);
 
-  let body: { scan_id?: string; part?: number; feature_index?: number };
+  let body: { scan_id?: string; action?: string; exclude?: string[] };
   try {
     body = await req.json();
   } catch {
@@ -132,12 +135,15 @@ Deno.serve(async (req) => {
   }
   const scanId = body.scan_id;
   if (!scanId) return json({ error: "scan_id required" }, 400);
-  let part = Number.isInteger(body.part) && (body.part as number) >= 1 ? (body.part as number) : 1;
-  if (part > PARTS) part = PARTS;
-  // The client now proposes first, lets the user pick, then asks to implement
-  // specific features by index. feature_index (0-based) implements exactly that
-  // feature; when absent we fall back to the old sequential part-based order.
-  const wantImpl = Number.isInteger(body.feature_index) && (body.feature_index as number) >= 0;
+  // No default: a client still speaking the old part-number protocol must fail
+  // loudly here rather than half-run something the user never approved.
+  const action = body.action;
+  if (action !== "propose" && action !== "build") {
+    return json({ error: "action must be 'propose' or 'build'" }, 400);
+  }
+  const exclude = Array.isArray(body.exclude)
+    ? body.exclude.filter((n) => typeof n === "string" && n.trim()).slice(0, 10)
+    : [];
 
   const { data: scan, error: scanErr } = await admin
     .from("scans")
@@ -173,38 +179,40 @@ Deno.serve(async (req) => {
 
     const startedAt = Date.now();
 
-    if (part === 1 && !wantImpl) {
-      // Propose the 5 features (no code yet).
+    if (action === "propose") {
+      // Propose one feature. Nothing is written to the bundle — the user has
+      // not approved anything yet.
+      const rejected = exclude.length
+        ? `<already_rejected>\n${exclude.map((n) => `- ${n}`).join("\n")}\n</already_rejected>\n\n`
+        : "";
       const userContent =
         `<site_profile>\n${JSON.stringify(scan.site_profile ?? {}, null, 2)}\n</site_profile>\n\n` +
+        rejected +
         `<site_html>\n${stripped}\n</site_html>\n\n` +
-        `Propose exactly 5 new features that fit this site.`;
+        `Propose exactly one new feature that fits this site.`;
       const res = await callClaude({
-        apiKey, model: MODEL, effort: "high", maxTokens: 4000, stream: false,
+        apiKey, model: MODEL, effort: "high", maxTokens: 1500, stream: false,
         system: PLAN_SYSTEM, schema: PLAN_SCHEMA, userContent, timeoutMs: 120_000,
       });
       await recordStageUsage(admin, scanId, buildEntry("features_plan", MODEL, res.usage, Date.now() - startedAt, "high"));
 
-      const out = (res.json ?? {}) as { features?: Array<{ name?: string; summary?: string }> };
-      const features = (out.features ?? []).slice(0, FEATURE_COUNT);
-      if (!features.length) throw new Error("empty_feature_plan");
+      const out = (res.json ?? {}) as { feature?: { name?: string; summary?: string } };
+      const feature = out.feature;
+      if (!feature || !feature.name) throw new Error("empty_feature_plan");
 
       await admin.storage.from("scans").upload(
         planPath,
-        new Blob([JSON.stringify(features)], { type: "application/json" }),
+        new Blob([JSON.stringify(feature)], { type: "application/json" }),
         { upsert: true, contentType: "application/json" },
       );
-      return json({ ok: true, scan_id: scanId, part, parts: PARTS, done: false, features });
+      return json({ ok: true, scan_id: scanId, action, feature });
     }
 
-    // Implement ONE feature — the one the user picked (feature_index), or the
-    // sequential fallback (part-2).
+    // action === "build" — implement the proposal the user approved.
     const { data: planFile } = await admin.storage.from("scans").download(planPath);
     if (!planFile) throw new Error("feature_plan_missing");
-    const features = JSON.parse(await planFile.text()) as Array<{ name: string; summary: string }>;
-    const idx = wantImpl ? (body.feature_index as number) : part - 2;
-    const feat = features[idx];
-    if (!feat) return json({ error: "feature_index_out_of_range", index: idx, count: features.length }, 409);
+    const feat = JSON.parse(await planFile.text()) as { name: string; summary: string };
+    if (!feat || !feat.name) throw new Error("feature_plan_missing");
 
     const userContent =
       `<site_profile>\n${JSON.stringify(scan.site_profile ?? {}, null, 2)}\n</site_profile>\n\n` +
@@ -215,7 +223,7 @@ Deno.serve(async (req) => {
       apiKey, model: MODEL, effort: "high", maxTokens: 12000, stream: false,
       system: IMPL_SYSTEM, schema: IMPL_SCHEMA, userContent, timeoutMs: 120_000,
     });
-    await recordStageUsage(admin, scanId, buildEntry(`features_impl_${idx + 1}`, MODEL, res.usage, Date.now() - startedAt, "high"));
+    await recordStageUsage(admin, scanId, buildEntry("features_impl", MODEL, res.usage, Date.now() - startedAt, "high"));
 
     const impl = (res.json ?? {}) as { html?: string; css?: string; js?: string };
     const injected = injectFeature(stripped, impl);
@@ -228,11 +236,10 @@ Deno.serve(async (req) => {
     );
     if (up.error) throw new Error(`storage: ${up.error.message}`);
 
-    // Each call fully implements ONE feature; the client drives the loop over
-    // the features the user selected, so this call is "done" on its own.
+    // Keep the scan deliverable (download/PR available).
     await admin.from("scans").update({ pipeline_status: "applied" }).eq("id", scanId);
 
-    return json({ ok: true, scan_id: scanId, index: idx, done: true, feature: feat, features });
+    return json({ ok: true, scan_id: scanId, action, done: true, feature: feat });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     await admin.from("scans").update({ error: `features: ${message}` }).eq("id", scanId);

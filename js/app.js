@@ -788,9 +788,15 @@
     window.scrollTo(0, 0);
   }
 
-  /* lets a fixture scan be pushed into the report view locally, so the layout
-     can be checked without running a real audit */
-  if (DEV_NO_AUTH) { window.__devRenderReport = renderReport; }
+  /* lets a fixture scan or feature proposal be pushed into the view locally, so
+     the layout can be checked without running a real audit or model call */
+  if (DEV_NO_AUTH) {
+    window.__devRenderReport = renderReport;
+    window.__devFeatureProposal = function (feature, attempt) {
+      featureAttempts = attempt || 1;
+      renderFeatureProposal(feature);
+    };
+  }
 
   /* The card is rebuilt on every render, so the toggle is wired here rather
      than cached in cacheEls. */
@@ -821,17 +827,15 @@
     rebuildShell: "בונה את שפת העיצוב (צבעים, פונטים, מבנה)…",
     rebuildSection: function (d, t) { return "בונה מאפס — סקשן " + d + " מתוך " + t + "…"; },
     rebuildDone: "האתר נבנה מחדש מאפס — אפשר להוריד ולראות את התוצאה.",
-    addFeatures: "הצע 5 פיצ'רים",
-    featuresProposing: "קורא ומבין את האתר — חושב על 5 פיצ'רים…",
-    featurePass: function (i) { return "בונה פיצ'ר " + i + " מתוך 5…"; },
-    featuresTitle: "פיצ'רים חדשים שנוספו",
-    featuresDone: "נוספו פיצ'רים חדשים — אפשר להוריד ולראות.",
-    /* propose → select → add */
-    featuresPick: "בחר אילו פיצ'רים להוסיף לאתר:",
-    featuresAddBtn: "הוסף את הנבחרים",
-    featuresNoneSelected: "בחר לפחות פיצ'ר אחד.",
-    featuresAdding: function (d, t) { return "מוסיף פיצ'ר " + d + " מתוך " + t + "…"; },
-    featuresAddedN: function (n) { return "נוספו " + n + " פיצ'רים — אפשר להוריד ולראות."; },
+    /* propose one → approve → build */
+    addFeatures: "הצע פיצ'ר חדש",
+    featuresProposing: "קורא ומבין את האתר — חושב על פיצ'ר…",
+    featureBuilding: "בונה את הפיצ'ר…",
+    featureProposalTitle: "הפיצ'ר המוצע",
+    featureBuild: "בנה את זה",
+    featureReject: "הצע אחר",
+    featuresTitle: "הפיצ'ר שנוסף",
+    featuresDone: "הפיצ'ר נוסף — אפשר להוריד ולראות.",
     /* interactive progress */
     rbStepUnderstand: "מבין את האתר",
     rbStepDesign: "בונה שפת עיצוב",
@@ -880,17 +884,15 @@
     rebuildShell: "Building the design language (colors, fonts, layout)…",
     rebuildSection: function (d, t) { return "Rebuilding from scratch — section " + d + " of " + t + "…"; },
     rebuildDone: "The site was rebuilt from scratch — download to see the result.",
-    addFeatures: "Suggest 5 features",
-    featuresProposing: "Reading & understanding the site — thinking of 5 features…",
-    featurePass: function (i) { return "Building feature " + i + " of 5…"; },
-    featuresTitle: "New features added",
-    featuresDone: "New features added — download to see them.",
-    /* propose → select → add */
-    featuresPick: "Pick which features to add to the site:",
-    featuresAddBtn: "Add selected",
-    featuresNoneSelected: "Select at least one feature.",
-    featuresAdding: function (d, t) { return "Adding feature " + d + " of " + t + "…"; },
-    featuresAddedN: function (n) { return "Added " + n + " features — download to see them."; },
+    /* propose one → approve → build */
+    addFeatures: "Suggest a new feature",
+    featuresProposing: "Reading & understanding the site — thinking of a feature…",
+    featureBuilding: "Building the feature…",
+    featureProposalTitle: "The proposed feature",
+    featureBuild: "Build it",
+    featureReject: "Suggest another",
+    featuresTitle: "Feature added",
+    featuresDone: "The feature was added — download to see it.",
     /* interactive progress */
     rbStepUnderstand: "Understanding the site",
     rbStepDesign: "Building the design language",
@@ -959,6 +961,9 @@
     if (els["features-result"]) els["features-result"].hidden = true;
     if (els["rb-progress"]) els["rb-progress"].hidden = true;
     if (els["score-delta"]) els["score-delta"].hidden = true;
+    /* a scan opened from history must not inherit the previous one's rejects */
+    featureRejects = [];
+    featureAttempts = 0;
     /* a scan re-opened from history may already carry a measured after-score */
     if (scan.ai_fingerprint_score_after != null) {
       renderScoreDelta(
@@ -1212,82 +1217,95 @@
     });
   }
 
-  /* ===== FeatureDesigner: propose 5 features → user picks 1+ → add the picked
-     ones (one server call each, shown as live progress) → re-score. ===== */
-  var proposedFeatures = [];
-  function renderFeatureChoices(list) {
-    proposedFeatures = list || [];
+  /* ===== FeatureDesigner: propose one feature, build it only once approved =====
+     Nothing reaches the user's site until they press "build". They get one
+     alternative if the first idea misses — two proposals is the whole budget —
+     and one feature per scan, so the button goes away once it is built. */
+  var FEATURE_ATTEMPTS = 2;
+  var featureRejects = [];  /* names the user turned down, sent back so the model doesn't repeat them */
+  var featureAttempts = 0;
+
+  function renderFeatureProposal(feature) {
+    var canReject = featureAttempts < FEATURE_ATTEMPTS;
     els["features-result"].hidden = false;
     els["features-result"].innerHTML =
-      "<h3>" + esc(P.featuresTitle) + "</h3>" +
-      "<p>" + esc(P.featuresPick) + "</p>" +
-      '<ul class="feat-choose">' + proposedFeatures.map(function (f, i) {
-        return '<li><label class="feat-opt">' +
-          '<input type="checkbox" class="feat-cb" value="' + i + '" checked> ' +
-          "<span><b>" + esc(f.name || "") + "</b> — " + esc(f.summary || "") + "</span></label></li>";
-      }).join("") + "</ul>" +
-      '<button type="button" class="btn btn-primary" id="features-add">' + esc(P.featuresAddBtn) + "</button>";
-    var addBtn = $("features-add");
-    if (addBtn) addBtn.addEventListener("click", addSelectedFeatures);
+      "<h3>" + esc(P.featureProposalTitle) + "</h3>" +
+      '<div class="feat-proposal">' +
+        '<p class="feat-name">' + esc(feature.name || "") + "</p>" +
+        '<p class="feat-summary">' + esc(feature.summary || "") + "</p>" +
+        '<div class="feat-actions">' +
+          '<button type="button" class="btn btn-primary" id="feature-build">' + esc(P.featureBuild) + "</button>" +
+          (canReject
+            ? '<button type="button" class="btn" id="feature-reject">' + esc(P.featureReject) + "</button>"
+            : "") +
+        "</div>" +
+      "</div>";
+    /* the card is rebuilt on every proposal, so its buttons are wired here */
+    $("feature-build").addEventListener("click", buildFeature);
+    if (canReject) {
+      $("feature-reject").addEventListener("click", function () {
+        featureRejects.push(feature.name || "");
+        proposeFeature();
+      });
+    }
   }
 
-  /* Step 1: read/understand the site (server also uses the scan's profile) and
-     propose 5 features. Nothing is added yet — the user chooses. */
-  function proposeFeatures() {
+  function featureCardBusy(busyNow) {
+    var build = $("feature-build"), reject = $("feature-reject");
+    if (build) build.disabled = busyNow;
+    if (reject) reject.disabled = busyNow;
+  }
+
+  function proposeFeature() {
     if (!currentScanId) return;
+    featureAttempts += 1;
+    featureCardBusy(true);
     busyFixButtons();
     if (els["score-delta"]) els["score-delta"].hidden = true;
     els["fix-hint"].textContent = P.featuresProposing;
-    invokeFn("features", { scan_id: currentScanId, part: 1 }).then(function (data) {
+    invokeFn("features", {
+      scan_id: currentScanId, action: "propose", exclude: featureRejects
+    }).then(function (data) {
       els["fix-hint"].textContent = "";
-      renderFeatureChoices((data && data.features) || []);
+      renderFeatureProposal((data && data.feature) || {});
       reenableFixButtons();
     }).catch(function (e) {
       els["fix-hint"].textContent = P.err + " [features]" + fmtReason(e);
+      featureCardBusy(false);
       reenableFixButtons();
     });
   }
 
-  /* Step 2: implement only the selected features, one call each, with progress. */
-  function addSelectedFeatures() {
+  function buildFeature() {
     if (!currentScanId) return;
-    var boxes = els["features-result"].querySelectorAll(".feat-cb");
-    var selected = [];
-    Array.prototype.forEach.call(boxes, function (b) { if (b.checked) selected.push(Number(b.value)); });
-    if (!selected.length) { els["fix-hint"].textContent = P.featuresNoneSelected; return; }
-
-    var addBtn = $("features-add");
-    if (addBtn) addBtn.disabled = true;
+    featureCardBusy(true);
     busyFixButtons();
-    var labels = selected.map(function (i) {
-      return (proposedFeatures[i] && proposedFeatures[i].name) || P.rbStepSection(i + 1);
-    });
-
-    function step(k) {
-      if (k >= selected.length) return Promise.resolve();
-      renderProgress(stepsWithState(labels, k));
-      els["fix-hint"].textContent = P.featuresAdding(k + 1, selected.length);
-      return invokeFn("features", { scan_id: currentScanId, feature_index: selected[k] })
-        .then(function () {
-          renderProgress(stepsWithState(labels, k + 1));
-          return step(k + 1);
-        });
-    }
-
-    step(0).then(function () {
+    els["fix-hint"].textContent = P.featureBuilding;
+    renderProgress(stepsWithState([P.featureBuilding], 0));
+    invokeFn("features", { scan_id: currentScanId, action: "build" }).then(function (data) {
+      var feat = (data && data.feature) || {};
       hideProgress();
-      els["fix-hint"].textContent = P.featuresAddedN(selected.length);
+      els["features-result"].innerHTML =
+        "<h3>" + esc(P.featuresTitle) + "</h3>" +
+        '<div class="feat-proposal">' +
+          '<p class="feat-name">' + esc(feat.name || "") + "</p>" +
+          '<p class="feat-summary">' + esc(feat.summary || "") + "</p>" +
+        "</div>";
+      els["fix-hint"].textContent = P.featuresDone;
+      /* one feature per scan — the way back is a new scan */
+      els["add-features"].hidden = true;
       showDeliver();
-      return runAfterScan();
+      return runAfterScan(); /* the honest before/after AI score */
     }).then(function () {
       reenableFixButtons();
     }).catch(function (e) {
       hideProgress();
       els["fix-hint"].textContent = P.err + " [features]" + fmtReason(e);
+      featureCardBusy(false);
       reenableFixButtons();
-      if (addBtn) addBtn.disabled = false;
     });
   }
+
 
   function proposeFixes() {
     if (!currentScanId) return;
@@ -1649,7 +1667,7 @@
     if (els["rebuild-site"]) els["rebuild-site"].addEventListener("click", rebuildSite);
     if (els["propose-fixes"]) els["propose-fixes"].addEventListener("click", transformSite);
     if (els["apply-fixes"]) els["apply-fixes"].addEventListener("click", applyFixes);
-    if (els["add-features"]) els["add-features"].addEventListener("click", proposeFeatures);
+    if (els["add-features"]) els["add-features"].addEventListener("click", proposeFeature);
     if (els["download-zip"]) els["download-zip"].addEventListener("click", downloadZip);
     if (els["push-github"]) els["push-github"].addEventListener("click", function () {
       pushToGithub(false);
