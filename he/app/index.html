@@ -111,12 +111,8 @@
 
       <!-- ===== טעינה ===== -->
       <section id="loading" hidden>
-        <ol class="stages" id="stages" aria-live="polite">
-          <li data-stage="0"><span class="stage-mark" aria-hidden="true"></span><span class="stage-name">קורא קבצים</span></li>
-          <li data-stage="1"><span class="stage-mark" aria-hidden="true"></span><span class="stage-name">מסנן קבצים לא רלוונטיים</span></li>
-          <li data-stage="2"><span class="stage-mark" aria-hidden="true"></span><span class="stage-name">מעלה לניתוח</span></li>
-          <li data-stage="3"><span class="stage-mark" aria-hidden="true"></span><span class="stage-name">מריץ אבחון מול 110 סימנים</span></li>
-        </ol>
+        <!-- שמות השלבים מגיעים מ-JS, כי השלב שרץ משתנה תוך כדי -->
+        <div class="prog-host" id="scan-progress" aria-live="polite"></div>
       </section>
 
       <!-- ===== דוח אבחון ===== -->

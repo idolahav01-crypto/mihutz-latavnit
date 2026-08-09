@@ -45,6 +45,8 @@
     filesPicked: function (n, root) {
       return (root ? root + "/ — " : "") + n + (n === 1 ? " קובץ" : " קבצים");
     },
+    scanSteps: ["קורא קבצים", "מסנן קבצים לא רלוונטיים", "מעלה לניתוח",
+                "מריץ אבחון מול 110 סימנים"],
     scanned: function (n) { return "נסרקו " + n + " קבצים"; },
     foundSignals: function (p, appl) { return "נמצאו " + p + " סימנים מתוך " + appl + " ישימים"; },
     /* cats: [{ name, count }], כבר ממוינות מהגדולה לקטנה */
@@ -91,6 +93,8 @@
     filesPicked: function (n, root) {
       return (root ? root + "/ — " : "") + n + (n === 1 ? " file" : " files");
     },
+    scanSteps: ["Reading files", "Filtering out irrelevant files", "Uploading for analysis",
+                "Running diagnosis against 110 signals"],
     scanned: function (n) { return "Scanned " + n + " files"; },
     foundSignals: function (p, appl) { return "Found " + p + " signals of " + appl + " applicable"; },
     /* cats: [{ name, count }], already sorted largest first */
@@ -176,9 +180,9 @@
      "fix-pipeline", "rebuild-site", "propose-fixes", "fix-hint", "design-direction",
      "proposals", "fix-actions", "apply-fixes", "apply-result", "qa-result",
      "deliver-actions", "download-zip", "push-github", "deliver-result",
-     "add-features", "features-result", "rb-progress", "score-delta"
+     "add-features", "features-result", "rb-progress", "score-delta",
+     "scan-progress"
     ].forEach(function (id) { els[id] = $(id); });
-    els.stageItems = Array.prototype.slice.call(document.querySelectorAll(".stages li"));
   }
 
   /* ===== auth helpers ===== */
@@ -653,9 +657,7 @@
         // so a re-hunt can never fabricate or lower the count.
         var found = data && typeof data.present_count === "number" ? data.present_count : null;
         if (found !== null && found < REHUNT_FLOOR) {
-          var li = els.stageItems && els.stageItems[3];
-          var nm = li && li.querySelector(".stage-name");
-          if (nm) nm.textContent = P.rehunting;
+          prog.say(P.rehunting);
           return invokeFn("detect", { scan_id: scanId, rehunt: true })
             .catch(function () { /* non-fatal: keep the detection we have */ })
             .then(function () { return loadReport(scanId); });
@@ -683,10 +685,8 @@
   /* Keeps the user oriented across a multi-pass audit that can take a while.
      Rewrites the diagnosis step's own label rather than adding new chrome. */
   function setDetectProgress(done, total) {
-    var li = els.stageItems && els.stageItems[3];
-    if (!li) return;
-    var name = li.querySelector(".stage-name");
-    if (name) name.textContent = P.detectPass(done, total);
+    if (!total) return;
+    prog.to(P.detectPass(done, total), DETECT_FLOOR + (done / total) * (100 - DETECT_FLOOR));
   }
 
   /* Invoke an edge function and, on failure, surface the server's own
@@ -792,6 +792,10 @@
      the layout can be checked without running a real audit or model call */
   if (DEV_NO_AUTH) {
     window.__devRenderReport = renderReport;
+    /* lazy: the progress helpers are defined further down the file */
+    window.__devProgress = function () {
+      return { prog: prog, setStage: setStage, showStages: showStages, detect: setDetectProgress };
+    };
     window.__devFeatureProposal = function (feature, attempt) {
       featureAttempts = attempt || 1;
       renderFeatureProposal(feature);
@@ -1064,9 +1068,14 @@
      locked on the first file and reused for the rest so the site stays coherent.
      No proposals, no per-signal patches, no human step — the file is rewritten. */
   function transformPass(n) {
-    els["fix-hint"].textContent = P.transformPass(n, transformTotal || n);
+    var text = P.transformPass(n, transformTotal || n);
+    els["fix-hint"].textContent = text;
+    /* the file count only arrives with the first response */
+    if (transformTotal) prog.to(text, ((n - 1) / transformTotal) * 100);
+    else prog.estimate(text, 60000, 20);
     return invokeFn("transform", { scan_id: currentScanId, part: n }).then(function (data) {
       transformTotal = (data && data.parts) || transformTotal;
+      if (transformTotal) prog.to(null, (n / transformTotal) * 100);
       if (data && data.done) return data;
       return transformPass(n + 1);
     });
@@ -1077,39 +1086,29 @@
     els["propose-fixes"].disabled = true;
     els["proposals"].hidden = true;
     els["fix-actions"].hidden = true;
+    if (els["score-delta"]) els["score-delta"].hidden = true;
     els["fix-hint"].textContent = P.proposing;
     transformTotal = 0;
+    pipelineProgress(P.proposing);
     transformPass(1).then(function (data) {
-      els["fix-hint"].textContent = P.transformDone;
+      prog.done();
       els["propose-fixes"].hidden = true;
       renderDesign(data && data.design_direction);
       showDeliver(); /* the redesigned bundle is saved — offer download / PR */
+      return runAfterScan(); /* same measured before/after the rebuild flow shows */
+    }).then(function () {
+      hideProgress();
+      els["fix-hint"].textContent = P.transformDone;
     }).catch(function (e) {
+      hideProgress();
       els["fix-hint"].textContent = P.err + " [transform]" + fmtReason(e);
       els["propose-fixes"].disabled = false;
     });
   }
 
-  /* ===== interactive progress: a live checklist of steps done / active / left,
-     shared by the rebuild flow and the add-features flow. ===== */
-  function renderProgress(steps) {
-    var el = els["rb-progress"];
-    if (!el) return;
-    el.hidden = false;
-    el.innerHTML = '<ol class="rb-steps">' + steps.map(function (s) {
-      var mark = s.state === "done" ? "✓" : "";
-      return '<li class="rb-step is-' + s.state + '">' +
-        '<span class="rb-dot" aria-hidden="true">' + mark + '</span>' +
-        '<span class="rb-label">' + esc(s.label) + "</span></li>";
-    }).join("") + "</ol>";
-  }
-  function hideProgress() { if (els["rb-progress"]) els["rb-progress"].hidden = true; }
-  /* Map a flat list of step labels + how many are complete into progress rows. */
-  function stepsWithState(labels, completed) {
-    return labels.map(function (label, i) {
-      return { label: label, state: i < completed ? "done" : (i === completed ? "active" : "pending") };
-    });
-  }
+  /* Every wait inside the report view shares one bar, in #rb-progress. */
+  function pipelineProgress(text) { prog.start(els["rb-progress"], text); }
+  function hideProgress() { prog.hide(); }
 
   function reenableFixButtons() {
     if (els["rebuild-site"]) els["rebuild-site"].disabled = false;
@@ -1128,14 +1127,17 @@
      numbers are directly comparable and the "after" is measured, not asserted. */
   function afterScanPass(n, total) {
     els["fix-hint"].textContent = P.scoreScanning(n, total);
+    prog.to(P.scoreScanning(n, total), ((n - 1) / total) * 100);
     return invokeFn("detect", { scan_id: currentScanId, mode: "after", part: n, parts: total })
       .then(function (data) {
+        prog.to(null, (n / total) * 100);
         if (data && data.done) return data;
         return afterScanPass(n + 1, total);
       });
   }
   function runAfterScan() {
     els["fix-hint"].textContent = P.scoreScanning(0, 0);
+    pipelineProgress(P.scoreScanning(0, 0));
     return afterScanPass(1, 3).then(function (data) {
       renderScoreDelta(data && data.before, data && data.after);
       return data;
@@ -1179,7 +1181,14 @@
     return labels;
   }
   function rebuildPass(n) {
-    renderProgress(stepsWithState(rbLabels(), n - 1)); /* step n is active */
+    /* Step n names itself: the spec pass first, then the shell, then one per
+       section using the section's own heading once the spec has told us them. */
+    var labels = rbLabels();
+    var text = labels[n - 1] || P.rbStepSection(n - 2);
+    /* The total is only known after part 1 returns, so the spec pass is the one
+       step with nothing to measure against. */
+    if (rebuildTotal) prog.to(text, ((n - 1) / rebuildTotal) * 100);
+    else prog.estimate(text, 60000, 20);
     els["fix-hint"].textContent = n === 1 ? P.rebuildSpec
       : (n === 2 ? P.rebuildShell
                  : P.rebuildSection(n - 2, rebuildTotal ? rebuildTotal - 2 : n - 2));
@@ -1188,7 +1197,7 @@
       if (n === 1 && data && data.spec_summary && data.spec_summary.sections) {
         rbSectionNames = data.spec_summary.sections.map(function (s) { return s.heading || s.type || ""; });
       }
-      renderProgress(stepsWithState(rbLabels(), n)); /* step n done */
+      if (rebuildTotal) prog.to(null, (n / rebuildTotal) * 100);
       if (data && data.done) return data;
       return rebuildPass(n + 1);
     });
@@ -1202,12 +1211,14 @@
     if (els["score-delta"]) els["score-delta"].hidden = true;
     rebuildTotal = 0;
     rbSectionNames = null;
+    pipelineProgress(P.rbStepUnderstand);
     rebuildPass(1).then(function (data) {
-      hideProgress();
+      prog.done();
       renderDesign(data && data.design_direction);
       showDeliver(); /* the rebuilt bundle is saved — offer download / PR */
       return runAfterScan(); /* measure the honest before/after AI score */
     }).then(function () {
+      hideProgress();
       els["fix-hint"].textContent = P.rebuildDone;
       reenableFixButtons();
     }).catch(function (e) {
@@ -1263,9 +1274,13 @@
     busyFixButtons();
     if (els["score-delta"]) els["score-delta"].hidden = true;
     els["fix-hint"].textContent = P.featuresProposing;
+    pipelineProgress(P.featuresProposing);
+    prog.estimate(P.featuresProposing, 30000, 92);
     invokeFn("features", {
       scan_id: currentScanId, action: "propose", exclude: featureRejects
     }).then(function (data) {
+      prog.done();
+      hideProgress();
       els["fix-hint"].textContent = "";
       renderFeatureProposal((data && data.feature) || {});
       reenableFixButtons();
@@ -1281,10 +1296,11 @@
     featureCardBusy(true);
     busyFixButtons();
     els["fix-hint"].textContent = P.featureBuilding;
-    renderProgress(stepsWithState([P.featureBuilding], 0));
+    pipelineProgress(P.featureBuilding);
+    prog.estimate(P.featureBuilding, 75000, 92);
     invokeFn("features", { scan_id: currentScanId, action: "build" }).then(function (data) {
       var feat = (data && data.feature) || {};
-      hideProgress();
+      prog.done();
       els["features-result"].innerHTML =
         "<h3>" + esc(P.featuresTitle) + "</h3>" +
         '<div class="feat-proposal">' +
@@ -1629,6 +1645,108 @@
   function showError(msg) { els["err-banner"].textContent = msg; els["err-banner"].hidden = false; }
   function hideError() { els["err-banner"].hidden = true; }
 
+  /* ===== one progress bar for every wait =====
+     The label above the bar names the step actually running. A stage that
+     reports part/parts drives the fill from real numbers; a stage that is a
+     single server call has nothing to report, so it eases toward a ceiling on
+     a time estimate and stops there. Only done() reaches 100 — the bar never
+     claims a finish that hasn't happened, and never runs backwards. */
+  var prog = (function () {
+    var host = null, label = "", value = 0, timer = null;
+    var clock = null, startedAt = 0, frozen = null;
+
+    function stop() { if (timer) { clearInterval(timer); timer = null; } }
+    function stopClock() { if (clock) { clearInterval(clock); clock = null; } }
+
+    /* seconds under a minute, m:ss above it */
+    function elapsed() {
+      var sec = frozen != null ? frozen : Math.floor((Date.now() - startedAt) / 1000);
+      if (sec < 60) return sec + "s";
+      return Math.floor(sec / 60) + ":" + ("0" + (sec % 60)).slice(-2);
+    }
+
+    function paintTime() {
+      if (!host) return;
+      host.querySelector(".prog-time").textContent = elapsed();
+    }
+
+    function paint() {
+      if (!host) return;
+      var v = Math.max(0, Math.min(100, value));
+      var track = host.querySelector(".prog-track");
+      host.querySelector(".prog-label").textContent = label;
+      host.querySelector(".prog-pct").textContent = Math.round(v) + "%";
+      host.querySelector(".prog-fill").style.inlineSize = v + "%";
+      track.setAttribute("aria-valuenow", String(Math.round(v)));
+      track.setAttribute("aria-label", label);
+      paintTime();
+    }
+
+    return {
+      start: function (container, text) {
+        stop(); stopClock();
+        if (!container) return;
+        container.innerHTML =
+          '<p class="prog-head">' +
+            '<span class="prog-label"></span>' +
+            '<span class="prog-meta mono ltr">' +
+              '<span class="prog-pct"></span>' +
+              '<span class="prog-time" aria-hidden="true"></span>' +
+            "</span>" +
+          "</p>" +
+          '<div class="prog-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">' +
+            '<div class="prog-fill"></div>' +
+          "</div>";
+        container.hidden = false;
+        host = container;
+        label = text || "";
+        value = 0;
+        startedAt = Date.now();
+        frozen = null;
+        paint();
+        /* the clock runs for the whole wait — an honest-percentage stage has
+           no other timer keeping the display alive between passes */
+        clock = setInterval(paintTime, 1000);
+      },
+      /* honest position, as an absolute percentage */
+      to: function (text, pct) {
+        stop();
+        if (text != null) label = text;
+        if (pct != null) value = Math.max(value, pct);
+        paint();
+      },
+      /* nothing to report: crawl toward `ceiling` over `ms` and hold there */
+      estimate: function (text, ms, ceiling) {
+        stop();
+        if (text != null) label = text;
+        var from = value, to = ceiling, t0 = Date.now();
+        paint();
+        timer = setInterval(function () {
+          var k = Math.min(1, (Date.now() - t0) / ms);
+          /* close to linear, easing off near the ceiling. A sharper curve
+             lands on ~40% within seconds of a minute-long wait, which reads
+             as a fake bar rather than a slow one. */
+          value = from + (to - from) * (1 - Math.pow(1 - k, 1.5));
+          paint();
+          if (k >= 1) stop();
+        }, 200);
+      },
+      /* keep the fill, change what it says it is doing */
+      say: function (text) { label = text; paint(); },
+      done: function () {
+        stop(); stopClock();
+        frozen = Math.floor((Date.now() - startedAt) / 1000);
+        value = 100;
+        paint();
+      },
+      hide: function () {
+        stop(); stopClock();
+        if (host) { host.hidden = true; host.innerHTML = ""; }
+        host = null; label = ""; value = 0; frozen = null;
+      }
+    };
+  })();
+
   /* ===== ui state ===== */
   function setBusy(v) { busy = v; }
 
@@ -1640,17 +1758,23 @@
     els.loading.hidden = false;
   }
 
-  /* Everything before `i` is done, `i` is running, the rest are waiting. */
+  /* The three client-side prep steps are near-instant, so they only claim the
+     first slice of the bar; the audit itself owns the rest and reports its own
+     passes through setDetectProgress. */
+  var PREP_PCT = [4, 9, 14];
+  var DETECT_FLOOR = 15;
+
   function setStage(i) {
-    els.stageItems.forEach(function (li, n) {
-      li.classList.toggle("is-done", n < i);
-      li.classList.toggle("is-active", n === i);
-    });
+    if (i < 0) { prog.hide(); return; }
+    if (i === 0) prog.start(els["scan-progress"], T.scanSteps[0]);
+    if (i < 3) { prog.to(T.scanSteps[i], PREP_PCT[i]); return; }
+    /* the audit hasn't reported a pass yet — estimate until it does */
+    prog.estimate(T.scanSteps[3], 25000, 30);
   }
 
   function hideStages() {
     els.loading.hidden = true;
-    setStage(-1);
+    prog.hide();
     els["app-input"].hidden = false;
     els.history.hidden = false;
   }

@@ -62,7 +62,7 @@
    Signal #21 flags text-align:center once it passes ~60% of the page,
    and #75 flags a centred Hebrew hero, so centring stays on the few
    blocks that genuinely have no neighbour: this head, the drop area,
-   the loading checklist, empty states and sheet titles. Everything
+   the loading screen, empty states and sheet titles. Everything
    that is read in sequence or sits next to a peer stays start-aligned. */
 .app-head { margin-block-end: var(--s-2); text-align: center; }
 .app-head h1 {
@@ -336,37 +336,47 @@ code, .mono { font-family: var(--font-mono); }
 .history-row:hover .history-open { color: var(--color-primary); }
 
 /* ============================================================
-   LOADING — a checklist, so the wait has a shape
+   PROGRESS — one bar for every wait in the product
    ============================================================ */
 #loading[hidden] { display: none; }
-.stages {
-  list-style: none; margin: 0; padding: 0;
+.prog-host[hidden] { display: none; }
+/* the scan's bar is the only thing on its screen, so it gets room */
+#scan-progress {
   max-inline-size: 420px;
   margin-block: clamp(var(--s-4), 6vw, var(--s-8));
   margin-inline: auto;
 }
-.stages li {
-  display: flex; align-items: center; gap: var(--s-2);
-  padding-block: var(--s-1);
-  font-family: var(--font-mono);
-  font-size: 0.85rem;
-  color: var(--color-neutral-300);
+.prog-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: var(--s-2);
+  margin: 0 0 var(--s-1);
   max-width: none;
+  font-size: 0.9rem; color: var(--color-ink);
 }
-:lang(he) .stages li { font-family: "Rubik", sans-serif; font-size: 0.9rem; }
-.stage-mark {
-  inline-size: 12px; block-size: 12px; flex-shrink: 0;
-  border: 1px solid currentColor; border-radius: 50%;
+/* percentage and elapsed clock sit together at the end of the label line */
+.prog-meta {
+  display: inline-flex; align-items: baseline; gap: var(--s-1);
+  flex-shrink: 0;
+  font-size: 0.82rem; color: var(--color-neutral-600);
+  font-variant-numeric: tabular-nums;
 }
-.stages li.is-done { color: var(--color-neutral-600); }
-.stages li.is-done .stage-mark { background: var(--color-neutral-600); border-color: var(--color-neutral-600); }
-.stages li.is-active { color: var(--color-ink); font-weight: 600; }
-.stages li.is-active .stage-mark {
-  border-color: var(--color-primary);
-  border-block-start-color: transparent;
-  animation: spin 0.8s linear infinite;
+/* the clock is the one number that changes every second, so it is held back
+   from the percentage rather than competing with it */
+.prog-time { color: var(--color-neutral-300); }
+.prog-track {
+  block-size: 6px;
+  border-radius: 999px;
+  background: var(--color-neutral-300);
+  overflow: hidden;
 }
-@keyframes spin { to { transform: rotate(360deg); } }
+.prog-fill {
+  block-size: 100%;
+  inline-size: 0;
+  background: var(--color-primary);
+  border-radius: inherit;
+  transition: inline-size 260ms ease;
+}
+@media (prefers-reduced-motion: reduce) { .prog-fill { transition: none; } }
 
 /* ============================================================
    REPORT — the audit-ledger from the landing page, at full size
@@ -558,34 +568,8 @@ code, .mono { font-family: var(--font-mono); }
 .qa-pass { color: #14612a; font-weight: 700; }
 .qa-human { color: #8a5a00; font-weight: 600; }
 
-/* ============================================================
-   INTERACTIVE PROGRESS — live step checklist (rebuild / add features)
-   ============================================================ */
+/* the report view's bar sits inside the fix pipeline */
 .rb-progress { margin-block-start: var(--s-3); }
-.rb-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
-.rb-step {
-  display: flex; align-items: center; gap: 10px;
-  font-size: 0.92rem; line-height: 1.35;
-  color: var(--color-neutral-600);
-}
-.rb-dot {
-  flex: 0 0 auto;
-  inline-size: 18px; block-size: 18px; border-radius: 999px;
-  border: 2px solid var(--color-neutral-300);
-  display: inline-flex; align-items: center; justify-content: center;
-  font-size: 0.7rem; font-weight: 700; color: #fff; background: transparent;
-}
-.rb-step.is-done { color: var(--color-ink); }
-.rb-step.is-done .rb-dot { background: #14612a; border-color: #14612a; }
-.rb-step.is-active { color: var(--color-ink); font-weight: 600; }
-.rb-step.is-active .rb-dot {
-  border-color: var(--color-primary, #c0392b);
-  border-block-start-color: transparent;
-  animation: rb-spin 0.7s linear infinite;
-}
-.rb-step.is-pending { opacity: 0.6; }
-@keyframes rb-spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .rb-step.is-active .rb-dot { animation: none; } }
 
 /* ===== AI score before → after ===== */
 .score-hint { font-size: 0.82rem; color: var(--color-neutral-600); margin-block: 2px var(--s-2); }
@@ -703,11 +687,6 @@ code, .mono { font-family: var(--font-mono); }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .stages li.is-active .stage-mark {
-    animation: none;
-    border-color: var(--color-primary);
-    background: var(--color-primary);
-  }
   .drop, .history-row, .repo-row { transition: none; }
 }
 

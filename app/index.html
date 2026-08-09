@@ -111,12 +111,8 @@
 
       <!-- ===== loading ===== -->
       <section id="loading" hidden>
-        <ol class="stages" id="stages" aria-live="polite">
-          <li data-stage="0"><span class="stage-mark" aria-hidden="true"></span><span class="stage-name">Reading files</span></li>
-          <li data-stage="1"><span class="stage-mark" aria-hidden="true"></span><span class="stage-name">Filtering out irrelevant files</span></li>
-          <li data-stage="2"><span class="stage-mark" aria-hidden="true"></span><span class="stage-name">Uploading for analysis</span></li>
-          <li data-stage="3"><span class="stage-mark" aria-hidden="true"></span><span class="stage-name">Running diagnosis against 110 signals</span></li>
-        </ol>
+        <!-- step names come from JS, since the running step changes as it goes -->
+        <div class="prog-host" id="scan-progress" aria-live="polite"></div>
       </section>
 
       <!-- ===== report ===== -->
