@@ -136,6 +136,29 @@ Return:
 
 Look hand-built and premium. FORBIDDEN AI fingerprints: default Inter, purple/indigo gradients, the dark-navy+gold cliché, Playfair-as-elegance, generic "Get Started" copy, perfectly symmetric three-card rows as the only rhythm, and — ABSOLUTELY NO EMOJI anywhere (not in the logo, nav, headings, buttons, or footer). Emoji are the single most obvious AI tell; never emit a single one. Return ONLY valid JSON. No prose.`;
 
+/**
+ * The AI fingerprints this specific site was caught with, each with the audit's
+ * own note on how it showed up HERE — "a grid of 4 identical cards in the
+ * achievements section" rather than the generic rule. That note is already in
+ * the stored detection, so this costs no extra lookup and no bundled data.
+ *
+ * It goes into the section builder's SYSTEM prompt rather than its user turn:
+ * the bytes are identical across every section call within a scan, so the
+ * prompt cache serves calls 2..N at a tenth of the input price. It also pushes
+ * the section prompt (~540 tokens) past the size where caching engages at all,
+ * which is why every rebuild call so far measured zero cached input.
+ */
+function buildAvoidBlock(present: DetectedSignal[]): string {
+  if (!present.length) return "";
+  const lines = present
+    .map((s) => {
+      const found = (s.explanation ?? "").trim();
+      return `#${s.id} ${s.name}` + (found ? `\n   found here as: ${found}` : "");
+    })
+    .join("\n");
+  return `\n\n<avoid_ai_patterns>\nThe audit found these AI fingerprints in THIS site. Removing them is the entire point of rebuilding it, so your section must not reproduce a single one — and must not reach for a different cliché in their place. Each entry is the fingerprint, then how it showed up in this site.\n\n${lines}\n</avoid_ai_patterns>`;
+}
+
 const SECTION_SYSTEM =
   `You are RebuildDesigner, building ONE section of a website from scratch. You are given the approved design_direction, the global tokens_css (the classes and CSS variables you MUST reuse), and the content spec for exactly one section. Build beautiful, human, semantic markup for it and its CSS.
 
@@ -341,6 +364,9 @@ Deno.serve(async (req) => {
 
     const present = presentSignals(scan.detection as { signals?: DetectedSignal[] });
     const avoidList = present.map((s) => `#${s.id} ${s.name}`).join("\n");
+    // "#78 currency order" on its own tells the builder nothing, so the block
+    // carries what the audit saw in this site alongside each signal.
+    const avoidBlock = buildAvoidBlock(present);
 
     // ---------- PART 1: content spec + design direction ----------
     if (part === 1) {
@@ -385,6 +411,8 @@ Deno.serve(async (req) => {
       await admin.from("scans").update({
         design_direction: direction ?? scan.design_direction ?? null,
         pipeline_status: "applying",
+        // A fresh attempt must not inherit the error of the one before it.
+        error: null,
       }).eq("id", scanId);
 
       return json({
@@ -438,11 +466,14 @@ Deno.serve(async (req) => {
       `<section_spec>\n${JSON.stringify(section, null, 2)}\n</section_spec>\n\n` +
       `Build ONLY this section (html + css), using only the content above.`;
 
+    /* Sections produce nearly all of the page's markup and CSS, so they get the
+       same effort the shell already had — this stage was the one doing the most
+       work on the least thinking. */
     const res = await callClaude({
-      apiKey, model: MODEL, effort: "medium", maxTokens: 10000, stream: true,
-      system: SECTION_SYSTEM, schema: SECTION_BUILD_SCHEMA, userContent, timeoutMs: 135_000,
+      apiKey, model: MODEL, effort: "high", maxTokens: 10000, stream: true,
+      system: SECTION_SYSTEM + avoidBlock, schema: SECTION_BUILD_SCHEMA, userContent, timeoutMs: 135_000,
     });
-    await recordStageUsage(admin, scanId, buildEntry(`rebuild_section_${sectionIndex + 1}`, MODEL, res.usage, Date.now() - startedAt, "medium"));
+    await recordStageUsage(admin, scanId, buildEntry(`rebuild_section_${sectionIndex + 1}`, MODEL, res.usage, Date.now() - startedAt, "high"));
 
     const built = (res.json ?? {}) as { html?: string; css?: string };
     if (!built.html) throw new Error(`empty_section_${sectionIndex + 1}`);
@@ -467,6 +498,11 @@ Deno.serve(async (req) => {
 
       await admin.from("scans").update({
         pipeline_status: "applied",
+        // Only a run that reached here is deliverable, so clear whatever a
+        // previous failed attempt left behind. Without this a scan can sit as
+        // "applied" while still carrying an error from an earlier try, which is
+        // exactly how one run looked delivered and broken at the same time.
+        error: null,
         change_log: present.map((s) => ({
           signal_id: s.id, file: target, applied: true, applied_by: "rebuild", reason: null,
         })),
