@@ -148,15 +148,43 @@ Look hand-built and premium. FORBIDDEN AI fingerprints: default Inter, purple/in
  * the section prompt (~540 tokens) past the size where caching engages at all,
  * which is why every rebuild call so far measured zero cached input.
  */
+/**
+ * Rules that apply to every rebuild regardless of what the audit found.
+ *
+ * buildAvoidBlock only ever lists signals PRESENT in the original site, so a
+ * check the original passed is never mentioned — and measurement showed that is
+ * exactly the set the rebuild breaks. Three runs in a row introduced physical
+ * CSS properties, inconsistent RTL, reversed currency order and icon buttons
+ * with no accessible name, none of which the original was guilty of.
+ */
+const NEVER_INTRODUCE = `
+
+<never_introduce>
+These are not site-specific findings — they are rules the rebuilt page must
+satisfy even if the original site already did. Breaking one turns a passing
+check into a failing one, which is worse than leaving the site alone.
+
+- Logical properties ONLY. Never margin-left/right, padding-left/right,
+  float:left, text-align:left. Use inline-start / inline-end / text-align:start.
+- RTL must be consistent, not just dir on the root: flex/grid direction, absolute
+  offsets (inset-inline-start, never left:0), and icon/arrow direction all follow
+  the text direction.
+- Currency and numbers: the symbol goes BEFORE the number in Hebrew (₪199, never
+  "199 ₪"). Wrap any Latin text or number inside Hebrew in an element with
+  dir="ltr" and unicode-bidi:isolate so it cannot reorder.
+- Every control needs an accessible name. An icon-only <button> or <a> must carry
+  aria-label. Every <img> needs a real alt (empty alt only if purely decorative).
+</never_introduce>`;
+
 function buildAvoidBlock(present: DetectedSignal[]): string {
-  if (!present.length) return "";
+  if (!present.length) return NEVER_INTRODUCE;
   const lines = present
     .map((s) => {
       const found = (s.explanation ?? "").trim();
       return `#${s.id} ${s.name}` + (found ? `\n   found here as: ${found}` : "");
     })
     .join("\n");
-  return `\n\n<avoid_ai_patterns>\nThe audit found these AI fingerprints in THIS site. Removing them is the entire point of rebuilding it, so your section must not reproduce a single one — and must not reach for a different cliché in their place. Each entry is the fingerprint, then how it showed up in this site.\n\n${lines}\n</avoid_ai_patterns>`;
+  return NEVER_INTRODUCE + `\n\n<avoid_ai_patterns>\nThe audit found these AI fingerprints in THIS site. Removing them is the entire point of rebuilding it, so your section must not reproduce a single one — and must not reach for a different cliché in their place. Each entry is the fingerprint, then how it showed up in this site.\n\n${lines}\n</avoid_ai_patterns>`;
 }
 
 const SECTION_SYSTEM =
@@ -343,6 +371,33 @@ function headMeta(spec: Spec): string {
   return tags.join("\n");
 }
 
+/**
+ * The floor every rebuilt page gets whether or not the original had it.
+ *
+ * The avoid list is derived from the signals found in the ORIGINAL site, so a
+ * check the original passed is never mentioned to the builder — which is
+ * precisely the set it is free to break. Three consecutive runs introduced the
+ * same kinds of regression (no skip link, no reduced-motion block, no font
+ * preload), so those three stop being asked for and start being emitted.
+ */
+function baseA11yCss(): string {
+  return `/* keyboard users need a way past the nav (#94) */
+.skip-link{position:absolute;inset-block-start:-100%;inset-inline-start:0;z-index:999;
+  padding:.75rem 1rem;background:#000;color:#fff;text-decoration:none}
+.skip-link:focus{inset-block-start:0}
+/* honour the OS "reduce motion" setting (#45) */
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{animation-duration:.01ms !important;animation-iteration-count:1 !important;
+    transition-duration:.01ms !important;scroll-behavior:auto !important}
+}`;
+}
+
+/** Preload the font the shell already loads (#40), derived from its own link. */
+function fontPreload(headExtras: string): string {
+  const m = headExtras.match(/<link[^>]+href="(https:\/\/fonts\.googleapis\.com\/[^"]+)"/i);
+  return m ? `<link rel="preload" as="style" href="${m[1]}">` : "";
+}
+
 function assemble(spec: Spec, shell: Shell, sections: BuiltSection[], scripts: string[]): string {
   const ordered = [...sections].sort((a, b) => a.index - b.index);
   const sectionCss = ordered.map((s) => s.css || "").join("\n\n");
@@ -356,16 +411,20 @@ function assemble(spec: Spec, shell: Shell, sections: BuiltSection[], scripts: s
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escapeHtml(spec.meta.name || "")}</title>
 ${headMeta(spec)}
+${fontPreload(shell.head_extras || "")}
 ${shell.head_extras || ""}
 <style>
+${baseA11yCss()}
+
 ${shell.tokens_css}
 
 ${sectionCss}
 </style>
 </head>
 <body>
+<a class="skip-link" href="#main">${spec.dir === "rtl" ? "דלג לתוכן העמוד" : "Skip to content"}</a>
 ${shell.header_html}
-<main>
+<main id="main">
 ${sectionHtml}
 </main>
 ${shell.footer_html}
@@ -495,7 +554,7 @@ Deno.serve(async (req) => {
 
       const res = await callClaude({
         apiKey, model: MODEL, effort: "high", maxTokens: 12000, stream: true,
-        system: SHELL_SYSTEM, schema: SHELL_SCHEMA, userContent, timeoutMs: 135_000,
+        system: SHELL_SYSTEM + NEVER_INTRODUCE, schema: SHELL_SCHEMA, userContent, timeoutMs: 135_000,
       });
       await recordStageUsage(admin, scanId, buildEntry("rebuild_shell", MODEL, res.usage, Date.now() - startedAt, "high"));
 
