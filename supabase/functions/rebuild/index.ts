@@ -130,7 +130,7 @@ const SHELL_SYSTEM =
 
 Return:
 - head_extras: the <link> tags that load the chosen fonts (Google Fonts is fine). For Hebrew, use Hebrew-capable fonts (Heebo, Assistant, Rubik, Frank Ruhl Libre, Noto Sans Hebrew).
-- tokens_css: a real design system as CSS — :root custom properties for the brand palette, type scale, spacing rhythm, radii and shadows; sensible base element styles (body font/line-height/color, headings, links, img{max-width:100%}); and reusable component classes the sections will use (.container, .btn / .btn-primary, .eyebrow, .section, etc.). Body font-weight >= 500, headings >= 700. Respect dir (logical properties for RTL).
+- tokens_css: a real design system as CSS — :root custom properties for the brand palette, type scale, spacing rhythm, radii and shadows; sensible base element styles (body font/line-height/color, headings, links, img{max-width:100%}); and reusable component classes the sections will use (.container, .btn / .btn-primary, .section, etc.). Do NOT define an .eyebrow class or any other "small label above every heading" helper — offering one makes every section reach for it, and a kicker on every section is itself an AI tell. Body font-weight >= 500, headings >= 700. Respect dir (logical properties for RTL).
 - header_html: the site header/nav markup (logo text = site name, real nav links only). Use the token classes.
 - footer_html: a real footer using the site's real facts (name, contact). No invented links.
 
@@ -295,6 +295,54 @@ const SECTION_BUILD_SCHEMA = {
 };
 
 // ================= assembly =================
+
+/**
+ * The head tags the audit checks for (#30 meta description, #31 Open Graph,
+ * #27 JSON-LD). These are built from the spec rather than asked of the model:
+ * the facts are already in hand, so generating them here makes them certain and
+ * free instead of something a prompt can forget — two consecutive runs cleared
+ * different subsets of what they were told to fix, and these three never cleared
+ * at all.
+ *
+ * Canonical (#99) is deliberately absent: it needs the site's real deployed URL,
+ * which the bundle does not carry, and a guessed canonical is worse than none.
+ */
+function headMeta(spec: Spec): string {
+  const name = spec.meta.name || "";
+  const desc = (spec.meta.purpose || "").trim().slice(0, 155);
+  const q = (s: string) => escapeHtml(s).replace(/"/g, "&quot;");
+  const tags: string[] = [];
+
+  if (desc) {
+    tags.push(`<meta name="description" content="${q(desc)}">`);
+    tags.push(`<meta property="og:description" content="${q(desc)}">`);
+  }
+  if (name) {
+    tags.push(`<meta property="og:title" content="${q(name)}">`);
+    tags.push(`<meta property="og:site_name" content="${q(name)}">`);
+  }
+  tags.push(`<meta property="og:type" content="website">`);
+  if (spec.meta.language) tags.push(`<meta property="og:locale" content="${q(spec.meta.language)}">`);
+
+  // Organisation schema from the real facts only — never invented.
+  if (name) {
+    const ld: Record<string, unknown> = {
+      "@context": "https://schema.org",
+      "@type": "Organization",
+      name,
+    };
+    if (desc) ld.description = desc;
+    const phone = (spec.facts ?? []).find((f) => /0\d[\d\-\s]{7,}/.test(f));
+    if (phone) ld.telephone = phone.match(/0\d[\d\-\s]{7,}/)?.[0]?.trim();
+    const email = (spec.facts ?? []).find((f) => /[\w.+-]+@[\w-]+\.[\w.]+/.test(f));
+    if (email) ld.email = email.match(/[\w.+-]+@[\w-]+\.[\w.]+/)?.[0];
+    tags.push(
+      `<script type="application/ld+json">${JSON.stringify(ld).replace(/</g, "\\u003c")}</script>`,
+    );
+  }
+  return tags.join("\n");
+}
+
 function assemble(spec: Spec, shell: Shell, sections: BuiltSection[], scripts: string[]): string {
   const ordered = [...sections].sort((a, b) => a.index - b.index);
   const sectionCss = ordered.map((s) => s.css || "").join("\n\n");
@@ -307,6 +355,7 @@ function assemble(spec: Spec, shell: Shell, sections: BuiltSection[], scripts: s
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escapeHtml(spec.meta.name || "")}</title>
+${headMeta(spec)}
 ${shell.head_extras || ""}
 <style>
 ${shell.tokens_css}
@@ -323,6 +372,10 @@ ${shell.footer_html}
 ${scriptBlock}</body>
 </html>
 `;
+}
+
+function clip(s: string, n: number): string {
+  return s.length > n ? s.slice(0, n) + "\n…" : s;
 }
 
 function escapeHtml(s: string): string {
@@ -459,11 +512,31 @@ Deno.serve(async (req) => {
     const section = spec.sections[sectionIndex];
     if (!section) return json({ ok: true, scan_id: scanId, part, parts, done: true });
 
+    /* Each section is built in its own request, so without this it cannot see
+       what the others look like — and independently reaching for the same
+       device is exactly how every section ended up with a kicker label, and in
+       another run with the same bento grid. Show it the markup already built so
+       it can deliberately do something else. */
+    const built0 = (await readJson<BuiltSection[]>(admin, P.sections)) ?? [];
+    const previous = built0
+      .filter((s) => s.index < sectionIndex)
+      .sort((a, b) => b.index - a.index)
+      .slice(0, 3)
+      .map((s) => `--- section ${s.index + 1} ---\n${clip(s.html, 700)}`)
+      .join("\n\n");
+    const alreadyBuilt = previous
+      ? `<already_built_sections>\n${previous}\n</already_built_sections>\n\n` +
+        `The sections above are already on this page. Give THIS section a visibly ` +
+        `different composition — do not repeat their layout pattern, their heading ` +
+        `treatment, or any small label above the heading.\n\n`
+      : "";
+
     const userContent =
       `<design_direction>\n${JSON.stringify(direction ?? {}, null, 2)}\n</design_direction>\n\n` +
       `<tokens_css>\n${shell.tokens_css}\n</tokens_css>\n\n` +
       `<dir>${spec.dir}</dir>\n\n` +
       `<section_spec>\n${JSON.stringify(section, null, 2)}\n</section_spec>\n\n` +
+      alreadyBuilt +
       `Build ONLY this section (html + css), using only the content above.`;
 
     /* Sections produce nearly all of the page's markup and CSS, so they get the
@@ -478,9 +551,9 @@ Deno.serve(async (req) => {
     const built = (res.json ?? {}) as { html?: string; css?: string };
     if (!built.html) throw new Error(`empty_section_${sectionIndex + 1}`);
 
-    // Accumulate this section (download-merge-upload, keyed by index).
-    const prior = (await readJson<BuiltSection[]>(admin, P.sections)) ?? [];
-    const merged = prior.filter((s) => s.index !== sectionIndex);
+    // Accumulate this section (merge-upload, keyed by index). Parts run strictly
+    // one at a time per scan, so the copy read before the call is still current.
+    const merged = built0.filter((s) => s.index !== sectionIndex);
     merged.push({ index: sectionIndex, html: built.html, css: built.css ?? "" });
     await writeJson(admin, P.sections, merged);
 
