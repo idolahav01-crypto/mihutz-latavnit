@@ -529,6 +529,36 @@ code, .mono { font-family: var(--font-mono); }
    ============================================================ */
 /* Sits directly under .report-summary, which already ends in a rule — a
    second border here would double it. The findings card below gets the gap. */
+/* ---------- the site's own address ----------
+   og:url, og:image and canonical are the only checks that cannot be answered
+   from the source files, so this one field is what unlocks them. Optional on
+   purpose: a wrong canonical is worse than a missing one. */
+.site-url { margin-block-end: var(--s-3); }
+.site-url-label {
+  display: block;
+  font-size: 0.82rem; font-weight: 600;
+  color: var(--color-ink-soft);
+  margin-block-end: 4px;
+}
+:lang(he) .site-url-label { font-weight: 700; }
+.site-url input {
+  inline-size: 100%; max-inline-size: 420px;
+  min-block-size: 44px;
+  background: var(--color-paper-raised);
+  border: 1px solid var(--color-neutral-300);
+  border-radius: var(--r-surface);
+  padding-inline: var(--s-2);
+  font: inherit; color: var(--color-ink);
+}
+.site-url input::placeholder { color: var(--color-neutral-600); }
+.site-url input:focus-visible { outline: none; border-color: var(--color-primary); }
+[dir="rtl"] .site-url input { text-align: right; }
+.site-url-note {
+  margin-block-start: 4px;
+  font-size: 0.82rem; color: var(--color-neutral-600);
+  max-width: none;
+}
+
 .fix-pipeline { margin-block-start: 0; }
 #report-body { margin-block-start: var(--s-4); }
 .fix-hint { color: var(--color-neutral-600); font-size: 0.9rem; }

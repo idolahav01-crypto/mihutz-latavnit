@@ -126,6 +126,12 @@
              Sits above the findings: the next move is the first thing on
              screen, and the full list opens below it only on request. ===== -->
         <div class="fix-pipeline" id="fix-pipeline">
+        <div class="site-url">
+          <label class="site-url-label" for="site-url">Your live site address (optional)</label>
+          <input type="url" id="site-url" dir="ltr" inputmode="url" autocomplete="off"
+                 placeholder="https://example.com" />
+          <p class="site-url-note">Without it we cannot emit share tags or a canonical link — and we never invent an address.</p>
+        </div>
           <button type="button" class="btn btn-primary" id="rebuild-site">Rebuild from scratch</button>
           <button type="button" class="btn" id="add-features">Suggest a new feature</button>
           <button type="button" class="btn" id="propose-fixes">Redesign the site (old)</button>

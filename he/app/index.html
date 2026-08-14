@@ -126,6 +126,12 @@
              יושב מעל הממצאים: הצעד הבא הוא הדבר הראשון על המסך, והרשימה
              המלאה נפתחת מתחתיו רק למי שרוצה אותה. ===== -->
         <div class="fix-pipeline" id="fix-pipeline">
+        <div class="site-url">
+          <label class="site-url-label" for="site-url">כתובת האתר החי (לא חובה)</label>
+          <input type="url" id="site-url" dir="ltr" inputmode="url" autocomplete="off"
+                 placeholder="https://example.co.il" />
+          <p class="site-url-note">בלי הכתובת אי אפשר לייצר תגיות שיתוף ותגית canonical — ואנחנו לא ממציאים כתובת.</p>
+        </div>
           <button type="button" class="btn btn-primary" id="rebuild-site">בנה מחדש מאפס</button>
           <button type="button" class="btn" id="add-features">הצע פיצ'ר חדש</button>
           <button type="button" class="btn" id="propose-fixes">שדרג ועצב מחדש (ישן)</button>

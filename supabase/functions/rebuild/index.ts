@@ -91,6 +91,8 @@ interface Spec {
   facts: string[];
   sections: Section[];
   components: Array<{ name: string; purpose: string; container_id: string; script_index?: number }>;
+  /** Image sources lifted from the ORIGINAL markup — never model-authored. */
+  images?: string[];
 }
 interface Direction {
   brand_palette: Array<{ token: string; hex: string; role: string }>;
@@ -335,7 +337,53 @@ const SECTION_BUILD_SCHEMA = {
  * Canonical (#99) is deliberately absent: it needs the site's real deployed URL,
  * which the bundle does not carry, and a guessed canonical is worse than none.
  */
-function headMeta(spec: Spec): string {
+/**
+ * The site's own address is the one input the pipeline cannot derive or invent,
+ * and three signals hang off it (og:url, og:image, canonical). The user supplies
+ * it; we only sanity-check it so a typo can never end up in a canonical tag.
+ */
+function normalizeSiteUrl(raw: unknown): string | null {
+  if (typeof raw !== "string" || !raw.trim()) return null;
+  const withScheme = /^https?:\/\//i.test(raw.trim()) ? raw.trim() : `https://${raw.trim()}`;
+  try {
+    const u = new URL(withScheme);
+    if (u.protocol !== "http:" && u.protocol !== "https:") return null;
+    if (!u.hostname.includes(".")) return null;
+    u.hash = "";
+    return u.toString().replace(/\/$/, "");
+  } catch {
+    return null;
+  }
+}
+
+/** Resolve an image path from the original page against the live site address. */
+function absoluteUrl(src: string, siteUrl: string): string | null {
+  try {
+    return new URL(src, siteUrl + "/").toString();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Candidate share images, in the order the page itself presents them. Logos and
+ * icons are pushed to the back: signal #98 is specifically "the logo is the
+ * og:image on every page", so a real content image is always the better pick.
+ */
+function extractImageUrls(html: string): string[] {
+  const found: string[] = [];
+  const re = /<img\b[^>]*\bsrc\s*=\s*["']([^"']+)["']/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html)) !== null) {
+    const src = m[1].trim();
+    if (!src || src.startsWith("data:")) continue;
+    if (!found.includes(src)) found.push(src);
+  }
+  const isChrome = (s: string) => /logo|icon|favicon|sprite|avatar/i.test(s);
+  return [...found.filter((s) => !isChrome(s)), ...found.filter(isChrome)].slice(0, 5);
+}
+
+function headMeta(spec: Spec, siteUrl: string | null): string {
   const name = spec.meta.name || "";
   const desc = (spec.meta.purpose || "").trim().slice(0, 155);
   const q = (s: string) => escapeHtml(s).replace(/"/g, "&quot;");
@@ -351,6 +399,20 @@ function headMeta(spec: Spec): string {
   }
   tags.push(`<meta property="og:type" content="website">`);
   if (spec.meta.language) tags.push(`<meta property="og:locale" content="${q(spec.meta.language)}">`);
+
+  // These three need the real address. Without it we emit nothing rather than
+  // guess — a wrong canonical is worse than a missing one.
+  if (siteUrl) {
+    tags.push(`<link rel="canonical" href="${q(siteUrl)}">`);
+    tags.push(`<meta property="og:url" content="${q(siteUrl)}">`);
+    const img = (spec.images ?? [])
+      .map((src) => (/^https?:\/\//i.test(src) ? src : absoluteUrl(src, siteUrl)))
+      .find((u): u is string => !!u);
+    if (img) {
+      tags.push(`<meta property="og:image" content="${q(img)}">`);
+      tags.push(`<meta name="twitter:card" content="summary_large_image">`);
+    }
+  }
 
   // Organisation schema from the real facts only — never invented.
   if (name) {
@@ -398,7 +460,7 @@ function fontPreload(headExtras: string): string {
   return m ? `<link rel="preload" as="style" href="${m[1]}">` : "";
 }
 
-function assemble(spec: Spec, shell: Shell, sections: BuiltSection[], scripts: string[]): string {
+function assemble(spec: Spec, shell: Shell, sections: BuiltSection[], scripts: string[], siteUrl: string | null): string {
   const ordered = [...sections].sort((a, b) => a.index - b.index);
   const sectionCss = ordered.map((s) => s.css || "").join("\n\n");
   const sectionHtml = ordered.map((s) => s.html || "").join("\n\n");
@@ -410,7 +472,7 @@ function assemble(spec: Spec, shell: Shell, sections: BuiltSection[], scripts: s
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escapeHtml(spec.meta.name || "")}</title>
-${headMeta(spec)}
+${headMeta(spec, siteUrl)}
 ${fontPreload(shell.head_extras || "")}
 ${shell.head_extras || ""}
 <style>
@@ -450,7 +512,7 @@ Deno.serve(async (req) => {
   const user = await requireUser(admin, req);
   if (!user) return json({ error: "unauthorized" }, 401);
 
-  let body: { scan_id?: string; part?: number };
+  let body: { scan_id?: string; part?: number; site_url?: string };
   try {
     body = await req.json();
   } catch {
@@ -462,11 +524,15 @@ Deno.serve(async (req) => {
 
   const { data: scan, error: scanErr } = await admin
     .from("scans")
-    .select("id, user_id, detection, site_profile, design_direction")
+    .select("id, user_id, detection, site_profile, design_direction, site_url")
     .eq("id", scanId)
     .single();
   if (scanErr || !scan || scan.user_id !== user.id) return json({ error: "scan not found" }, 404);
   if (!scan.detection) return json({ error: "run_detection_first" }, 409);
+
+  // A URL sent with this request wins; otherwise reuse whatever an earlier part
+  // stored, so parts 2..N still know the address the user typed once.
+  const siteUrl = normalizeSiteUrl(body.site_url) ?? normalizeSiteUrl(scan.site_url);
 
   const P = paths(user.id, scanId);
 
@@ -515,6 +581,10 @@ Deno.serve(async (req) => {
       if (!spec || !Array.isArray(spec.sections) || !spec.sections.length) throw new Error("empty_spec");
       const direction = out.design_direction ?? (scan.design_direction as Direction | null);
 
+      // The share image has to be a real image off the real page, so it is read
+      // out of the source markup here rather than asked of the model.
+      spec.images = extractImageUrls(pristine.get(target) ?? "");
+
       await writeJson(admin, P.spec, { spec, design_direction: direction, scripts, target });
       // Reset any prior section builds from an earlier run.
       await writeJson(admin, P.sections, []);
@@ -522,6 +592,7 @@ Deno.serve(async (req) => {
       const parts = 2 + spec.sections.length; // spec + shell + one per section
       await admin.from("scans").update({
         design_direction: direction ?? scan.design_direction ?? null,
+        site_url: siteUrl,
         pipeline_status: "applying",
         // A fresh attempt must not inherit the error of the one before it.
         error: null,
@@ -619,7 +690,7 @@ Deno.serve(async (req) => {
     const done = part >= parts;
     if (done) {
       // Every section built — assemble the final self-contained document.
-      const full = assemble(spec, shell, merged, scripts);
+      const full = assemble(spec, shell, merged, scripts, siteUrl);
       const editedMap = new Map<string, string>([[target, full]]);
       const up = await admin.storage.from("scans").upload(
         P.edited,

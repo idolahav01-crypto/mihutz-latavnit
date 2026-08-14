@@ -188,7 +188,7 @@
      "proposals", "fix-actions", "apply-fixes", "apply-result", "qa-result",
      "deliver-actions", "download-zip", "push-github", "deliver-result",
      "add-features", "features-result", "rb-progress", "score-delta",
-     "scan-progress"
+     "scan-progress", "site-url"
     ].forEach(function (id) { els[id] = $(id); });
   }
 
@@ -1180,6 +1180,12 @@
      step assembles a complete, self-contained page. Progress is shown live. ===== */
   var rebuildTotal = 0;
   var rbSectionNames = null;
+  /* og:url, og:image and canonical are the only checks we cannot satisfy from
+     the source alone: they need the address the site actually lives at. */
+  function siteUrlValue() {
+    var el = els["site-url"];
+    return el && el.value ? el.value.trim() : "";
+  }
   function rbLabels() {
     var labels = [P.rbStepUnderstand, P.rbStepDesign];
     if (rbSectionNames) {
@@ -1199,7 +1205,11 @@
     els["fix-hint"].textContent = n === 1 ? P.rebuildSpec
       : (n === 2 ? P.rebuildShell
                  : P.rebuildSection(n - 2, rebuildTotal ? rebuildTotal - 2 : n - 2));
-    return invokeFn("rebuild", { scan_id: currentScanId, part: n }).then(function (data) {
+    /* The address only matters on part 1 — that is where it gets stored, and
+       every later part reads it back from the scan row. */
+    var payload = { scan_id: currentScanId, part: n };
+    if (n === 1) payload.site_url = siteUrlValue();
+    return invokeFn("rebuild", payload).then(function (data) {
       rebuildTotal = (data && data.parts) || rebuildTotal;
       if (n === 1 && data && data.spec_summary && data.spec_summary.sections) {
         rbSectionNames = data.spec_summary.sections.map(function (s) { return s.heading || s.type || ""; });
