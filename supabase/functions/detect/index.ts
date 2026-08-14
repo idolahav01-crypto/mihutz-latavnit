@@ -16,6 +16,7 @@ import {
   parseBundle,
   serializeBundle,
 } from "../_shared/pipeline.ts";
+import { MECHANICAL_IDS, mechanicalSignals, overlayMechanical } from "../_shared/mechanical.ts";
 import { callClaude } from "../_shared/anthropic.ts";
 import { buildEntry, recordStageUsage } from "../_shared/usage.ts";
 
@@ -33,6 +34,12 @@ const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 // edge-function wall clock.
 const MODEL = "claude-sonnet-5";
 const SIGNAL_COUNT = (signals as unknown[]).length; // 110
+// The mechanical ids are decided by text search in _shared/mechanical.ts, so
+// they are never put to the model: same answer every run, and the output tokens
+// they used to cost disappear.
+const MODEL_SIGNALS = (signals as Array<{ id: number }>).filter(
+  (s) => !MECHANICAL_IDS.includes(s.id),
+);
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
@@ -303,7 +310,8 @@ Deno.serve(async (req) => {
       const prior = (scan.detection ?? {}) as DetectionResult;
       const absentIds = (prior.signals ?? [])
         .filter((s) => s.present !== true && s.applicable !== false)
-        .map((s) => Number(s.id));
+        .map((s) => Number(s.id))
+        .filter((id) => !MECHANICAL_IDS.includes(id));
       if (!absentIds.length) {
         const { score, present } = computeScore(prior.signals ?? []);
         return json({ ok: true, scan_id: scanId, mode: "rehunt", done: true, ai_fingerprint_score: score, present_count: present });
@@ -335,6 +343,11 @@ Deno.serve(async (req) => {
       const found = claude.json as DetectionResult;
       const additions = (found.signals ?? []).filter((s) => s.present === true);
       const merged = mergeDetection(prior, { signals: additions });
+      // A re-hunt is allowed to find more, never to overrule a text search.
+      merged.signals = overlayMechanical(
+        merged.signals ?? [],
+        mechanicalSignals(parseBundle(bundle)),
+      );
       const { score, present } = computeScore(merged.signals ?? []);
 
       await recordStageUsage(
@@ -391,8 +404,8 @@ Deno.serve(async (req) => {
     // Which signals this pass is responsible for. The SYSTEM prompt still
     // carries all 110 (identical bytes every pass, so it stays prompt-cached);
     // only the user turn narrows the scope.
-    const perPart = Math.ceil(signals.length / parts);
-    const slice = signals.slice((part - 1) * perPart, part * perPart);
+    const perPart = Math.ceil(MODEL_SIGNALS.length / parts);
+    const slice = MODEL_SIGNALS.slice((part - 1) * perPart, part * perPart);
     const idList = slice.map((sg) => `#${sg.id}`).join(", ");
 
     // Routed through the shared client so this stage gets the same treatment as
@@ -429,6 +442,12 @@ Deno.serve(async (req) => {
       : scan.detection;
     const prior = (part === 1 ? {} : (priorStored ?? {})) as DetectionResult;
     const detection = mergeDetection(prior, partDetection);
+    // Applied on every pass, not just the last, so a partial save on disk is
+    // never internally inconsistent with the finished one.
+    detection.signals = overlayMechanical(
+      detection.signals ?? [],
+      mechanicalSignals(parseBundle(bundle)),
+    );
 
     await recordStageUsage(
       admin,
