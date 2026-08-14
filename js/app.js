@@ -49,6 +49,7 @@
                 "מריץ אבחון מול 110 סימנים"],
     scanned: function (n) { return "נסרקו " + n + " קבצים"; },
     foundSignals: function (p, appl) { return "נמצאו " + p + " סימנים מתוך " + appl + " ישימים"; },
+    unevaluated: function (n) { return n + " סימנים לא נבדקו"; },
     /* cats: [{ name, count }], כבר ממוינות מהגדולה לקטנה */
     findingsSummary: function (total, cats) {
       var head = total === 1 ? "נמצא סימן אחד " : "נמצאו " + total + " סימנים ";
@@ -97,6 +98,7 @@
                 "Running diagnosis against 110 signals"],
     scanned: function (n) { return "Scanned " + n + " files"; },
     foundSignals: function (p, appl) { return "Found " + p + " signals of " + appl + " applicable"; },
+    unevaluated: function (n) { return n + " signals were not evaluated"; },
     /* cats: [{ name, count }], already sorted largest first */
     findingsSummary: function (total, cats) {
       var head = total === 1 ? "Found 1 signal " : "Found " + total + " signals ";
@@ -639,9 +641,23 @@
       return invokeFn("detect", { scan_id: scanId, part: n, parts: total })
         .then(function (data) {
           if (data && data.done) return data;
+          /* The server found signals the model never returned. Rather than
+             score around the hole, it hands them back as another pass with a
+             budget of its own. */
+          if (data && data.gap) return gapPass(data.gap_attempt, n, total);
           setDetectProgress(n, total);
           return pass(n + 1, total);
         });
+    }
+
+    function gapPass(attempt, n, total) {
+      prog.say(P.gapPass);
+      return invokeFn("detect", {
+        scan_id: scanId, gap: true, gap_attempt: attempt, part: n, parts: total,
+      }).then(function (data) {
+        if (data && data.gap) return gapPass(data.gap_attempt, n, total);
+        return data;
+      });
     }
 
     /* How long a pass takes is driven by how many signals come back PRESENT,
@@ -741,9 +757,15 @@
       : 110 - ((det.not_applicable_ids || []).length);
 
     els.score.innerHTML = esc(String(scan.ai_fingerprint_score != null ? scan.ai_fingerprint_score : 0)) + "<small>/100</small>";
+    /* A signal nobody evaluated is recorded with confidence 0 rather than
+       dropped, so it cannot quietly leave the denominator. Saying so out loud
+       is the point: this failure was found by reading the database by hand,
+       and it should never take that again. */
+    var unevaluated = all.filter(function (s) { return s.confidence === 0; }).length;
     els["report-caption"].textContent =
       T.foundSignals(scan.present_count != null ? scan.present_count : present.length, applicable) +
-      " · " + T.scanned(scan.files_scanned != null ? scan.files_scanned : 0);
+      " · " + T.scanned(scan.files_scanned != null ? scan.files_scanned : 0) +
+      (unevaluated ? " · " + T.unevaluated(unevaluated) : "");
 
     /* group present signals by category, preserving id order */
     var groups = [];
@@ -880,6 +902,7 @@
     applyPass: function (d, t) { return "מחיל תיקונים — מעבר " + d + " מתוך " + t; },
     transformPass: function (d, t) { return "משדרג ומעצב מחדש — שלב " + d + " מתוך " + t; },
     rehunting: "מחפש לעומק — עוד סימני AI...",
+    gapPass: "משלים סימנים שלא נבדקו…",
     zipBuilding: "מכין את הקובץ...",
     zipReady: function (n) { return "הורד. " + n + " קבצים שונו."; },
     prOpening: "פותח Pull Request...",
@@ -937,6 +960,7 @@
     applyPass: function (d, t) { return "Applying fixes — pass " + d + " of " + t; },
     transformPass: function (d, t) { return "Redesigning — step " + d + " of " + t; },
     rehunting: "Digging deeper — more AI signals...",
+    gapPass: "Filling in signals that were skipped…",
     zipBuilding: "Preparing the file...",
     zipReady: function (n) { return "Downloaded. " + n + " files changed."; },
     prOpening: "Opening a pull request...",
