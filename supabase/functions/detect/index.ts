@@ -251,6 +251,52 @@ function computeScore(sigs: Array<Record<string, unknown>>): {
   return { score: den === 0 ? 0 : Math.round((100 * num) / den), present };
 }
 
+
+/**
+ * Signals the model was asked about and simply never returned.
+ *
+ * Measured on two consecutive scans of one unchanged site: the model returned
+ * 93 signals on the first and 88 on the second, and every id it dropped came
+ * from the tail of its assigned list. This was not truncation — the pass used
+ * 3,246 of its 32,000 output tokens and 45 of its 150 seconds. It just stopped
+ * early.
+ *
+ * The damage is in the scoring, not the reporting. computeScore divides by the
+ * signals it was handed, so a dropped signal leaves the denominator instead of
+ * counting as a pass, and the score moves for a reason that has nothing to do
+ * with the site. Two runs over identical bytes scored 53 and 44; on a fixed
+ * denominator the same two runs are 49 and 42.
+ */
+function missingIds(detection: DetectionResult): number[] {
+  const have = new Set((detection.signals ?? []).map((s) => Number(s.id)));
+  return (signals as Array<{ id: number }>).map((s) => s.id).filter((id) => !have.has(id));
+}
+
+/**
+ * Record an unevaluated signal as an explicit pass rather than a hole. Absent
+ * is the honest default — we have no evidence it is present, and evidence is
+ * what present=true costs — but confidence 0 marks it as never looked at, so a
+ * scan that skipped half the catalogue cannot masquerade as a clean one.
+ */
+function fillUnevaluated(detection: DetectionResult, ids: number[]): void {
+  const catalogue = new Map(
+    (signals as Array<{ id: number; name: string; weight: string }>).map((s) => [s.id, s]),
+  );
+  const added = ids.map((id) => ({
+    id,
+    name: catalogue.get(id)?.name ?? `#${id}`,
+    present: false,
+    applicable: true,
+    weight: catalogue.get(id)?.weight ?? "medium",
+    confidence: 0,
+    total_occurrences: 0,
+    explanation: "לא הוערך בסריקה זו — הסימן נספר כתקין כדי שהציון יישאר בר-השוואה.",
+    evidence: [],
+  }));
+  detection.signals = [...(detection.signals ?? []), ...added]
+    .sort((a, b) => Number(a.id) - Number(b.id));
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST") return json({ error: "method not allowed" }, 405);
@@ -479,6 +525,46 @@ Deno.serve(async (req) => {
       });
     }
 
+    // ---- close the gaps the model left before anything is scored ----
+    // One cheap extra pass over just the dropped ids, then an explicit record
+    // for whatever is still missing. The retry is bounded and best-effort: if
+    // it fails or times out, the deterministic fill below still guarantees a
+    // constant denominator, which is the part that must never be optional.
+    let gaps = missingIds(detection);
+    if (gaps.length) {
+      try {
+        const gapStarted = Date.now();
+        const gapCall = await callClaude({
+          apiKey: ANTHROPIC_API_KEY,
+          model: MODEL,
+          effort: "medium",
+          maxTokens: 16000,
+          system: SYSTEM_PROMPT,
+          userContent: `GAP PASS. An earlier pass was asked about these signals and returned no ` +
+            `entry for them. Evaluate EVERY one of them now and return an entry for each, ` +
+            `present or absent, with the same evidence rules as any other pass. ` +
+            `Do NOT return site_profile, meta, or scores.\n\n` +
+            `Signals: ${gaps.map((id) => `#${id}`).join(", ")}\n\n${bundle}`,
+          schema: SCHEMA,
+          timeoutMs: 60_000,
+        });
+        const filled = mergeDetection(detection, gapCall.json as DetectionResult);
+        detection.signals = overlayMechanical(
+          filled.signals ?? [],
+          mechanicalSignals(parseBundle(bundle)),
+        );
+        await recordStageUsage(
+          admin, scanId,
+          buildEntry(`${mode === "after" ? "detect_after" : "detect"}_gap`, MODEL, gapCall.usage, Date.now() - gapStarted, "medium"),
+        );
+        gaps = missingIds(detection);
+      } catch (e) {
+        // Never fatal: a scan with a filled denominator beats no scan at all.
+        console.error("gap pass failed:", e);
+      }
+    }
+    if (gaps.length) fillUnevaluated(detection, gaps);
+
     // Recompute the score deterministically from the returned signals.
     const { score, present } = computeScore(detection.signals ?? []);
 
@@ -513,6 +599,7 @@ Deno.serve(async (req) => {
           present_count: before?.present_count ?? null,
         },
         after: { ai_fingerprint_score: score, present_count: present },
+        unevaluated: gaps.length,
         // Negative = the fingerprint went down, which is the goal.
         score_delta: before?.ai_fingerprint_score == null
           ? null
@@ -542,6 +629,7 @@ Deno.serve(async (req) => {
       ai_fingerprint_score: score,
       present_count: present,
       files_scanned: detection.meta?.files_scanned ?? fileCount,
+      unevaluated: gaps.length,
     });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
