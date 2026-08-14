@@ -22,10 +22,12 @@
 // Body: { scan_id, part? } — response returns { parts, done, ... }.
 
 import {
+  DELETED_FILE,
   type DetectedSignal,
   parseBundle,
   presentSignals,
   serializeBundle,
+  unreferencedAssets,
 } from "../_shared/pipeline.ts";
 import { callClaude, cleanApiKey } from "../_shared/anthropic.ts";
 import { adminClient, cors, json, requireUser } from "../_shared/http.ts";
@@ -692,6 +694,24 @@ Deno.serve(async (req) => {
       // Every section built — assemble the final self-contained document.
       const full = assemble(spec, shell, merged, scripts, siteUrl);
       const editedMap = new Map<string, string>([[target, full]]);
+
+      // The rebuilt page is self-contained: its CSS is inline and the original
+      // <script> blocks are carried inside it. That leaves the old stylesheet
+      // orphaned — nothing links it, and it still shipped to the user and still
+      // scored against them. Measured on a real rebuild, one dead style.css kept
+      // #64 alive with all 8 of its physical properties and dragged #77 in with
+      // it, so two of the remaining signals were pure dead code.
+      //
+      // Only assets nothing references are dropped, and only after the whole
+      // project is assembled — a stylesheet a page we did NOT rebuild still
+      // links stays exactly where it is.
+      const { data: origFile } = await admin.storage.from("scans").download(P.bundle);
+      if (origFile) {
+        const originals = parseBundle(await origFile.text());
+        for (const dead of unreferencedAssets(new Map([...originals, ...editedMap]))) {
+          editedMap.set(dead, DELETED_FILE);
+        }
+      }
       const up = await admin.storage.from("scans").upload(
         P.edited,
         new Blob([serializeBundle(editedMap)], { type: "text/plain" }),

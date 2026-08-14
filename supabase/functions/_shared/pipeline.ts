@@ -314,13 +314,58 @@ function findWhitespaceInsensitiveUnique(
 }
 
 /** Merge edited files over the saved originals → the final, complete project. */
+/**
+ * A tombstone: this path was deliberately dropped from the delivered project.
+ *
+ * The edited bundle only carries files a stage rewrote, and everything else
+ * comes through from the original — which is right until a stage makes a file
+ * obsolete rather than changing it. A rebuilt page carries its own CSS inline,
+ * so the old stylesheet is dead code: nothing links it, and it still ships to
+ * the user and still scores against them. Measured on one real rebuild, an
+ * orphaned style.css alone kept two signals alive (#64 and #77).
+ *
+ * A sentinel rather than a separate delete list, because every consumer — the
+ * zip, the pull request, the after-scan, QA — already funnels through
+ * assembleFinalFiles, so they all honour it without changing.
+ */
+export const DELETED_FILE = "\u0000MIHUTZ_DELETED\u0000";
+
 export function assembleFinalFiles(
   original: Map<string, string>,
   edited: Map<string, string>,
 ): Map<string, string> {
   const out = new Map(original);
-  for (const [path, content] of edited) out.set(path, content);
+  for (const [path, content] of edited) {
+    if (content === DELETED_FILE) out.delete(path);
+    else out.set(path, content);
+  }
   return out;
+}
+
+/**
+ * Files nothing links to any more.
+ *
+ * Only stylesheets and scripts are candidates: an unreferenced image may still
+ * be wanted, and another HTML page is a page, not an asset. A file is kept if
+ * ANY surviving page mentions its name, so a stylesheet shared with a page we
+ * did not rebuild stays. The match is deliberately loose in the keeping
+ * direction — a false keep costs nothing, a false delete costs a file.
+ */
+export function unreferencedAssets(files: Map<string, string>): string[] {
+  const pages = [...files.entries()]
+    .filter(([p]) => /\.html?$/i.test(p))
+    .map(([, c]) => c)
+    .join("\n");
+  if (!pages) return [];
+  const dead: string[] = [];
+  for (const path of files.keys()) {
+    if (!/\.(css|js|mjs)$/i.test(path)) continue;
+    const name = path.split("/").pop() ?? path;
+    // Quoted in an href/src, or named anywhere in an import — either counts.
+    if (pages.includes(name)) continue;
+    dead.push(path);
+  }
+  return dead;
 }
 
 // ---------- unified diff (Stage 5 QA input) ----------

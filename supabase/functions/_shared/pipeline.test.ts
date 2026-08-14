@@ -4,6 +4,7 @@ import {
   assembleFinalFiles,
   buildDiffs,
   buildSignalList,
+  DELETED_FILE,
   extractCodeRegions,
   filesTouchedByFixes,
   isVerbatimUnique,
@@ -11,6 +12,7 @@ import {
   presentSignals,
   serializeBundle,
   unifiedDiff,
+  unreferencedAssets,
   validateProposals,
 } from "./pipeline.ts";
 
@@ -181,4 +183,53 @@ Deno.test("validateProposals rejects a currency-inverting fix before it can appl
   assertEquals(out[0].old_code_verbatim, true); // the anchor was fine
   assertEquals(out[0].applicable_edit, false); // but the edit is a regression
   assertEquals(out[0].rejected_reason, "inverts_currency_order");
+});
+
+Deno.test("assembleFinalFiles drops a tombstoned path", () => {
+  const original = new Map([["index.html", "<p>x</p>"], ["style.css", "a{}"]]);
+  const edited = new Map([["index.html", "<p>y</p>"], ["style.css", DELETED_FILE]]);
+  const out = assembleFinalFiles(original, edited);
+  assertEquals(out.get("index.html"), "<p>y</p>");
+  assertEquals(out.has("style.css"), false);
+});
+
+Deno.test("unreferencedAssets finds the stylesheet the rebuilt page dropped", () => {
+  // the real shape: a page rebuilt with inline CSS, keeping its <script src>
+  const files = new Map([
+    ["index.html", '<html><head><style>a{}</style></head><body><script src="script.js"></script></body></html>'],
+    ["style.css", ".hero{right:0}"],
+    ["script.js", "console.log(1)"],
+  ]);
+  assertEquals(unreferencedAssets(files), ["style.css"]);
+});
+
+Deno.test("unreferencedAssets keeps a stylesheet another page still links", () => {
+  const files = new Map([
+    ["index.html", "<html><head><style>a{}</style></head><body></body></html>"],
+    ["about.html", '<html><head><link rel="stylesheet" href="style.css"></head></html>'],
+    ["style.css", ".hero{right:0}"],
+  ]);
+  assertEquals(unreferencedAssets(files), []);
+});
+
+Deno.test("unreferencedAssets never touches images or pages", () => {
+  const files = new Map([
+    ["index.html", "<html><head><style>a{}</style></head><body></body></html>"],
+    ["old-page.html", "<html><body>still a page</body></html>"],
+    ["logo.png", "binary"],
+    ["fonts/x.woff2", "binary"],
+  ]);
+  assertEquals(unreferencedAssets(files), []);
+});
+
+Deno.test("unreferencedAssets does nothing when there is no page to judge by", () => {
+  assertEquals(unreferencedAssets(new Map([["style.css", "a{}"]])), []);
+});
+
+Deno.test("a pruned project survives a bundle round-trip", () => {
+  const original = new Map([["index.html", "<p>x</p>"], ["style.css", "a{}"]]);
+  const edited = new Map([["index.html", "<p>y</p>"], ["style.css", DELETED_FILE]]);
+  const round = parseBundle(serializeBundle(edited));
+  const out = assembleFinalFiles(original, round);
+  assertEquals([...out.keys()], ["index.html"]);
 });
