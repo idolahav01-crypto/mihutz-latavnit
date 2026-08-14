@@ -531,7 +531,18 @@ Deno.serve(async (req) => {
     // it fails or times out, the deterministic fill below still guarantees a
     // constant denominator, which is the part that must never be optional.
     let gaps = missingIds(detection);
-    if (gaps.length) {
+    // What is left of the 150s wall clock, not a fixed number. The first try
+    // used a flat 60s and died on `stage_timeout_after_60s` — 22 signals need
+    // about as long as a normal pass, and a pass here runs 38-90s.
+    //
+    // The budget lands where it is needed, because the two facts move in
+    // opposite directions: a pass that quit early leaves gaps AND leaves time,
+    // while a pass that used its full 90s evaluated everything and has nothing
+    // to retry. Below 25s we skip straight to the fill rather than spend a call
+    // we know will be cut off.
+    const spent = Date.now() - startedAt;
+    const gapBudget = Math.min(120_000, 140_000 - spent);
+    if (gaps.length && gapBudget >= 25_000) {
       try {
         const gapStarted = Date.now();
         const gapCall = await callClaude({
@@ -546,7 +557,7 @@ Deno.serve(async (req) => {
             `Do NOT return site_profile, meta, or scores.\n\n` +
             `Signals: ${gaps.map((id) => `#${id}`).join(", ")}\n\n${bundle}`,
           schema: SCHEMA,
-          timeoutMs: 60_000,
+          timeoutMs: gapBudget,
         });
         const filled = mergeDetection(detection, gapCall.json as DetectionResult);
         detection.signals = overlayMechanical(

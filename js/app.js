@@ -650,7 +650,12 @@
        making the user pay for a dead end and come back. Once only: if six
        passes still overrun, something else is wrong and retrying just burns
        more money. */
-    return pass(1, 3)
+    /* Four, not three. Measured: at three parts a pass ran 86-90s of its 150s
+       budget and the model started dropping the tail of its own list rather
+       than overrunning — 22 of 110 signals went unevaluated on one run. Shorter
+       passes are what stop that at the source; the server's gap pass is the
+       safety net, not the plan. */
+    return pass(1, 4)
       .catch(function (e) {
         var msg = (e && e.body && e.body.error) || "";
         if (String(msg).indexOf("stage_timeout") === -1) throw e;
