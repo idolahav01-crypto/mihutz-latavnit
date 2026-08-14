@@ -9,6 +9,7 @@ import {
   filesTouchedByFixes,
   isVerbatimUnique,
   parseBundle,
+  pickHomePage,
   presentSignals,
   serializeBundle,
   unifiedDiff,
@@ -233,3 +234,66 @@ Deno.test("a pruned project survives a bundle round-trip", () => {
   const out = assembleFinalFiles(original, round);
   assertEquals([...out.keys()], ["index.html"]);
 });
+
+// ---------- pickHomePage ----------
+
+Deno.test("pickHomePage: the real four-page site that used to pick contact.html", () => {
+  assertEquals(
+    pickHomePage([
+      "contact.html",
+      "gallery.html",
+      "products.html",
+      "index.html",
+      "style.css",
+    ]),
+    "index.html",
+  );
+});
+
+Deno.test("pickHomePage: a single page is that page", () => {
+  assertEquals(pickHomePage(["about.html"]), "about.html");
+});
+
+Deno.test("pickHomePage: no html at all is null, not a guess", () => {
+  assertEquals(pickHomePage(["style.css", "script.js", "README.md"]), null);
+});
+
+Deno.test("pickHomePage: nothing named like a home page falls back alphabetically", () => {
+  assertEquals(
+    pickHomePage(["gallery.html", "contact.html", "products.html"]),
+    "contact.html",
+  );
+});
+
+Deno.test("pickHomePage: a named entry point beats a shallower ordinary page", () => {
+  assertEquals(pickHomePage(["about.html", "public/index.html"]), "public/index.html");
+});
+
+Deno.test("pickHomePage: the shallowest index wins", () => {
+  assertEquals(
+    pickHomePage(["docs/index.html", "index.html", "a/b/index.html"]),
+    "index.html",
+  );
+});
+
+Deno.test("pickHomePage: index beats home beats default beats main", () => {
+  assertEquals(pickHomePage(["main.html", "default.html", "home.html"]), "home.html");
+  assertEquals(pickHomePage(["main.html", "default.html"]), "default.html");
+  assertEquals(pickHomePage(["home.html", "index.html"]), "index.html");
+});
+
+Deno.test("pickHomePage: .htm counts, and case does not", () => {
+  assertEquals(pickHomePage(["contact.html", "Index.HTM"]), "Index.HTM");
+});
+
+Deno.test("pickHomePage: order of input does not change the answer", () => {
+  const files = ["products.html", "index.html", "contact.html", "gallery.html"];
+  const first = pickHomePage(files);
+  assertEquals(first, "index.html");
+  assertEquals(pickHomePage([...files].reverse()), first);
+});
+
+Deno.test("pickHomePage: a page merely containing 'index' is not an index", () => {
+  assertEquals(pickHomePage(["contact.html", "index-of-terms.html"]), "contact.html");
+});
+

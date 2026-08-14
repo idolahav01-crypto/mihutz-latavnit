@@ -25,6 +25,7 @@ import {
   DELETED_FILE,
   type DetectedSignal,
   parseBundle,
+  pickHomePage,
   presentSignals,
   serializeBundle,
   unreferencedAssets,
@@ -553,9 +554,10 @@ Deno.serve(async (req) => {
       const { data: file, error: dlErr } = await admin.storage.from("scans").download(P.bundle);
       if (dlErr || !file) throw new Error("bundle_not_found");
       const pristine = parseBundle(await file.text());
-      const htmlFiles = [...pristine.keys()].filter((p) => /\.html?$/i.test(p)).sort();
-      if (!htmlFiles.length) return json({ error: "no_html_file" }, 409);
-      const target = htmlFiles[0];
+      // The one page this run rebuilds. Alphabetical order used to decide it,
+      // which on a multi-page site meant contact.html and never the home page.
+      const target = pickHomePage(pristine.keys());
+      if (!target) return json({ error: "no_html_file" }, 409);
 
       // Carry the original scripts byte-for-byte; the model only sees placeholders.
       const { stripped, scripts } = extractScripts(pristine.get(target) ?? "");

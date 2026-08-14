@@ -744,3 +744,55 @@ export function mergeDetection(
   };
 }
 
+
+/**
+ * Which page a single-page rebuild should treat as the site.
+ *
+ * The rebuild writes one file, so the choice decides what the whole run is
+ * worth. It used to be the alphabetically first page, which on a real
+ * four-page site ("contact, gallery, index, products") meant contact.html
+ * every time and the home page never. Two measured rebuilds picked the wrong
+ * page that way, and one of them picked a macOS metadata sidecar.
+ *
+ * Ranked, not filtered: every page stays eligible, so a site with no index.html
+ * still gets its most plausible entry point rather than an error. Ties fall
+ * back to the alphabetical order this replaces, so the choice is total and
+ * repeatable.
+ */
+const HOME_BASENAMES = ["index", "home", "default", "main"];
+
+export function pickHomePage(paths: Iterable<string>): string | null {
+  const pages = [...paths].filter((p) => /\.html?$/i.test(p)).sort();
+  if (!pages.length) return null;
+
+  const rank = (path: string): [number, number, number] => {
+    const segments = path.split("/");
+    const base = (segments.pop() ?? "").replace(/\.html?$/i, "").toLowerCase();
+    const named = HOME_BASENAMES.indexOf(base);
+    return [
+      // A recognised entry-point name beats any other name, whatever the depth:
+      // "public/index.html" is the home page and "about.html" is not.
+      named === -1 ? 1 : 0,
+      // Among those, the shallowest wins — the root index over a nested one.
+      segments.length,
+      // "index" over "home" over "default" over "main".
+      named === -1 ? 0 : named,
+    ];
+  };
+
+  let best = pages[0];
+  let bestRank = rank(best);
+  for (const page of pages.slice(1)) {
+    const r = rank(page);
+    for (let i = 0; i < r.length; i++) {
+      if (r[i] === bestRank[i]) continue;
+      if (r[i] < bestRank[i]) {
+        best = page;
+        bestRank = r;
+      }
+      break;
+    }
+  }
+  return best;
+}
+
