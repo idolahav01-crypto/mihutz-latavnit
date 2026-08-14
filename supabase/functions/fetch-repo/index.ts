@@ -5,6 +5,7 @@
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { UntarStream } from "jsr:@std/tar@0.1/untar-stream";
+import { keepPath } from "../_shared/pipeline.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -25,24 +26,6 @@ function json(body: unknown, status = 200) {
     status,
     headers: { ...cors, "content-type": "application/json" },
   });
-}
-
-// Directories and files that never carry the site's own fingerprint.
-const SKIP_DIR =
-  /(^|\/)(node_modules|\.git|dist|build|\.next|\.nuxt|out|vendor|coverage|\.cache|\.vercel|\.turbo|__MACOSX)(\/|$)/;
-// AppleDouble sidecars ("._index.html") are macOS metadata, not pages, but they
-// end in .html and were being scanned and scored as real pages.
-const SKIP_APPLEDOUBLE = /(^|\/)\._/;
-const SKIP_FILE =
-  /\.(min\.(js|css)|map|lock|png|jpe?g|gif|webp|avif|svg|ico|woff2?|ttf|otf|eot|mp4|webm|mp3|wav|pdf|zip|gz|br|wasm|ds_store)$/i;
-const LOCKFILES = /(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|bun\.lockb)$/i;
-
-function keep(path: string): boolean {
-  if (SKIP_DIR.test(path)) return false;
-  if (SKIP_APPLEDOUBLE.test(path)) return false;
-  if (LOCKFILES.test(path)) return false;
-  if (SKIP_FILE.test(path)) return false;
-  return true;
 }
 
 Deno.serve(async (req) => {
@@ -116,7 +99,7 @@ Deno.serve(async (req) => {
       // Tar paths are prefixed with "<owner>-<repo>-<sha>/"; strip it.
       const rel = entry.path.replace(/^[^/]+\//, "");
       if (!entry.readable) continue;
-      if (!rel || entry.path.endsWith("/") || !keep(rel)) {
+      if (!rel || entry.path.endsWith("/") || !keepPath(rel)) {
         await entry.readable.cancel();
         continue;
       }

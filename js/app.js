@@ -121,17 +121,24 @@
     errTimeout: "Diagnosis ran past 150 seconds and was cut off. Try a smaller repo, or contact us."
   };
 
-  /* ===== file filtering (mirrors the fetch-repo edge function) ===== */
-  var SKIP_DIR = /(^|\/)(node_modules|\.git|dist|build|\.next|\.nuxt|out|vendor|coverage|\.cache|\.vercel|\.turbo|__MACOSX)(\/|$)/;
-  /* AppleDouble sidecars: zipping a folder on macOS puts a "._name.html" next to
-     every file. They are metadata, not pages, but they end in .html and were
-     being scanned and scored as if they were real pages. */
-  var SKIP_APPLEDOUBLE = /(^|\/)\._/;
+  /* ===== file filtering =====
+     A copy of keepPath() in supabase/functions/_shared/pipeline.ts, because the
+     browser filters before upload and cannot import from there. The tests for
+     these rules live with that copy. Change one, change both.
+
+     The dotted-segment rule drops .git, .DS_Store, the "._name" sidecars macOS
+     puts in every zip, and .env — which was otherwise read off the user's disk
+     and uploaded. robots.txt is deliberately kept; three signals look for it. */
+  var SKIP_DIR = /(^|\/)(node_modules|dist|build|\.next|\.nuxt|out|vendor|coverage|\.cache|\.vercel|\.turbo|__MACOSX)(\/|$)/;
+  var SKIP_DOTTED = /(^|\/)\./;
+  var SKIP_ARCHIVE_ARTIFACT = /(^|\/)pax_global_header$/;
+  var SKIP_DOCS = /(\.(md|markdown|mdx|rst)$|(^|\/)(LICENSE|LICENCE|COPYING|NOTICE|CHANGELOG|AUTHORS|CONTRIBUTING)(\.(txt|rst))?$)/i;
   var SKIP_FILE = /\.(min\.(js|css)|map|lock|png|jpe?g|gif|webp|avif|svg|ico|woff2?|ttf|otf|eot|mp4|webm|mp3|wav|pdf|zip|gz|br|wasm|ds_store)$/i;
-  var LOCKFILES = /(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|bun\.lockb)$/i;
+  var SKIP_LOCKFILES = /(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|bun\.lockb)$/i;
   function keepPath(p) {
-    return !SKIP_DIR.test(p) && !SKIP_APPLEDOUBLE.test(p) &&
-      !LOCKFILES.test(p) && !SKIP_FILE.test(p);
+    return !SKIP_DIR.test(p) && !SKIP_DOTTED.test(p) &&
+      !SKIP_ARCHIVE_ARTIFACT.test(p) && !SKIP_DOCS.test(p) &&
+      !SKIP_LOCKFILES.test(p) && !SKIP_FILE.test(p);
   }
 
   /* ===== dom ===== */

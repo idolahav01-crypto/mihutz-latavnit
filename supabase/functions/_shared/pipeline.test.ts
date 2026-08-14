@@ -8,6 +8,7 @@ import {
   extractCodeRegions,
   filesTouchedByFixes,
   isVerbatimUnique,
+  keepPath,
   parseBundle,
   pickHomePage,
   presentSignals,
@@ -297,3 +298,77 @@ Deno.test("pickHomePage: a page merely containing 'index' is not an index", () =
   assertEquals(pickHomePage(["contact.html", "index-of-terms.html"]), "contact.html");
 });
 
+// ---------- keepPath ----------
+
+Deno.test("keepPath: keeps the files a site is actually made of", () => {
+  for (
+    const p of [
+      "index.html",
+      "contact.htm",
+      "style.css",
+      "css/app.css",
+      "js/main.js",
+      "app/index.html",
+      "robots.txt",
+      "sitemap.xml",
+      "manifest.json",
+    ]
+  ) {
+    assert(keepPath(p), `should have kept ${p}`);
+  }
+});
+
+Deno.test("keepPath: drops the junk found in real scan bundles", () => {
+  for (
+    const p of [
+      "pax_global_header",
+      "README.md",
+      "SETUP-AUTH.md",
+      "._contact.html",
+      "._style.css",
+      "__MACOSX/contact.html",
+      ".gitignore",
+      ".DS_Store",
+      "node_modules/react/index.js",
+      "package-lock.json",
+    ]
+  ) {
+    assertFalse(keepPath(p), `should have dropped ${p}`);
+  }
+});
+
+Deno.test("keepPath: a secret is never bundled and never sent to the model", () => {
+  assertFalse(keepPath(".env"));
+  assertFalse(keepPath(".env.local"));
+  assertFalse(keepPath("config/.env.production"));
+});
+
+Deno.test("keepPath: robots.txt survives, because three signals look for it", () => {
+  assert(keepPath("robots.txt"));
+  assert(keepPath("public/robots.txt"));
+});
+
+Deno.test("keepPath: a dotted segment anywhere in the path, not just the start", () => {
+  assertFalse(keepPath("src/.cache/app.css"));
+  assertFalse(keepPath("a/b/._index.html"));
+  assert(keepPath("src/cache/app.css"));
+});
+
+Deno.test("keepPath: directory form with a trailing slash", () => {
+  assertFalse(keepPath("node_modules/"));
+  assertFalse(keepPath(".git/"));
+  assert(keepPath("css/"));
+});
+
+Deno.test("keepPath: a filename merely containing a dot or the word readme is kept", () => {
+  assert(keepPath("index.min.html"));
+  assert(keepPath("readme.html"));
+  assert(keepPath("my.page.html"));
+});
+
+Deno.test("keepPath: documentation goes, licence-named pages of the site stay html", () => {
+  assertFalse(keepPath("CHANGELOG"));
+  assertFalse(keepPath("LICENSE.txt"));
+  assertFalse(keepPath("docs/guide.md"));
+  assert(keepPath("license.html"));
+});

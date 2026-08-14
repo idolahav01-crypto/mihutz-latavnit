@@ -796,3 +796,51 @@ export function pickHomePage(paths: Iterable<string>): string | null {
   return best;
 }
 
+// ============================================================
+// Which files belong in a scan bundle
+// ============================================================
+
+/**
+ * A scan should see the site, and only the site.
+ *
+ * Everything that gets past this ends up in the bundle: it is sent to the
+ * model, it is counted in files_scanned, and any signal found in it scores
+ * against the user. Real bundles were carrying an archive-extraction artifact
+ * (pax_global_header), repo documentation (README.md), and macOS metadata —
+ * none of which a browser ever loads.
+ *
+ * The dotted-segment rule is the one that matters most: it drops .git, .cache,
+ * .DS_Store, the "._name" sidecars macOS puts in every zip, and — the reason it
+ * is a rule and not a list — .env, which was being read off disk and sent to
+ * the model along with whatever was in it.
+ *
+ * robots.txt is deliberately NOT filtered as a text file; three signals look
+ * for it.
+ *
+ * js/app.js keeps a copy of these rules, because the browser does the same
+ * filtering before upload and cannot import from here. Change one, change both.
+ */
+const SKIP_DIR =
+  /(^|\/)(node_modules|dist|build|\.next|\.nuxt|out|vendor|coverage|\.cache|\.vercel|\.turbo|__MACOSX)(\/|$)/;
+// Any path segment starting with a dot: config, VCS internals, macOS sidecars,
+// and secrets. None of them are the website.
+const SKIP_DOTTED = /(^|\/)\./;
+// tar/pax writes this pseudo-entry into archives; GitHub tarballs carry it.
+const SKIP_ARCHIVE_ARTIFACT = /(^|\/)pax_global_header$/;
+// Repo documentation. It ships to GitHub, not to a browser.
+const SKIP_DOCS =
+  /(\.(md|markdown|mdx|rst)$|(^|\/)(LICENSE|LICENCE|COPYING|NOTICE|CHANGELOG|AUTHORS|CONTRIBUTING)(\.(txt|rst))?$)/i;
+const SKIP_FILE =
+  /\.(min\.(js|css)|map|lock|png|jpe?g|gif|webp|avif|svg|ico|woff2?|ttf|otf|eot|mp4|webm|mp3|wav|pdf|zip|gz|br|wasm|ds_store)$/i;
+const SKIP_LOCKFILES = /(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|bun\.lockb)$/i;
+
+/** True if this path should go into the bundle. Accepts "dir/" for directories. */
+export function keepPath(path: string): boolean {
+  if (SKIP_DIR.test(path)) return false;
+  if (SKIP_DOTTED.test(path)) return false;
+  if (SKIP_ARCHIVE_ARTIFACT.test(path)) return false;
+  if (SKIP_DOCS.test(path)) return false;
+  if (SKIP_LOCKFILES.test(path)) return false;
+  if (SKIP_FILE.test(path)) return false;
+  return true;
+}
