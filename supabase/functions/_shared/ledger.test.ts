@@ -1,4 +1,4 @@
-import { assert, assertEquals } from "jsr:@std/assert@1";
+import { assert, assertEquals, assertFalse } from "jsr:@std/assert@1";
 import { buildLedger, scopeCss, visibleTextLength } from "./ledger.ts";
 
 // A page with the shapes the rebuild kept losing: a hero <header>, a repeated
@@ -156,4 +156,66 @@ Deno.test("visibleTextLength counts rendered text, ignoring tags", () => {
   // tag-free, and the same rule applies to original and rebuilt alike.
   const len = visibleTextLength("<div><h2>שלום</h2><p>עולם</p></div>");
   assertEquals(len, "שלוםעולם".length);
+});
+
+// ---------- footer facts ----------
+//
+// A business footer is the one place Israeli law reaches into: company number,
+// address, terms, cancellation and accessibility all live there, and three of
+// the 110 signals check for them. The footer's MARKUP is replaced, so its
+// CONTENT has to survive as facts or a compliant site comes back non-compliant.
+
+const BUSINESS_FOOTER = `<!doctype html><html lang="he" dir="rtl"><body>
+  <main><h1>דפוס פיקסל</h1><p>הדפסה וגימור.</p></main>
+  <footer>
+    <div><h4>יצירת קשר</h4>
+      <p>הדפוס 12, אזור תעשייה<br>ראשון לציון<br>
+        <a href="tel:037654321">03-765-4321</a><br>
+        <a href="mailto:info@pixelprint.co.il">info@pixelprint.co.il</a></p>
+      <p>ח"פ 514785236</p>
+      <p>ימים א-ה 08:00-17:00</p>
+    </div>
+    <div class="footer-bottom">
+      <span>© 2026 דפוס פיקסל. כל הזכויות שמורות.</span>
+      <a href="/terms.html">תקנון ותנאי שימוש</a>
+      <a href="/privacy.html">מדיניות פרטיות</a>
+      <span>מדיניות ביטול עסקה</span>
+    </div>
+  </footer></body></html>`;
+
+Deno.test("ledger: a business footer's mandatory details all survive", () => {
+  const facts = buildLedger(BUSINESS_FOOTER).facts.join("\n");
+  for (
+    const needed of [
+      "הדפוס 12",           // street address
+      "ראשון לציון",         // city, on its own <br> line and with no digits
+      "514785236",          // company number
+      "08:00-17:00",        // opening hours
+      "037654321",          // tel: value
+      "info@pixelprint.co.il",
+      "מדיניות ביטול עסקה", // required, and written as plain text not a link
+    ]
+  ) {
+    assert(facts.includes(needed), `footer fact lost: ${needed}`);
+  }
+});
+
+Deno.test("ledger: legal pages keep the href the site already uses", () => {
+  const facts = buildLedger(BUSINESS_FOOTER).facts;
+  assert(facts.some((f) => f.includes("תקנון") && f.includes("/terms.html")));
+  assert(facts.some((f) => f.includes("מדיניות פרטיות") && f.includes("/privacy.html")));
+});
+
+Deno.test("ledger: an address split across <br> is not glued into one word", () => {
+  const facts = buildLedger(BUSINESS_FOOTER).facts;
+  assert(facts.some((f) => f === "ראשון לציון"), "the city must stand as its own fact");
+  assertFalse(
+    facts.some((f) => /אזור תעשייהראשון/.test(f)),
+    "reading textContent alone glues the lines together",
+  );
+});
+
+Deno.test("ledger: a page with no footer yields no invented facts", () => {
+  const facts = buildLedger(`<html><body><main><h1>כותרת</h1><p>טקסט.</p></main></body></html>`).facts;
+  assertEquals(facts, []);
 });

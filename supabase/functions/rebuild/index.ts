@@ -183,7 +183,7 @@ Return:
 - head_extras: the <link> tags that load the chosen fonts (Google Fonts is fine). For Hebrew, use Hebrew-capable fonts (Heebo, Assistant, Rubik, Frank Ruhl Libre, Noto Sans Hebrew).
 - tokens_css: a real design system as CSS — :root custom properties for the brand palette, type scale, spacing rhythm, radii and shadows; sensible base element styles (body font/line-height/color, headings, links, img{max-width:100%}); and reusable component classes the sections will use (.container, .btn / .btn-primary, .section, etc.). Do NOT define an .eyebrow class or any other "small label above every heading" helper — offering one makes every section reach for it, and a kicker on every section is itself an AI tell. Body font-weight >= 500, headings >= 700. Respect dir (logical properties for RTL).
 - header_html: the site header/nav markup (logo text = site name, real nav links only). Use the token classes.
-- footer_html: a real footer using the site's real facts (name, contact). No invented links.
+- footer_html: a real footer built from the site's real facts. EVERY fact given to you that belongs in a footer MUST appear: company number, physical address, opening hours, phone, email, and the legal pages (terms, cancellation, privacy, accessibility statement) with the exact href each one already uses. Israeli law requires several of these and the audit checks for them, so dropping one makes the site worse than it was. Invent nothing: if a fact was not given, omit it rather than filling in a placeholder.
 
 DEPART from the original. If <original_look> is provided, the tokens_css must NOT reuse its palette or fonts — build the shell in the NEW design_direction, clearly different from the old site.
 

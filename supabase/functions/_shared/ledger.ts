@@ -426,15 +426,65 @@ function extractCta(block: Element): { label?: string; href?: string } | undefin
   return { label: label || undefined, href };
 }
 
-/** Concrete facts worth carrying to the shell/footer: contact details. */
+/**
+ * The facts the rebuilt page must carry over.
+ *
+ * The footer is rebuilt rather than kept, because its markup is part of the old
+ * design. Its CONTENT is not: a business footer holds the company number, the
+ * physical address, opening hours and the links to the terms, cancellation and
+ * privacy pages. Israeli law requires several of those, and three of the 110
+ * signals check for them.
+ *
+ * Taking only tel: and mailto: — which is what this did — meant a site that was
+ * already compliant came back less compliant than it went in, and then scored
+ * for the loss. Measured on a real print shop: the address, the founding year
+ * and both legal links were dropped, and only the phone and email survived.
+ *
+ * Facts are extracted, never composed. Every string here is copied out of the
+ * page; nothing is inferred, formatted or filled in.
+ */
 function extractFacts(doc: ReturnType<DOMParser["parseFromString"]>): string[] {
   const facts = new Set<string>();
   if (!doc) return [];
+
   for (const a of Array.from(doc.querySelectorAll("a[href^='tel:'], a[href^='mailto:']")) as Element[]) {
     const href = a.getAttribute("href") ?? "";
     const val = href.replace(/^(tel:|mailto:)/, "").trim();
     if (val) facts.add(val);
   }
+
+  // Legal and contact pages, with the href the site already uses. Rebuilding
+  // the footer must not invent a URL, and must not drop one either.
+  for (const a of Array.from(doc.querySelectorAll("footer a")) as Element[]) {
+    const href = (a.getAttribute("href") ?? "").trim();
+    const label = normalizeText(a.textContent ?? "");
+    if (!href || !label) continue;
+    if (/^(tel:|mailto:|#)/.test(href)) continue;
+    facts.add(`${label} -> ${href}`);
+  }
+
+  // Address, company number, hours, year of establishment, and the names of the
+  // legal pages. Lines are split on the markup's own breaks first: a footer
+  // address is written with <br> between the street and the city, and reading
+  // textContent alone glues them into "אזור תעשייהראשון לציון03-765-4321".
+  for (const el of Array.from(doc.querySelectorAll("footer")) as Element[]) {
+    const lines = (el.innerHTML ?? "")
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(/<\/(p|div|li|h[1-6]|span|td|tr|address)>/gi, "\n")
+      .replace(/<[^>]+>/g, "")
+      .split(/[\n\r]|·|\|/);
+    for (const raw of lines) {
+      const line = normalizeText(raw);
+      // Every line, not only the ones that look important. Filtering by "has a
+      // digit" split "הדפוס 12, אזור תעשייה" from "ראשון לציון" and kept only
+      // half an address; deciding which of a business's own footer lines matter
+      // is exactly the judgement that loses facts. A footer is small, and a
+      // redundant line costs nothing.
+      if (line.length < 2 || line.length > 160) continue;
+      facts.add(line);
+    }
+  }
+
   return [...facts];
 }
 

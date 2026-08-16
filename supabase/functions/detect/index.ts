@@ -17,7 +17,7 @@ import {
   serializeBundle,
 } from "../_shared/pipeline.ts";
 import { MECHANICAL_IDS, mechanicalSignals, overlayMechanical } from "../_shared/mechanical.ts";
-import { fillUnevaluated, missingIds } from "../_shared/catalogue.ts";
+import { applyCatalogueRules, fillUnevaluated, missingIds } from "../_shared/catalogue.ts";
 import { callClaude } from "../_shared/anthropic.ts";
 import { buildEntry, recordStageUsage } from "../_shared/usage.ts";
 
@@ -334,6 +334,7 @@ Deno.serve(async (req) => {
         .map((s) => Number(s.id))
         .filter((id) => !MECHANICAL_IDS.includes(id));
       if (!absentIds.length) {
+        applyCatalogueRules(prior);
         const { score, present } = computeScore(prior.signals ?? []);
         return json({ ok: true, scan_id: scanId, mode: "rehunt", done: true, ai_fingerprint_score: score, present_count: present });
       }
@@ -369,6 +370,7 @@ Deno.serve(async (req) => {
         merged.signals ?? [],
         mechanicalSignals(parseBundle(bundle)),
       );
+      applyCatalogueRules(merged);
       const { score, present } = computeScore(merged.signals ?? []);
 
       await recordStageUsage(
@@ -557,6 +559,11 @@ Deno.serve(async (req) => {
       });
     }
     if (gaps.length) fillUnevaluated(detection, gaps);
+
+    // The catalogue's own decisions, applied after the model and before the
+    // score: signals we do not score a site on are struck out, and the ones
+    // that need a fact from the owner are marked so the report can ask.
+    applyCatalogueRules(detection);
 
     // Recompute the score deterministically from the returned signals.
     const { score, present } = computeScore(detection.signals ?? []);

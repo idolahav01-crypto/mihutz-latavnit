@@ -740,3 +740,44 @@ code, .mono { font-family: var(--font-mono); }
   font-size: 0.85rem;
   opacity: 0.72;
 }
+
+/* Signals that stay lit because a fact is missing from the business, not from
+   our work. Set apart from the findings list so a leftover score reads as a
+   short to-do list rather than a verdict. Same surface treatment as .findings
+   so the two read as siblings. */
+.owner-needs {
+  background: var(--color-paper-raised);
+  border: 1px solid var(--color-neutral-300);
+  border-radius: var(--r-surface);
+  padding: var(--s-2) var(--s-3);
+  margin-block-end: var(--s-3);
+}
+.owner-needs-title {
+  margin: 0 0 var(--s-1);
+  font-size: 1rem;
+}
+.owner-needs-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.owner-needs-list li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-1);
+  align-items: baseline;
+  justify-content: space-between;
+  padding-block: var(--s-1);
+  border-block-end: 1px solid var(--color-neutral-300);
+}
+.owner-needs-list li:last-child { border-block-end: 0; }
+.owner-needs-ids {
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  color: var(--color-neutral-600);
+}
+.owner-needs-note {
+  margin: var(--s-2) 0 0;
+  font-size: 0.88rem;
+  color: var(--color-neutral-600);
+}

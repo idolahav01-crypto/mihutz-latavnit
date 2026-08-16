@@ -70,6 +70,16 @@
     noApiKey: "מנוע האבחון לא מוגדר — חסר ANTHROPIC_API_KEY ב-Supabase (Edge Functions → Secrets).",
     badApiKey: "מפתח ה-ANTHROPIC_API_KEY לא תקין — כנראה נדבקו איתו רווח או ירידת שורה. הגדירו אותו מחדש.",
     errTimeout: "האבחון ארך יותר מ-150 שניות ונקטע. נסו ריפו קטן יותר, או פנו אלינו.",
+    ownerTitle: "מה מחכה לך",
+    ownerNote: "את אלה אי אפשר לתקן אוטומטית — חסרה עובדה שרק אתם יודעים. אנחנו לא ממציאים עובדות, אז הם יישארו עד שתספקו אותן.",
+    ownerNeeds: {
+      business_details: "פרטי העסק — ח\"פ, כתובת, טלפון, שעות פעילות",
+      legal_documents: "מסמכים משפטיים — תקנון, מדיניות פרטיות, הצהרת נגישות",
+      real_images: "תמונות אמיתיות של העסק",
+      real_numbers: "נתונים אמיתיים — מקור לסטטיסטיקה, המלצות עם שם ותפקיד",
+      analytics_account: "חשבון מדידה — Google Tag Manager או Analytics",
+      more_content: "תוכן נוסף — עמודים פנימיים או תרגום"
+    },
     errContentLoss: "עצרנו את הבנייה: התוצאה יצאה חסרה לעומת האתר המקורי, ולא נמסור אתר שאיבד תוכן. זה לא משהו שעשיתם — זו בדיקת בטיחות אצלנו."
   } : {
     hi: "Hi, ",
@@ -120,6 +130,16 @@
     noApiKey: "Diagnosis engine not configured — ANTHROPIC_API_KEY is missing in Supabase (Edge Functions → Secrets).",
     badApiKey: "ANTHROPIC_API_KEY is invalid — a space or newline was probably pasted with it. Set it again.",
     errTimeout: "Diagnosis ran past 150 seconds and was cut off. Try a smaller repo, or contact us.",
+    ownerTitle: "Waiting on you",
+    ownerNote: "These cannot be fixed automatically — each needs a fact only you have. We never invent facts, so they stay until you supply them.",
+    ownerNeeds: {
+      business_details: "Business details — company number, address, phone, hours",
+      legal_documents: "Legal pages — terms, privacy policy, accessibility statement",
+      real_images: "Real photographs of the business",
+      real_numbers: "Real data — a source for each statistic, testimonials with a name and role",
+      analytics_account: "An analytics account — Google Tag Manager or Analytics",
+      more_content: "More content — inner pages or a translation"
+    },
     errContentLoss: "We stopped the rebuild: the result came back missing content the original had, and we will not hand over a site that lost part of itself. This is our safety check, not something you did."
   };
 
@@ -761,9 +781,16 @@
        110 — so the page stays short and about what was actually found. */
     var all = det.present_signals || det.signals || [];
     var present = all.filter(function (s) { return s.present === true && s.applicable !== false; });
-    var applicable = det.applicable_count != null
-      ? det.applicable_count
-      : 110 - ((det.not_applicable_ids || []).length);
+    /* The denominator the score actually used. Counting it off the stored
+       signals keeps the caption honest now that the catalogue strikes some
+       out — saying "110 applicable" while five are struck out is a number that
+       does not match the score beside it. Older scans without a signals array
+       fall back to the previous fields. */
+    var applicable = all.length
+      ? all.filter(function (s) { return s.applicable !== false; }).length
+      : (det.applicable_count != null
+        ? det.applicable_count
+        : 110 - ((det.not_applicable_ids || []).length));
 
     els.score.innerHTML = esc(String(scan.ai_fingerprint_score != null ? scan.ai_fingerprint_score : 0)) + "<small>/100</small>";
     /* A signal nobody evaluated is recorded with confidence 0 rather than
@@ -801,6 +828,32 @@
         '<ul class="led">' + rows + "</ul></details>";
     }).join("");
 
+    /* Signals that stay lit because a real-world fact is missing — a company
+       number, a photograph, a customer's name. Shown apart from the rest so a
+       leftover score reads as a short to-do list the owner can act on, instead
+       of as a failure on our side. Absent on scans audited before the catalogue
+       started marking them, and the block simply does not render. */
+    var ownerGroups = [], ownerBy = {};
+    present.forEach(function (s) {
+      var needs = s.needs_owner_input;
+      if (!needs || !T.ownerNeeds[needs]) return;
+      if (!ownerBy[needs]) { ownerBy[needs] = []; ownerGroups.push(needs); }
+      ownerBy[needs].push(s);
+    });
+    var ownerBlock = ownerGroups.length
+      ? '<div class="owner-needs">' +
+          '<h3 class="owner-needs-title">' + esc(T.ownerTitle) + "</h3>" +
+          '<ul class="owner-needs-list">' +
+            ownerGroups.map(function (needs) {
+              var ids = ownerBy[needs].map(function (s) { return "#" + s.id; }).join(" ");
+              return "<li><span>" + esc(T.ownerNeeds[needs]) + "</span>" +
+                '<span class="owner-needs-ids" dir="ltr">' + esc(ids) + "</span></li>";
+            }).join("") +
+          "</ul>" +
+          '<p class="owner-needs-note">' + esc(T.ownerNote) + "</p>" +
+        "</div>"
+      : "";
+
     /* The findings stay folded into one card: the summary paragraph says where
        the problems are, and the full per-signal list opens under it on request,
        so the fix pipeline above it is what the eye lands on first. */
@@ -808,6 +861,7 @@
       var cats = groups.map(function (cat) { return { name: cat, count: byCat[cat].length }; })
         .sort(function (a, b) { return b.count - a.count; });
       els["report-body"].innerHTML =
+        ownerBlock +
         '<div class="findings">' +
           '<div class="findings-head">' +
             '<p class="findings-sum">' + esc(T.findingsSummary(present.length, cats)) + "</p>" +

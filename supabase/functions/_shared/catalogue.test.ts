@@ -1,8 +1,15 @@
-import { assertEquals } from "jsr:@std/assert@1";
-import { fillUnevaluated, missingIds } from "./catalogue.ts";
+import { assert, assertEquals, assertFalse } from "jsr:@std/assert@1";
+import {
+  applyCatalogueRules,
+  fillUnevaluated,
+  missingIds,
+  NOT_COUNTED,
+  OWNER_INPUT,
+} from "./catalogue.ts";
 import signals from "./signals.json" with { type: "json" };
 
 const ALL = (signals as Array<{ id: number; weight: string }>);
+const SIGNALS = ALL;
 const WEIGHT_POINTS: Record<string, number> = { "very-high": 3, high: 3, medium: 2, low: 1 };
 
 /** The same arithmetic detect/index.ts uses, so the test measures the real thing. */
@@ -96,4 +103,59 @@ Deno.test("the result stays sorted by id", () => {
   fillUnevaluated(d, missingIds(d));
   const ids = d.signals!.map((s) => Number(s.id));
   assertEquals(ids, [...ids].sort((x, y) => x - y));
+});
+
+// ---------- catalogue rules ----------
+
+Deno.test("applyCatalogueRules: an uncountable signal cannot score against the site", () => {
+  const detection = {
+    signals: NOT_COUNTED.map((n) => ({ id: n.id, present: true, applicable: true, weight: "high" })),
+  };
+  applyCatalogueRules(detection);
+  for (const s of detection.signals) {
+    assertEquals(s.applicable, false, `#${s.id} must not be counted`);
+    assertEquals((s as Record<string, unknown>).not_counted, true);
+  }
+});
+
+Deno.test("applyCatalogueRules: an uncountable signal says why, in the report's language", () => {
+  const detection = { signals: [{ id: 36, present: true, applicable: true, explanation: "" }] };
+  applyCatalogueRules(detection);
+  const s = detection.signals[0] as Record<string, unknown>;
+  assert(String(s.explanation).length > 10, "a struck-out signal must explain itself");
+});
+
+Deno.test("applyCatalogueRules: owner-input signals are marked with what is missing", () => {
+  const detection = { signals: OWNER_INPUT.map((o) => ({ id: o.id, present: true, applicable: true })) };
+  applyCatalogueRules(detection);
+  for (const s of detection.signals) {
+    const needs = (s as Record<string, unknown>).needs_owner_input;
+    assert(typeof needs === "string" && needs.length > 0, `#${s.id} must name what it needs`);
+  }
+});
+
+Deno.test("applyCatalogueRules: an owner-input signal is still counted", () => {
+  // It stays in the score on purpose. It is a real gap on the site; the mark
+  // only says whose gap it is.
+  const detection = { signals: [{ id: 92, present: true, applicable: true }] };
+  applyCatalogueRules(detection);
+  assertEquals(detection.signals[0].applicable, true);
+});
+
+Deno.test("applyCatalogueRules: an ordinary signal is left exactly as it was", () => {
+  const detection = { signals: [{ id: 1, present: true, applicable: true, explanation: "x" }] };
+  applyCatalogueRules(detection);
+  assertEquals(detection.signals[0], { id: 1, present: true, applicable: true, explanation: "x" });
+});
+
+Deno.test("catalogue lists: no id appears in both, and every id is real", () => {
+  const notCounted = new Set(NOT_COUNTED.map((n) => n.id));
+  const owner = new Set(OWNER_INPUT.map((o) => o.id));
+  assertEquals(NOT_COUNTED.length, notCounted.size, "no duplicates in NOT_COUNTED");
+  assertEquals(OWNER_INPUT.length, owner.size, "no duplicates in OWNER_INPUT");
+  for (const id of owner) {
+    assertFalse(notCounted.has(id), `#${id} cannot be both struck out and asked about`);
+  }
+  const real = new Set(SIGNALS.map((s) => s.id));
+  for (const id of [...notCounted, ...owner]) assert(real.has(id), `#${id} is not in the catalogue`);
 });
