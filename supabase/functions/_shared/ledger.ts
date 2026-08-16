@@ -43,6 +43,9 @@ export interface LedgerSection {
   text: string;
 }
 
+/** script_index for a container driven by a .js file rather than an inline block. */
+export const EXTERNAL_SCRIPT = -1;
+
 export interface LedgerComponent {
   name: string;
   container_id: string;
@@ -76,7 +79,7 @@ const CHROME_TAGS = new Set(["SCRIPT", "STYLE", "TEMPLATE", "LINK", "NOSCRIPT"])
  * @param html   the raw original markup (scripts still inline — they are read
  *               here to learn which ids the page's behaviour depends on)
  */
-export function buildLedger(html: string): Ledger {
+export function buildLedger(html: string, externalJs = ""): Ledger {
   const doc = new DOMParser().parseFromString(html, "text/html");
   if (!doc) throw new Error("ledger: could not parse document");
 
@@ -97,6 +100,14 @@ export function buildLedger(html: string): Ledger {
 
   // Which ids does page behaviour depend on? Every getElementById / #id selector
   // inside a <script>, mapped back to the script that named it.
+  //
+  // externalJs carries the site's .js FILES. Reading only inline <script> was a
+  // real hole: a page whose behaviour lives in script.js looked script-free, so
+  // none of its containers were protected, and one shipped rebuild dropped #nav
+  // and #formNote while still linking the script that dereferences them — a
+  // TypeError on every scroll. External code has no inline script to carry, so
+  // its ids map to EXTERNAL_SCRIPT: the container must survive, but there is no
+  // script block to re-attach with it.
   const scripts = [...doc.querySelectorAll("script")].map((s) => s.textContent ?? "");
   const idToScript = new Map<string, number>();
   scripts.forEach((code, i) => {
@@ -104,6 +115,9 @@ export function buildLedger(html: string): Ledger {
       if (!idToScript.has(id)) idToScript.set(id, i);
     }
   });
+  for (const id of referencedIds(externalJs)) {
+    if (!idToScript.has(id)) idToScript.set(id, EXTERNAL_SCRIPT);
+  }
 
   const body = doc.querySelector("body");
   const blocks = body ? (Array.from(body.children) as Element[]) : [];

@@ -1032,6 +1032,13 @@
      for a single model call again. Anything at or past "applied" has an edited
      bundle in Storage, which is all the packaging step needs. */
   var DELIVERABLE = ["applied", "qa", "qa_passed", "qa_failed", "needs_human"];
+
+  /* Every file the pipeline can write under scans/<user>/<scan>/. Deleting an
+     audit must remove all of them; see deleteScan. */
+  var SCAN_ARTEFACTS = [
+    "bundle.txt", "edited-bundle.txt", "features.json",
+    "spec.json", "shell.json", "rebuild-sections.json"
+  ];
   function restoreDelivery(scan) {
     if (DELIVERABLE.indexOf(scan.pipeline_status) === -1) return;
 
@@ -1657,15 +1664,21 @@
     });
   }
 
-  /* Delete an audit (RLS lets a user delete only their own). Best-effort clean
-     of its stored bundles too, then refresh the list in place. */
+  /* Delete an audit (RLS lets a user delete only their own), then clean every
+     artefact it left in Storage.
+
+     This used to remove three files and leave spec.json, shell.json and
+     rebuild-sections.json behind. Those hold the site's own content, so a user
+     who deleted an audit still had their page sitting in our bucket — we
+     recovered a deleted site from exactly these leftovers. The list is now the
+     complete set the pipeline can write. */
   function deleteScan(id) {
     if (!id || !window.confirm(T.confirmDelete)) return;
     sb.from("scans").delete().eq("id", id).eq("user_id", user.id).then(function (r) {
       if (r.error) { showError(T.errGeneric); return; }
       var base = user.id + "/" + id + "/";
       try {
-        sb.storage.from("scans").remove([base + "bundle.txt", base + "edited-bundle.txt", base + "features.json"]);
+        sb.storage.from("scans").remove(SCAN_ARTEFACTS.map(function (f) { return base + f; }));
       } catch (e) { /* best-effort */ }
       historyRows = historyRows.filter(function (x) { return x.id !== id; });
       renderHistory();

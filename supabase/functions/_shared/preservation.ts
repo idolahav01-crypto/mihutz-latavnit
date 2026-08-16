@@ -171,16 +171,32 @@ function escapeRegExp(s: string): string {
  */
 export const MIN_WORD_RATIO = 0.6;
 
-export type FailureKind = "text_shrank" | "facts_missing" | "script_hooks_missing";
+export type FailureKind =
+  | "text_shrank"
+  | "facts_missing"
+  | "script_ids_missing"
+  | "script_classes_missing";
 
 export interface PreservationFailure {
   kind: FailureKind;
   detail: string;
   /** The specific items that went missing, for the operator and the log. */
   missing?: string[];
+  /**
+   * Whether this alone should stop delivery.
+   *
+   * A missing id breaks the page: the carried script dereferences null and
+   * takes the rest of the page's behaviour down with it. A missing class does
+   * not — `querySelectorAll` over nothing is a no-op, so the site works and
+   * only loses an effect. Blocking on both would refuse to deliver sites that
+   * are merely a little plainer than before, which is not what a safety net is
+   * for. The class loss is still reported; it is just not fatal.
+   */
+  blocking: boolean;
 }
 
 export interface PreservationReport {
+  /** True when nothing blocking was found. Warnings may still be present. */
   ok: boolean;
   failures: PreservationFailure[];
   stats: {
@@ -229,6 +245,7 @@ export function checkPreservation(input: PreservationInput): PreservationReport 
       kind: "text_shrank",
       detail: `visible text fell to ${Math.round(wordRatio * 100)}% of the original ` +
         `(${wordsBefore} words -> ${wordsAfter})`,
+      blocking: true,
     });
   }
 
@@ -240,6 +257,7 @@ export function checkPreservation(input: PreservationInput): PreservationReport 
       kind: "facts_missing",
       detail: `${factsMissing.length} number(s) present in the original are absent from the rebuild`,
       missing: factsMissing,
+      blocking: true,
     });
   }
 
@@ -249,20 +267,29 @@ export function checkPreservation(input: PreservationInput): PreservationReport 
   const hooks = scriptHooks(collectJs(original));
   const liveIds = [...hooks.ids].filter((id) => hasId(beforeHtml, id));
   const liveClasses = [...hooks.classes].filter((cls) => hasClass(beforeHtml, cls));
-  const missingHooks = [
-    ...liveIds.filter((id) => !hasId(afterHtml, id)).map((id) => `#${id}`),
-    ...liveClasses.filter((cls) => !hasClass(afterHtml, cls)).map((cls) => `.${cls}`),
-  ].sort();
-  if (missingHooks.length) {
+  const missingIds = liveIds.filter((id) => !hasId(afterHtml, id)).map((id) => `#${id}`).sort();
+  const missingClasses = liveClasses.filter((cls) => !hasClass(afterHtml, cls))
+    .map((cls) => `.${cls}`).sort();
+  if (missingIds.length) {
     failures.push({
-      kind: "script_hooks_missing",
-      detail: `the carried scripts drive ${missingHooks.length} element(s) the rebuild did not keep`,
-      missing: missingHooks,
+      kind: "script_ids_missing",
+      detail: `the carried scripts dereference ${missingIds.length} element(s) the rebuild did not keep`,
+      missing: missingIds,
+      blocking: true,
     });
   }
+  if (missingClasses.length) {
+    failures.push({
+      kind: "script_classes_missing",
+      detail: `${missingClasses.length} class(es) the scripts decorate are gone, so that effect is lost`,
+      missing: missingClasses,
+      blocking: false,
+    });
+  }
+  const missingHooks = [...missingIds, ...missingClasses];
 
   return {
-    ok: failures.length === 0,
+    ok: !failures.some((f) => f.blocking),
     failures,
     stats: {
       wordsBefore,
@@ -276,8 +303,14 @@ export function checkPreservation(input: PreservationInput): PreservationReport 
   };
 }
 
-/** One-line summary for an error message or a log entry. */
+/** One-line summary of what BLOCKED delivery. */
 export function summarize(report: PreservationReport): string {
-  if (report.ok) return "content preserved";
-  return report.failures.map((f) => f.detail).join("; ");
+  const blocking = report.failures.filter((f) => f.blocking);
+  if (!blocking.length) return "content preserved";
+  return blocking.map((f) => f.detail).join("; ");
+}
+
+/** Non-fatal losses worth recording next to a successful run. */
+export function warnings(report: PreservationReport): PreservationFailure[] {
+  return report.failures.filter((f) => !f.blocking);
 }

@@ -8,6 +8,7 @@ import {
   scriptHooks,
   summarize,
   visibleText,
+  warnings,
   wordCount,
 } from "./preservation.ts";
 
@@ -111,6 +112,7 @@ Deno.test("checkPreservation: the run that deleted the site fails on all three c
   assertFalse(r.ok);
   const kinds = r.failures.map((f) => f.kind).sort();
   assertEquals(kinds, ["facts_missing", "text_shrank"]);
+  assert(r.failures.every((f) => f.blocking));
 });
 
 Deno.test("checkPreservation: a dropped year is reported by value", () => {
@@ -134,14 +136,33 @@ Deno.test("checkPreservation: the word-ratio floor sits between the real cluster
   assert(MIN_WORD_RATIO < 0.99);
 });
 
-Deno.test("checkPreservation: a script hook that vanished is caught", () => {
-  const before = `<div id="nav">a</div><div class="fade-up">b</div>${RICH}`;
-  const after = `<div id="menu">a</div><div class="reveal">b</div>${RICH}`;
-  const r = check(before, after, { "script.js": `getElementById("nav"); querySelectorAll(".fade-up")` });
+Deno.test("checkPreservation: a dereferenced id that vanished blocks delivery", () => {
+  const before = `<div id="nav">a</div>${RICH}`;
+  const after = `<div id="menu">a</div>${RICH}`;
+  const r = check(before, after, { "script.js": `getElementById("nav")` });
   assertFalse(r.ok);
-  const hooks = r.failures.find((f) => f.kind === "script_hooks_missing");
-  assert(hooks);
-  assertEquals(hooks.missing, ["#nav", ".fade-up"]);
+  const ids = r.failures.find((f) => f.kind === "script_ids_missing");
+  assert(ids);
+  assertEquals(ids.missing, ["#nav"]);
+  assert(ids.blocking);
+});
+
+Deno.test("checkPreservation: a lost decorative class is reported but does not block", () => {
+  const before = `<div class="fade-up">b</div>${RICH}`;
+  const after = `<div class="reveal">b</div>${RICH}`;
+  const r = check(before, after, { "script.js": `querySelectorAll(".fade-up")` });
+  assert(r.ok, "a lost animation is not a reason to withhold the site");
+  const warn = warnings(r);
+  assertEquals(warn.length, 1);
+  assertEquals(warn[0].kind, "script_classes_missing");
+  assertEquals(warn[0].missing, [".fade-up"]);
+});
+
+Deno.test("checkPreservation: an external .js file protects its ids just like an inline block", () => {
+  const before = `<div id="nav">a</div>${RICH}`;
+  const after = `<div>a</div>${RICH}`;
+  assertFalse(check(before, after, { "js/site.js": `getElementById("nav")` }).ok);
+  assertFalse(check(before, after, { "index2.html": `<script>getElementById("nav")</script>` }).ok);
 });
 
 Deno.test("checkPreservation: a hook the original never satisfied is not blamed on the rebuild", () => {

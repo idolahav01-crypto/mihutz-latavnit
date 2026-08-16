@@ -568,7 +568,14 @@ Deno.serve(async (req) => {
       // CONTENT is inventoried deterministically — every section, every repeated
       // item, and the verbatim DOM of any widget a script drives. The model is
       // never asked what the page contains, so content cannot be summarised away.
-      const ledger = buildLedger(rawTarget);
+      // The site's .js FILES, not just the inline blocks. A page whose behaviour
+      // lives in script.js otherwise looks script-free, and its containers get
+      // no protection at all.
+      const externalJs = [...pristine.entries()]
+        .filter(([path]) => /\.(js|mjs)$/i.test(path))
+        .map(([, code]) => code)
+        .join("\n");
+      const ledger = buildLedger(rawTarget, externalJs);
       if (!ledger.sections.length) throw new Error("empty_ledger");
 
       // A headings-only outline is all the design pass needs — enough to judge
