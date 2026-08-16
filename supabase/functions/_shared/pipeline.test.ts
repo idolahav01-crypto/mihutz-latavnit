@@ -4,13 +4,17 @@ import {
   assembleFinalFiles,
   buildDiffs,
   buildSignalList,
+  DELETED_FILE,
   extractCodeRegions,
   filesTouchedByFixes,
   isVerbatimUnique,
+  keepPath,
   parseBundle,
+  pickHomePage,
   presentSignals,
   serializeBundle,
   unifiedDiff,
+  unreferencedAssets,
   validateProposals,
 } from "./pipeline.ts";
 
@@ -181,4 +185,190 @@ Deno.test("validateProposals rejects a currency-inverting fix before it can appl
   assertEquals(out[0].old_code_verbatim, true); // the anchor was fine
   assertEquals(out[0].applicable_edit, false); // but the edit is a regression
   assertEquals(out[0].rejected_reason, "inverts_currency_order");
+});
+
+Deno.test("assembleFinalFiles drops a tombstoned path", () => {
+  const original = new Map([["index.html", "<p>x</p>"], ["style.css", "a{}"]]);
+  const edited = new Map([["index.html", "<p>y</p>"], ["style.css", DELETED_FILE]]);
+  const out = assembleFinalFiles(original, edited);
+  assertEquals(out.get("index.html"), "<p>y</p>");
+  assertEquals(out.has("style.css"), false);
+});
+
+Deno.test("unreferencedAssets finds the stylesheet the rebuilt page dropped", () => {
+  // the real shape: a page rebuilt with inline CSS, keeping its <script src>
+  const files = new Map([
+    ["index.html", '<html><head><style>a{}</style></head><body><script src="script.js"></script></body></html>'],
+    ["style.css", ".hero{right:0}"],
+    ["script.js", "console.log(1)"],
+  ]);
+  assertEquals(unreferencedAssets(files), ["style.css"]);
+});
+
+Deno.test("unreferencedAssets keeps a stylesheet another page still links", () => {
+  const files = new Map([
+    ["index.html", "<html><head><style>a{}</style></head><body></body></html>"],
+    ["about.html", '<html><head><link rel="stylesheet" href="style.css"></head></html>'],
+    ["style.css", ".hero{right:0}"],
+  ]);
+  assertEquals(unreferencedAssets(files), []);
+});
+
+Deno.test("unreferencedAssets never touches images or pages", () => {
+  const files = new Map([
+    ["index.html", "<html><head><style>a{}</style></head><body></body></html>"],
+    ["old-page.html", "<html><body>still a page</body></html>"],
+    ["logo.png", "binary"],
+    ["fonts/x.woff2", "binary"],
+  ]);
+  assertEquals(unreferencedAssets(files), []);
+});
+
+Deno.test("unreferencedAssets does nothing when there is no page to judge by", () => {
+  assertEquals(unreferencedAssets(new Map([["style.css", "a{}"]])), []);
+});
+
+Deno.test("a pruned project survives a bundle round-trip", () => {
+  const original = new Map([["index.html", "<p>x</p>"], ["style.css", "a{}"]]);
+  const edited = new Map([["index.html", "<p>y</p>"], ["style.css", DELETED_FILE]]);
+  const round = parseBundle(serializeBundle(edited));
+  const out = assembleFinalFiles(original, round);
+  assertEquals([...out.keys()], ["index.html"]);
+});
+
+// ---------- pickHomePage ----------
+
+Deno.test("pickHomePage: the real four-page site that used to pick contact.html", () => {
+  assertEquals(
+    pickHomePage([
+      "contact.html",
+      "gallery.html",
+      "products.html",
+      "index.html",
+      "style.css",
+    ]),
+    "index.html",
+  );
+});
+
+Deno.test("pickHomePage: a single page is that page", () => {
+  assertEquals(pickHomePage(["about.html"]), "about.html");
+});
+
+Deno.test("pickHomePage: no html at all is null, not a guess", () => {
+  assertEquals(pickHomePage(["style.css", "script.js", "README.md"]), null);
+});
+
+Deno.test("pickHomePage: nothing named like a home page falls back alphabetically", () => {
+  assertEquals(
+    pickHomePage(["gallery.html", "contact.html", "products.html"]),
+    "contact.html",
+  );
+});
+
+Deno.test("pickHomePage: a named entry point beats a shallower ordinary page", () => {
+  assertEquals(pickHomePage(["about.html", "public/index.html"]), "public/index.html");
+});
+
+Deno.test("pickHomePage: the shallowest index wins", () => {
+  assertEquals(
+    pickHomePage(["docs/index.html", "index.html", "a/b/index.html"]),
+    "index.html",
+  );
+});
+
+Deno.test("pickHomePage: index beats home beats default beats main", () => {
+  assertEquals(pickHomePage(["main.html", "default.html", "home.html"]), "home.html");
+  assertEquals(pickHomePage(["main.html", "default.html"]), "default.html");
+  assertEquals(pickHomePage(["home.html", "index.html"]), "index.html");
+});
+
+Deno.test("pickHomePage: .htm counts, and case does not", () => {
+  assertEquals(pickHomePage(["contact.html", "Index.HTM"]), "Index.HTM");
+});
+
+Deno.test("pickHomePage: order of input does not change the answer", () => {
+  const files = ["products.html", "index.html", "contact.html", "gallery.html"];
+  const first = pickHomePage(files);
+  assertEquals(first, "index.html");
+  assertEquals(pickHomePage([...files].reverse()), first);
+});
+
+Deno.test("pickHomePage: a page merely containing 'index' is not an index", () => {
+  assertEquals(pickHomePage(["contact.html", "index-of-terms.html"]), "contact.html");
+});
+
+// ---------- keepPath ----------
+
+Deno.test("keepPath: keeps the files a site is actually made of", () => {
+  for (
+    const p of [
+      "index.html",
+      "contact.htm",
+      "style.css",
+      "css/app.css",
+      "js/main.js",
+      "app/index.html",
+      "robots.txt",
+      "sitemap.xml",
+      "manifest.json",
+    ]
+  ) {
+    assert(keepPath(p), `should have kept ${p}`);
+  }
+});
+
+Deno.test("keepPath: drops the junk found in real scan bundles", () => {
+  for (
+    const p of [
+      "pax_global_header",
+      "README.md",
+      "SETUP-AUTH.md",
+      "._contact.html",
+      "._style.css",
+      "__MACOSX/contact.html",
+      ".gitignore",
+      ".DS_Store",
+      "node_modules/react/index.js",
+      "package-lock.json",
+    ]
+  ) {
+    assertFalse(keepPath(p), `should have dropped ${p}`);
+  }
+});
+
+Deno.test("keepPath: a secret is never bundled and never sent to the model", () => {
+  assertFalse(keepPath(".env"));
+  assertFalse(keepPath(".env.local"));
+  assertFalse(keepPath("config/.env.production"));
+});
+
+Deno.test("keepPath: robots.txt survives, because three signals look for it", () => {
+  assert(keepPath("robots.txt"));
+  assert(keepPath("public/robots.txt"));
+});
+
+Deno.test("keepPath: a dotted segment anywhere in the path, not just the start", () => {
+  assertFalse(keepPath("src/.cache/app.css"));
+  assertFalse(keepPath("a/b/._index.html"));
+  assert(keepPath("src/cache/app.css"));
+});
+
+Deno.test("keepPath: directory form with a trailing slash", () => {
+  assertFalse(keepPath("node_modules/"));
+  assertFalse(keepPath(".git/"));
+  assert(keepPath("css/"));
+});
+
+Deno.test("keepPath: a filename merely containing a dot or the word readme is kept", () => {
+  assert(keepPath("index.min.html"));
+  assert(keepPath("readme.html"));
+  assert(keepPath("my.page.html"));
+});
+
+Deno.test("keepPath: documentation goes, licence-named pages of the site stay html", () => {
+  assertFalse(keepPath("CHANGELOG"));
+  assertFalse(keepPath("LICENSE.txt"));
+  assertFalse(keepPath("docs/guide.md"));
+  assert(keepPath("license.html"));
 });

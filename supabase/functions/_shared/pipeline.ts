@@ -314,13 +314,58 @@ function findWhitespaceInsensitiveUnique(
 }
 
 /** Merge edited files over the saved originals → the final, complete project. */
+/**
+ * A tombstone: this path was deliberately dropped from the delivered project.
+ *
+ * The edited bundle only carries files a stage rewrote, and everything else
+ * comes through from the original — which is right until a stage makes a file
+ * obsolete rather than changing it. A rebuilt page carries its own CSS inline,
+ * so the old stylesheet is dead code: nothing links it, and it still ships to
+ * the user and still scores against them. Measured on one real rebuild, an
+ * orphaned style.css alone kept two signals alive (#64 and #77).
+ *
+ * A sentinel rather than a separate delete list, because every consumer — the
+ * zip, the pull request, the after-scan, QA — already funnels through
+ * assembleFinalFiles, so they all honour it without changing.
+ */
+export const DELETED_FILE = "\u0000MIHUTZ_DELETED\u0000";
+
 export function assembleFinalFiles(
   original: Map<string, string>,
   edited: Map<string, string>,
 ): Map<string, string> {
   const out = new Map(original);
-  for (const [path, content] of edited) out.set(path, content);
+  for (const [path, content] of edited) {
+    if (content === DELETED_FILE) out.delete(path);
+    else out.set(path, content);
+  }
   return out;
+}
+
+/**
+ * Files nothing links to any more.
+ *
+ * Only stylesheets and scripts are candidates: an unreferenced image may still
+ * be wanted, and another HTML page is a page, not an asset. A file is kept if
+ * ANY surviving page mentions its name, so a stylesheet shared with a page we
+ * did not rebuild stays. The match is deliberately loose in the keeping
+ * direction — a false keep costs nothing, a false delete costs a file.
+ */
+export function unreferencedAssets(files: Map<string, string>): string[] {
+  const pages = [...files.entries()]
+    .filter(([p]) => /\.html?$/i.test(p))
+    .map(([, c]) => c)
+    .join("\n");
+  if (!pages) return [];
+  const dead: string[] = [];
+  for (const path of files.keys()) {
+    if (!/\.(css|js|mjs)$/i.test(path)) continue;
+    const name = path.split("/").pop() ?? path;
+    // Quoted in an href/src, or named anywhere in an import — either counts.
+    if (pages.includes(name)) continue;
+    dead.push(path);
+  }
+  return dead;
 }
 
 // ---------- unified diff (Stage 5 QA input) ----------
@@ -699,3 +744,103 @@ export function mergeDetection(
   };
 }
 
+
+/**
+ * Which page a single-page rebuild should treat as the site.
+ *
+ * The rebuild writes one file, so the choice decides what the whole run is
+ * worth. It used to be the alphabetically first page, which on a real
+ * four-page site ("contact, gallery, index, products") meant contact.html
+ * every time and the home page never. Two measured rebuilds picked the wrong
+ * page that way, and one of them picked a macOS metadata sidecar.
+ *
+ * Ranked, not filtered: every page stays eligible, so a site with no index.html
+ * still gets its most plausible entry point rather than an error. Ties fall
+ * back to the alphabetical order this replaces, so the choice is total and
+ * repeatable.
+ */
+const HOME_BASENAMES = ["index", "home", "default", "main"];
+
+export function pickHomePage(paths: Iterable<string>): string | null {
+  const pages = [...paths].filter((p) => /\.html?$/i.test(p)).sort();
+  if (!pages.length) return null;
+
+  const rank = (path: string): [number, number, number] => {
+    const segments = path.split("/");
+    const base = (segments.pop() ?? "").replace(/\.html?$/i, "").toLowerCase();
+    const named = HOME_BASENAMES.indexOf(base);
+    return [
+      // A recognised entry-point name beats any other name, whatever the depth:
+      // "public/index.html" is the home page and "about.html" is not.
+      named === -1 ? 1 : 0,
+      // Among those, the shallowest wins — the root index over a nested one.
+      segments.length,
+      // "index" over "home" over "default" over "main".
+      named === -1 ? 0 : named,
+    ];
+  };
+
+  let best = pages[0];
+  let bestRank = rank(best);
+  for (const page of pages.slice(1)) {
+    const r = rank(page);
+    for (let i = 0; i < r.length; i++) {
+      if (r[i] === bestRank[i]) continue;
+      if (r[i] < bestRank[i]) {
+        best = page;
+        bestRank = r;
+      }
+      break;
+    }
+  }
+  return best;
+}
+
+// ============================================================
+// Which files belong in a scan bundle
+// ============================================================
+
+/**
+ * A scan should see the site, and only the site.
+ *
+ * Everything that gets past this ends up in the bundle: it is sent to the
+ * model, it is counted in files_scanned, and any signal found in it scores
+ * against the user. Real bundles were carrying an archive-extraction artifact
+ * (pax_global_header), repo documentation (README.md), and macOS metadata —
+ * none of which a browser ever loads.
+ *
+ * The dotted-segment rule is the one that matters most: it drops .git, .cache,
+ * .DS_Store, the "._name" sidecars macOS puts in every zip, and — the reason it
+ * is a rule and not a list — .env, which was being read off disk and sent to
+ * the model along with whatever was in it.
+ *
+ * robots.txt is deliberately NOT filtered as a text file; three signals look
+ * for it.
+ *
+ * js/app.js keeps a copy of these rules, because the browser does the same
+ * filtering before upload and cannot import from here. Change one, change both.
+ */
+const SKIP_DIR =
+  /(^|\/)(node_modules|dist|build|\.next|\.nuxt|out|vendor|coverage|\.cache|\.vercel|\.turbo|__MACOSX)(\/|$)/;
+// Any path segment starting with a dot: config, VCS internals, macOS sidecars,
+// and secrets. None of them are the website.
+const SKIP_DOTTED = /(^|\/)\./;
+// tar/pax writes this pseudo-entry into archives; GitHub tarballs carry it.
+const SKIP_ARCHIVE_ARTIFACT = /(^|\/)pax_global_header$/;
+// Repo documentation. It ships to GitHub, not to a browser.
+const SKIP_DOCS =
+  /(\.(md|markdown|mdx|rst)$|(^|\/)(LICENSE|LICENCE|COPYING|NOTICE|CHANGELOG|AUTHORS|CONTRIBUTING)(\.(txt|rst))?$)/i;
+const SKIP_FILE =
+  /\.(min\.(js|css)|map|lock|png|jpe?g|gif|webp|avif|svg|ico|woff2?|ttf|otf|eot|mp4|webm|mp3|wav|pdf|zip|gz|br|wasm|ds_store)$/i;
+const SKIP_LOCKFILES = /(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|bun\.lockb)$/i;
+
+/** True if this path should go into the bundle. Accepts "dir/" for directories. */
+export function keepPath(path: string): boolean {
+  if (SKIP_DIR.test(path)) return false;
+  if (SKIP_DOTTED.test(path)) return false;
+  if (SKIP_ARCHIVE_ARTIFACT.test(path)) return false;
+  if (SKIP_DOCS.test(path)) return false;
+  if (SKIP_LOCKFILES.test(path)) return false;
+  if (SKIP_FILE.test(path)) return false;
+  return true;
+}

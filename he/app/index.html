@@ -111,12 +111,8 @@
 
       <!-- ===== טעינה ===== -->
       <section id="loading" hidden>
-        <ol class="stages" id="stages" aria-live="polite">
-          <li data-stage="0"><span class="stage-mark" aria-hidden="true"></span><span class="stage-name">קורא קבצים</span></li>
-          <li data-stage="1"><span class="stage-mark" aria-hidden="true"></span><span class="stage-name">מסנן קבצים לא רלוונטיים</span></li>
-          <li data-stage="2"><span class="stage-mark" aria-hidden="true"></span><span class="stage-name">מעלה לניתוח</span></li>
-          <li data-stage="3"><span class="stage-mark" aria-hidden="true"></span><span class="stage-name">מריץ אבחון מול 108 סימנים</span></li>
-        </ol>
+        <!-- שמות השלבים מגיעים מ-JS, כי השלב שרץ משתנה תוך כדי -->
+        <div class="prog-host" id="scan-progress" aria-live="polite"></div>
       </section>
 
       <!-- ===== דוח אבחון ===== -->
@@ -130,10 +126,18 @@
              יושב מעל הממצאים: הצעד הבא הוא הדבר הראשון על המסך, והרשימה
              המלאה נפתחת מתחתיו רק למי שרוצה אותה. ===== -->
         <div class="fix-pipeline" id="fix-pipeline">
-          <button type="button" class="btn btn-primary" id="propose-fixes">שדרג ועצב מחדש</button>
-          <button type="button" class="btn" id="add-features">הצע והוסף 5 פיצ'רים</button>
-          <button type="button" class="btn" id="review-bloat">בדוק מה מיותר להסרה</button>
+        <div class="site-url">
+          <label class="site-url-label" for="site-url">כתובת האתר החי (לא חובה)</label>
+          <input type="url" id="site-url" dir="ltr" inputmode="url" autocomplete="off"
+                 placeholder="https://example.co.il" />
+          <p class="site-url-note">בלי הכתובת אי אפשר לייצר תגיות שיתוף ותגית canonical — ואנחנו לא ממציאים כתובת.</p>
+        </div>
+          <button type="button" class="btn btn-primary" id="rebuild-site">בנה מחדש מאפס</button>
+          <button type="button" class="btn" id="add-features">הצע פיצ'ר חדש</button>
+          <button type="button" class="btn" id="propose-fixes">שדרג ועצב מחדש (ישן)</button>
           <p class="fix-hint" id="fix-hint" aria-live="polite"></p>
+          <div class="rb-progress" id="rb-progress" hidden aria-live="polite"></div>
+          <div class="fix-stage" id="score-delta" hidden aria-live="polite"></div>
           <div class="fix-stage" id="design-direction" hidden></div>
           <div class="fix-stage" id="proposals" hidden></div>
           <div class="fix-actions" id="fix-actions" hidden>
@@ -142,7 +146,6 @@
           <div class="fix-stage" id="apply-result" hidden aria-live="polite"></div>
           <div class="fix-stage" id="qa-result" hidden aria-live="polite"></div>
           <div class="fix-stage" id="features-result" hidden aria-live="polite"></div>
-          <div class="fix-stage" id="bloat-result" hidden aria-live="polite"></div>
           <div class="deliver-actions" id="deliver-actions" hidden>
             <button type="button" class="btn btn-primary" id="download-zip">הורדת הפרויקט המתוקן (‎.zip)</button>
             <button type="button" class="btn" id="push-github">פתיחת Pull Request ב-GitHub</button>

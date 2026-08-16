@@ -16,6 +16,8 @@ import {
   parseBundle,
   serializeBundle,
 } from "../_shared/pipeline.ts";
+import { MECHANICAL_IDS, mechanicalSignals, overlayMechanical } from "../_shared/mechanical.ts";
+import { fillUnevaluated, missingIds } from "../_shared/catalogue.ts";
 import { callClaude } from "../_shared/anthropic.ts";
 import { buildEntry, recordStageUsage } from "../_shared/usage.ts";
 
@@ -32,7 +34,13 @@ const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 // faster, which matters directly here because every pass races a 150s
 // edge-function wall clock.
 const MODEL = "claude-sonnet-5";
-const SIGNAL_COUNT = (signals as unknown[]).length; // 108
+const SIGNAL_COUNT = (signals as unknown[]).length; // 110
+// The mechanical ids are decided by text search in _shared/mechanical.ts, so
+// they are never put to the model: same answer every run, and the output tokens
+// they used to cost disappear.
+const MODEL_SIGNALS = (signals as Array<{ id: number }>).filter(
+  (s) => !MECHANICAL_IDS.includes(s.id),
+);
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
@@ -215,7 +223,7 @@ const SCHEMA = {
 
 // Deterministic recompute — never trust the model's own arithmetic.
 /**
- * How many passes to split the 108-signal audit across.
+ * How many passes to split the 110-signal audit across.
  *
  * Measured: wall-clock scales with the number of signals the model reports as
  * PRESENT (output tokens), not with input size — a 322KB bundle with 4 present
@@ -224,6 +232,16 @@ const SCHEMA = {
  * exactly this product's target. Splitting bounds the output per request.
  */
 const DEFAULT_PARTS = 3;
+
+/**
+ * How many times we go back for the signals the model skipped.
+ *
+ * Two, because the first gap pass fixes an ordinary early stop and a second
+ * covers a bad draw on top of it, while a third would mean the model is
+ * refusing this slice for a reason more calls will not solve. After that the
+ * remaining ids are recorded as unevaluated rather than chased.
+ */
+const MAX_GAP_ATTEMPTS = 2;
 
 function computeScore(sigs: Array<Record<string, unknown>>): {
   score: number;
@@ -243,6 +261,7 @@ function computeScore(sigs: Array<Record<string, unknown>>): {
   }
   return { score: den === 0 ? 0 : Math.round((100 * num) / den), present };
 }
+
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
@@ -271,11 +290,20 @@ Deno.serve(async (req) => {
   // signals currently marked absent, to raise recall on a suspiciously-low count
   // without ever fabricating (it can only ADD present signals, never remove one).
   let rehunt = false;
+  // A gap pass re-asks about the signals the model never returned. It is its
+  // own request with its own full 150s, rather than a retry squeezed into the
+  // milliseconds left over from the previous pass — that version was given a
+  // flat 60s and died on `stage_timeout_after_60s`, so completeness depended on
+  // how fast the pass before it happened to run. It no longer does.
+  let gapPass = false;
+  let gapAttempt = 0;
   try {
     const body = await req.json();
     scanId = body.scan_id;
     if (body.mode === "after") mode = "after";
     if (body.rehunt === true) rehunt = true;
+    if (body.gap === true) gapPass = true;
+    if (Number.isInteger(body.gap_attempt) && body.gap_attempt >= 0) gapAttempt = body.gap_attempt;
     if (Number.isInteger(body.parts) && body.parts >= 1) parts = body.parts;
     if (Number.isInteger(body.part) && body.part >= 1) part = Math.min(body.part, parts);
   } catch {
@@ -285,7 +313,7 @@ Deno.serve(async (req) => {
 
   const { data: scan, error: scanErr } = await admin
     .from("scans")
-    .select("id, user_id, detection")
+    .select("id, user_id, detection, detection_after")
     .eq("id", scanId)
     .single();
   if (scanErr || !scan || scan.user_id !== user.id) {
@@ -303,7 +331,8 @@ Deno.serve(async (req) => {
       const prior = (scan.detection ?? {}) as DetectionResult;
       const absentIds = (prior.signals ?? [])
         .filter((s) => s.present !== true && s.applicable !== false)
-        .map((s) => Number(s.id));
+        .map((s) => Number(s.id))
+        .filter((id) => !MECHANICAL_IDS.includes(id));
       if (!absentIds.length) {
         const { score, present } = computeScore(prior.signals ?? []);
         return json({ ok: true, scan_id: scanId, mode: "rehunt", done: true, ai_fingerprint_score: score, present_count: present });
@@ -335,6 +364,11 @@ Deno.serve(async (req) => {
       const found = claude.json as DetectionResult;
       const additions = (found.signals ?? []).filter((s) => s.present === true);
       const merged = mergeDetection(prior, { signals: additions });
+      // A re-hunt is allowed to find more, never to overrule a text search.
+      merged.signals = overlayMechanical(
+        merged.signals ?? [],
+        mechanicalSignals(parseBundle(bundle)),
+      );
       const { score, present } = computeScore(merged.signals ?? []);
 
       await recordStageUsage(
@@ -389,59 +423,106 @@ Deno.serve(async (req) => {
     const fileCount = (bundle.match(/^=== FILE: /gm) ?? []).length;
 
     // Which signals this pass is responsible for. The SYSTEM prompt still
-    // carries all 108 (identical bytes every pass, so it stays prompt-cached);
+    // carries all 110 (identical bytes every pass, so it stays prompt-cached);
     // only the user turn narrows the scope.
-    const perPart = Math.ceil(signals.length / parts);
-    const slice = signals.slice((part - 1) * perPart, part * perPart);
-    const idList = slice.map((sg) => `#${sg.id}`).join(", ");
+    const priorStored = mode === "after"
+      ? (scan as { detection_after?: unknown }).detection_after
+      : scan.detection;
 
-    // Routed through the shared client so this stage gets the same treatment as
-    // 2/4/5: streaming (a 32k-token non-streaming response is an idle timeout
-    // waiting to happen), an abort budget that reports `stage_timeout_after_Ns`
-    // instead of an opaque 546, and schema sanitising.
-    //
-    // NOT fast mode: this org's fast-mode quota is 0 tokens/min, so speed:"fast"
-    // returns a hard 429. Splitting the work is what buys the headroom instead.
-    const claude = await callClaude({
-      apiKey: ANTHROPIC_API_KEY,
-      model: MODEL,
-      effort: "medium",
-      maxTokens: 32000,
-      system: SYSTEM_PROMPT,
-      userContent: `Audit this project. Return JSON per the schema.\n\n` +
-        `THIS PASS (${part} of ${parts}): evaluate ONLY these signals and return ` +
-        `no others: ${idList}\n` +
-        (part === 1
-          ? `Also return site_profile and meta on this pass.\n`
-          : `Do NOT return site_profile, meta, or scores on this pass.\n`) +
-        `\n${bundle}`,
-      schema: SCHEMA,
-      timeoutMs: 130_000,
-    });
-    const partDetection = claude.json as DetectionResult;
-    const usage = claude.usage;
+    let detection: DetectionResult;
 
-    // Fold this pass into whatever the earlier passes recorded.
-    const prior = (part === 1 ? {} : (scan.detection ?? {})) as DetectionResult;
-    const detection = mergeDetection(prior, partDetection);
+    if (gapPass) {
+      // Only the ids nobody returned, with the whole request to do it in.
+      const prior = (priorStored ?? {}) as DetectionResult;
+      const need = missingIds(prior);
+      if (!need.length) {
+        detection = prior;
+      } else {
+        const claude = await callClaude({
+          apiKey: ANTHROPIC_API_KEY,
+          model: MODEL,
+          effort: "medium",
+          maxTokens: 32000,
+          system: SYSTEM_PROMPT,
+          userContent: `GAP PASS. These signals were assigned to an earlier pass and it returned ` +
+            `no entry for any of them. Evaluate EVERY one now and return an entry for each, ` +
+            `present or absent, under the same evidence rules as any other pass. ` +
+            `Do NOT return site_profile, meta, or scores.\n\n` +
+            `Signals: ${need.map((id) => `#${id}`).join(", ")}\n\n${bundle}`,
+          schema: SCHEMA,
+          timeoutMs: 130_000,
+        });
+        detection = mergeDetection(prior, claude.json as DetectionResult);
+        await recordStageUsage(
+          admin, scanId,
+          buildEntry(`${mode === "after" ? "detect_after" : "detect"}_gap${gapAttempt}`, MODEL, claude.usage, Date.now() - startedAt, "medium"),
+        );
+      }
+      detection.signals = overlayMechanical(
+        detection.signals ?? [],
+        mechanicalSignals(parseBundle(bundle)),
+      );
+    } else {
+      const perPart = Math.ceil(MODEL_SIGNALS.length / parts);
+      const slice = MODEL_SIGNALS.slice((part - 1) * perPart, part * perPart);
+      const idList = slice.map((sg) => `#${sg.id}`).join(", ");
 
-    await recordStageUsage(
-      admin,
-      scanId,
-      buildEntry(
-        `${mode === "after" ? "detect_after" : "detect"}_part${part}`,
-        MODEL,
-        usage,
-        Date.now() - startedAt,
-        "medium",
-      ),
-    );
+      // Routed through the shared client so this stage gets the same treatment as
+      // 2/4/5: streaming (a 32k-token non-streaming response is an idle timeout
+      // waiting to happen), an abort budget that reports `stage_timeout_after_Ns`
+      // instead of an opaque 546, and schema sanitising.
+      //
+      // NOT fast mode: this org's fast-mode quota is 0 tokens/min, so speed:"fast"
+      // returns a hard 429. Splitting the work is what buys the headroom instead.
+      const claude = await callClaude({
+        apiKey: ANTHROPIC_API_KEY,
+        model: MODEL,
+        effort: "medium",
+        maxTokens: 32000,
+        system: SYSTEM_PROMPT,
+        userContent: `Audit this project. Return JSON per the schema.\n\n` +
+          `THIS PASS (${part} of ${parts}): evaluate ONLY these signals and return ` +
+          `no others: ${idList}\n` +
+          (part === 1
+            ? `Also return site_profile and meta on this pass.\n`
+            : `Do NOT return site_profile, meta, or scores on this pass.\n`) +
+          `\n${bundle}`,
+        schema: SCHEMA,
+        timeoutMs: 130_000,
+      });
+
+      // Fold this pass into whatever the earlier passes recorded. In "after" mode
+      // the partials accumulate in detection_after so the original "before"
+      // detection (scan.detection) is never touched or corrupted mid-rescan.
+      const prior = (part === 1 ? {} : (priorStored ?? {})) as DetectionResult;
+      detection = mergeDetection(prior, claude.json as DetectionResult);
+      // Applied on every pass, not just the last, so a partial save on disk is
+      // never internally inconsistent with the finished one.
+      detection.signals = overlayMechanical(
+        detection.signals ?? [],
+        mechanicalSignals(parseBundle(bundle)),
+      );
+
+      await recordStageUsage(
+        admin,
+        scanId,
+        buildEntry(
+          `${mode === "after" ? "detect_after" : "detect"}_part${part}`,
+          MODEL,
+          claude.usage,
+          Date.now() - startedAt,
+          "medium",
+        ),
+      );
+    }
 
     // Intermediate pass: persist the partial audit and hand the baton back to
     // the client, which drives the next pass. Status stays "detecting" so a
     // half-finished scan can never look complete.
-    if (part < parts) {
-      await admin.from("scans").update({ detection }).eq("id", scanId);
+    if (!gapPass && part < parts) {
+      await admin.from("scans")
+        .update(mode === "after" ? { detection_after: detection } : { detection })
+        .eq("id", scanId);
       return json({
         ok: true,
         scan_id: scanId,
@@ -452,6 +533,30 @@ Deno.serve(async (req) => {
         signals_so_far: (detection.signals ?? []).length,
       });
     }
+
+    // ---- completeness, before anything is scored ----
+    // A signal the model never returned must not quietly leave the denominator.
+    // Gaps go back to the client as another pass with its own full budget, up
+    // to MAX_GAP_ATTEMPTS times; only then do we write them down as unevaluated.
+    // Nothing here depends on how long the previous pass happened to take.
+    const gaps = missingIds(detection);
+    if (gaps.length && gapAttempt < MAX_GAP_ATTEMPTS) {
+      await admin.from("scans")
+        .update(mode === "after" ? { detection_after: detection } : { detection })
+        .eq("id", scanId);
+      return json({
+        ok: true,
+        scan_id: scanId,
+        mode,
+        part,
+        parts,
+        done: false,
+        gap: true,
+        gap_attempt: gapAttempt + 1,
+        missing: gaps.length,
+      });
+    }
+    if (gaps.length) fillUnevaluated(detection, gaps);
 
     // Recompute the score deterministically from the returned signals.
     const { score, present } = computeScore(detection.signals ?? []);
@@ -487,6 +592,7 @@ Deno.serve(async (req) => {
           present_count: before?.present_count ?? null,
         },
         after: { ai_fingerprint_score: score, present_count: present },
+        unevaluated: gaps.length,
         // Negative = the fingerprint went down, which is the goal.
         score_delta: before?.ai_fingerprint_score == null
           ? null
@@ -516,6 +622,7 @@ Deno.serve(async (req) => {
       ai_fingerprint_score: score,
       present_count: present,
       files_scanned: detection.meta?.files_scanned ?? fileCount,
+      unevaluated: gaps.length,
     });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);

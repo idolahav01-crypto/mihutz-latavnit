@@ -970,5 +970,23 @@
     "detection": "הכל ב-App.jsx אחד — state, routing, styling; API keys, URLs, feature flags ב-code ולא ב-.env/CMS; transition: all 0.3s ease על כל אלמנט; אייקונים בגדלים לא עקביים (16px/24px/4px) ללא grid אחיד",
     "weight": "medium",
     "auto_fixable": "partial"
+  },
+  {
+    "id": 109,
+    "name": "אמוג'י בממשק ובתוכן (אסור לחלוטין)",
+    "category": "אייקונים, אנליטיקס, GDPR ו-RTL",
+    "category_letter": "ט",
+    "detection": "כל שימוש באמוג'י כחלק מהעיצוב או התוכן: כאייקונים של פיצ'רים/הישגים/כרטיסים, ליד או בתוך כותרות (h1-h6), ב-badges/pills, בכפתורי CTA, בפריטי רשימה או בטקסט שיווקי (🚀 ✨ 💡 🎯 🛡️ ⭐ 🏆 ✅ 🎉 🔥 ⚡ 👉 💪 ועוד). אמוג'י הוא מהסימנים הכי מובהקים של אתר AI — אסור לחלוטין. תמיד להסיר ולהחליף באייקון SVG מותאם, בטיפוגרפיה, או בכלום",
+    "weight": "high",
+    "auto_fixable": "yes"
+  },
+  {
+    "id": 110,
+    "name": "שורת סטטיסטיקות round-number מרשימה",
+    "category": "דפוסי AI מסדר שני (Second-Order AI Clichés)",
+    "category_letter": "י",
+    "detection": "שורה/בלוק של 3-4 מספרים גדולים 'מרשימים' (500+ / 99% / 24/7 / 10K+) עם label קצר, מסודרים סימטרית כ-counter/stats bar שנועד להרשים ולא להסביר. לשמר תמיד את המספרים האמיתיים — לשנות רק את ההצגה הסימטרית הגנרית",
+    "weight": "medium",
+    "auto_fixable": "yes"
   }
 ]

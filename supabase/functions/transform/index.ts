@@ -97,6 +97,8 @@ RESTRUCTURE AGGRESSIVELY: rebuild the hero, re-lay-out and reorder sections, int
 - Every <!--__MIHUTZ_SCRIPT_N__--> placeholder, kept where its element lives (a quiz container etc.). Never delete one; never write <script> content.
 </preserve_exactly>
 
+REMOVE ALL EMOJI: strip every emoji from the markup — as icons, beside/inside headings, in badges, buttons, or list items. Replace an emoji icon with a real inline SVG icon or nothing. Emoji are the #1 AI fingerprint; the output must contain zero emoji. (This is the one content exception — you still keep all real facts, numbers, names and text.)
+
 Do NOT write CSS or <style> — a separate stylesheet handles ALL styling. Output only new body markup.
 
 Also emit design_direction (one coherent direction for THIS business from the profile: brand_palette, typography heading+body, layout_principle, personality, rationale). If an <approved_design_direction> is given, reuse it verbatim.
