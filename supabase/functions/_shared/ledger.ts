@@ -302,6 +302,29 @@ function componentIdWithin(block: Element, idToScript: Map<string, number>): str
 }
 
 /** The smallest element inside `block` that contains every referenced id present. */
+/**
+ * The element carried over verbatim so a script keeps the DOM it drives.
+ *
+ * The smallest ancestor holding every script-referenced id is the right answer
+ * for a self-contained widget like a quiz, whose ids span its whole body. It is
+ * the wrong answer when the only referenced id is a leaf: a contact section
+ * whose script touches nothing but `<p id="formNote">` — an empty status line —
+ * would carry that paragraph and drop the address, the opening hours and the
+ * form itself. Measured on a real run: the section's entire content vanished
+ * and the delivery was blocked for three missing numbers.
+ *
+ * So the container has to earn its narrowness. The test is what would be LEFT
+ * BEHIND: the block's text, minus the container's, minus the heading the
+ * rebuild redesigns anyway. A quiz leaves nothing behind — its boxes are empty
+ * until the script fills them — while the contact section leaves an address, a
+ * phone number and opening hours. Anything more than a stray word and the
+ * block wins.
+ *
+ * Carrying too much costs a section that keeps its original markup. Carrying
+ * too little costs the content itself, so the tie goes to carrying too much.
+ */
+const MAX_ABANDONED_TEXT = 40;
+
 function widgetContainer(block: Element, ids: string[]): Element {
   const els: Element[] = [];
   for (const id of ids) {
@@ -315,7 +338,14 @@ function widgetContainer(block: Element, ids: string[]): Element {
   while (anc && !els.every((e) => containsEl(anc as Element, e))) {
     anc = anc.parentElement;
   }
-  return anc ?? block;
+  const chosen = anc ?? block;
+  if (chosen === block) return block;
+
+  const heading = block.querySelector("h1,h2,h3,h4,h5,h6");
+  const abandoned = normalizeText(block.textContent ?? "").length -
+    normalizeText(chosen.textContent ?? "").length -
+    normalizeText(heading?.textContent ?? "").length;
+  return abandoned > MAX_ABANDONED_TEXT ? block : chosen;
 }
 
 function containsEl(anc: Element, node: Element): boolean {

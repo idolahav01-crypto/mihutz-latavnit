@@ -18,6 +18,7 @@
 
 import { EMOJI_RE, mechanicalSignals } from "./mechanical.ts";
 import { NOT_COUNTED } from "./catalogue.ts";
+import { collectJs, scriptHooks } from "./preservation.ts";
 
 // The detector's own definition, imported rather than restated: a strip here
 // and a check there must never disagree about what an emoji is.
@@ -159,11 +160,92 @@ export function logicalProperties(html: string): { html: string; changed: number
 }
 
 // ============================================================
+// Script hooks that live in the page's chrome
+// ============================================================
+
+// Only the structural elements. Re-attaching an id to a <div> would be a guess
+// about which of dozens is the right one; a page has one <nav>.
+const CHROME_TAGS = ["nav", "header", "footer", "main", "aside"];
+
+/**
+ * Put back an id the page's own script needs and the rebuild did not keep.
+ *
+ * The header and nav are site chrome: the ledger deliberately does not treat
+ * them as content, and the shell rebuilds them from scratch. That is right for
+ * the markup and wrong for the hooks — on a real run the original's
+ * `<nav id="nav">` came back as a plain `<nav>`, and script.js dereferenced
+ * null on every scroll.
+ *
+ * The id is only restored when the answer is unambiguous: the original carried
+ * it on a structural tag, and the rebuilt page has exactly one element of that
+ * tag with no id of its own. Anything less certain is left alone and reported
+ * as missing, because a hook attached to the wrong element is worse than a
+ * hook that is honestly absent.
+ */
+export function restoreChromeHooks(
+  originalPage: string,
+  files: Map<string, string>,
+  builtHtml: string,
+): { html: string; restored: string[] } {
+  const hooks = scriptHooks(collectJs(files));
+  const restored: string[] = [];
+  let out = builtHtml;
+
+  for (const id of hooks.ids) {
+    if (hasId(out, id)) continue;
+    const tag = chromeTagCarrying(originalPage, id);
+    if (!tag) continue;
+
+    // Chrome lives outside <main>. Without that restriction a rebuilt page with
+    // three section <header>s and one site <header> looks ambiguous and the
+    // hook is dropped — which is exactly what happened on the furniture site.
+    const searchable = maskMain(out);
+    const candidates = [...searchable.matchAll(new RegExp(`<${tag}\\b([^>]*)>`, "gi"))]
+      .filter((m) => !/\bid\s*=/i.test(m[1]));
+    if (candidates.length !== 1) continue;
+
+    const m = candidates[0];
+    out = out.slice(0, m.index!) + `<${tag} id="${id}"${m[1]}>` + out.slice(m.index! + m[0].length);
+    restored.push(`#${id}`);
+  }
+  return { html: out, restored };
+}
+
+/**
+ * Blank out the <main> region, keeping every character position intact so a
+ * match found here still points at the right offset in the original string.
+ */
+function maskMain(html: string): string {
+  return html.replace(
+    /<main\b[\s\S]*?<\/main>/gi,
+    (m) => " ".repeat(m.length),
+  );
+}
+
+function chromeTagCarrying(html: string, id: string): string | null {
+  for (const tag of CHROME_TAGS) {
+    const re = new RegExp(`<${tag}\\b[^>]*\\bid\\s*=\\s*["']${escapeRegExp(id)}["']`, "i");
+    if (re.test(html)) return tag;
+  }
+  return null;
+}
+
+function hasId(html: string, id: string): boolean {
+  return new RegExp(`\\sid\\s*=\\s*["']${escapeRegExp(id)}["']`, "i").test(html);
+}
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// ============================================================
 // The loop
 // ============================================================
 
 export interface SelfCheckResult {
   html: string;
+  /** Script hooks re-attached to the rebuilt chrome. */
+  restoredHooks: string[];
   /** Signal ids this pass repaired, proven absent by a re-scan. */
   repaired: number[];
   /** Signal ids a repair targeted that the re-scan still finds. */
@@ -183,7 +265,11 @@ export const REPAIRABLE = [64, 109] as const;
  * exactly the failure mode that let a rebuild delete a site and call it an
  * improvement.
  */
-export function selfCheck(page: string, html: string): SelfCheckResult {
+export function selfCheck(
+  page: string,
+  html: string,
+  original?: Map<string, string>,
+): SelfCheckResult {
   const before = presentMechanical(page, html);
 
   let out = html;
@@ -192,11 +278,19 @@ export function selfCheck(page: string, html: string): SelfCheckResult {
   const css = logicalProperties(out);
   out = css.html;
 
+  let restoredHooks: string[] = [];
+  if (original) {
+    const hooks = restoreChromeHooks(original.get(page) ?? "", original, out);
+    out = hooks.html;
+    restoredHooks = hooks.restored;
+  }
+
   const after = presentMechanical(page, out);
   const targeted = REPAIRABLE.filter((id) => before.includes(id));
 
   return {
     html: out,
+    restoredHooks,
     repaired: targeted.filter((id) => !after.includes(id)),
     unrepaired: targeted.filter((id) => after.includes(id)),
     stillPresent: after,

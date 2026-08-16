@@ -8,6 +8,7 @@
 // clean-up so the finished page never links to a section that does not exist.
 
 import { scopeCss, visibleTextLength } from "./ledger.ts";
+import { factTokens, visibleText } from "./preservation.ts";
 import type { LedgerItem } from "./ledger.ts";
 
 /**
@@ -68,10 +69,15 @@ export function renderContentSection(section: RenderableSection): RenderedSectio
     ? `<p class="section-sub">${escapeHtml(section.subheading)}</p>`
     : "";
 
+  // Body AND items, never one or the other. A section that has both — copy
+  // introducing a set of cards — used to ship with the copy silently dropped,
+  // which is the one thing a completeness floor must not do.
   const items = section.items ?? [];
-  let inner = "";
-  if (items.length) {
-    inner = `<div class="rb-grid">` +
+  const bodyHtml = section.body
+    ? section.body.split(/\n\n+/).map((p) => `<p>${escapeHtml(p)}</p>`).join("")
+    : "";
+  const itemsHtml = items.length
+    ? `<div class="rb-grid">` +
       items.map((it) =>
         `<article class="rb-card">` +
         (it.value ? `<div class="rb-value">${escapeHtml(it.value)}</div>` : "") +
@@ -79,10 +85,9 @@ export function renderContentSection(section: RenderableSection): RenderedSectio
         (it.text ? `<p>${escapeHtml(it.text)}</p>` : "") +
         `</article>`
       ).join("") +
-      `</div>`;
-  } else if (section.body) {
-    inner = section.body.split(/\n\n+/).map((p) => `<p>${escapeHtml(p)}</p>`).join("");
-  }
+      `</div>`
+    : "";
+  const inner = bodyHtml + itemsHtml;
 
   const cta = section.cta?.label
     ? `<p><a class="btn btn-primary" href="${escapeHtml(section.cta.href ?? "#")}">${escapeHtml(section.cta.label)}</a></p>`
@@ -112,6 +117,26 @@ export function sectionCoverage(builtHtml: string, section: RenderableSection): 
   const target = (section.text ?? "").length;
   if (target === 0) return 1;
   return visibleTextLength(builtHtml) / target;
+}
+
+/**
+ * Numbers from this section the build did not carry over.
+ *
+ * Length coverage alone is not enough. A contact section can be rewritten to
+ * the same size and still lose the two things that mattered in it: on a real
+ * run the builder kept the prose, met the 0.85 length floor, and dropped the
+ * street number and the opening hours — "רחוב הנגרים 12" and "10:00–19:00" —
+ * which is precisely the content a visitor needs and Israeli law expects.
+ *
+ * Numbers are the cheapest facts to verify and the most expensive to lose, so
+ * they get their own gate: any that go missing send the section to the floor
+ * renderer, which emits every ledger item verbatim.
+ */
+export function missingSectionFacts(builtHtml: string, section: RenderableSection): string[] {
+  const wanted = factTokens(section.text ?? "");
+  if (!wanted.size) return [];
+  const got = factTokens(visibleText(builtHtml));
+  return [...wanted].filter((f) => !got.has(f)).sort();
 }
 
 /**

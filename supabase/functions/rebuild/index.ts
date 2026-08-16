@@ -40,6 +40,7 @@ import { buildLedger } from "../_shared/ledger.ts";
 import {
   ensureSectionId,
   fixAnchors,
+  missingSectionFacts,
   renderContentSection,
   renderWidgetSection,
   sectionCoverage,
@@ -752,7 +753,8 @@ Deno.serve(async (req) => {
       // repeated group, or skipped copy), render every item from the ledger
       // instead. The page always ships whole — the guarantee never depends on the
       // model getting it right, and there is no failure branch.
-      if (modelHtml && sectionCoverage(modelHtml, section) >= 0.85) {
+      const lostFacts = modelHtml ? missingSectionFacts(modelHtml, section) : [];
+      if (modelHtml && sectionCoverage(modelHtml, section) >= 0.85 && !lostFacts.length) {
         sectionHtml = modelHtml;
         sectionCss = built.css ?? "";
       } else {
@@ -773,14 +775,24 @@ Deno.serve(async (req) => {
       // Every section built — assemble the final self-contained document.
       const assembled = assemble(spec, shell, merged, scripts, siteUrl);
 
-      // Then audit our own output and repair what code can repair. The builder
-      // is asked in two prompts not to emit emoji or physical CSS properties;
-      // it mostly complies and occasionally does not, and both are high-weight
-      // signals that were still lit after real rebuilds. The repair is verified
-      // by re-running the same detector, so nothing is reported as fixed unless
-      // the second pass agrees. Runs before the preservation guard, so the
-      // guard validates the bytes that actually ship.
-      const check = selfCheck(target, assembled);
+      // The original is read before anything is judged against it: the
+      // self-check needs it to know which ids the page's scripts require, the
+      // dead-asset sweep needs it to know what is orphaned, and the
+      // preservation guard needs it to know what was there. A run that cannot
+      // compare must not pretend it did.
+      const { data: origFile, error: origErr } = await admin.storage
+        .from("scans").download(P.bundle);
+      if (origErr || !origFile) throw new Error("bundle_not_found");
+      const originals = parseBundle(await origFile.text());
+
+      // Audit our own output and repair what code can repair. The builder is
+      // asked in two prompts not to emit emoji or physical CSS properties; it
+      // mostly complies and occasionally does not, and both are high-weight
+      // signals still lit after real rebuilds. It also re-attaches the ids the
+      // carried scripts need but the rebuilt header dropped. Every repair is
+      // verified by a second detector pass, and all of it runs BEFORE the
+      // preservation guard so the guard validates the bytes that actually ship.
+      const check = selfCheck(target, assembled, originals);
       const full = check.html;
       const editedMap = new Map<string, string>([[target, full]]);
 
@@ -794,14 +806,6 @@ Deno.serve(async (req) => {
       // Only assets nothing references are dropped, and only after the whole
       // project is assembled — a stylesheet a page we did NOT rebuild still
       // links stays exactly where it is.
-      //
-      // Reading the original back is required, not best-effort: both the dead
-      // asset sweep and the preservation guard below compare against it, and a
-      // run that cannot compare must not pretend it did.
-      const { data: origFile, error: origErr } = await admin.storage
-        .from("scans").download(P.bundle);
-      if (origErr || !origFile) throw new Error("bundle_not_found");
-      const originals = parseBundle(await origFile.text());
       for (const dead of unreferencedAssets(new Map([...originals, ...editedMap]))) {
         editedMap.set(dead, DELETED_FILE);
       }
@@ -845,6 +849,7 @@ Deno.serve(async (req) => {
         // deterministic re-scan of the shipped page still finds. Stored so the
         // next run is judged against a record rather than a memory.
         self_check: {
+          restored_hooks: check.restoredHooks,
           repaired: check.repaired,
           unrepaired: check.unrepaired,
           still_present: check.stillPresent,

@@ -3,6 +3,7 @@ import {
   logicalCssOutsideWidgets,
   logicalProperties,
   REPAIRABLE,
+  restoreChromeHooks,
   selfCheck,
   stripVisibleEmoji,
 } from "./selfcheck.ts";
@@ -136,4 +137,59 @@ Deno.test("selfCheck: an LTR page is not touched for #64, which does not apply t
     <body><h1>Title</h1></body></html>`;
   const r = selfCheck(PAGE, ltr);
   assertFalse(r.repaired.includes(64), "#64 is not applicable outside RTL");
+});
+
+// ---------- script hooks living in the page's chrome ----------
+//
+// The ledger treats <header> and <nav> as chrome and the shell rebuilds them,
+// which is right for the markup and wrong for the hooks: a real run turned
+// <nav id="nav"> into a plain <nav>, and script.js threw on every scroll.
+
+const ORIGINAL_WITH_NAV = `<!doctype html><html lang="he" dir="rtl"><body>
+  <nav id="nav"><a href="#a">בית</a></nav>
+  <main><h1>כותרת</h1><p>טקסט.</p></main></body></html>`;
+const FILES = new Map([
+  [PAGE, ORIGINAL_WITH_NAV],
+  ["script.js", `const nav = document.getElementById("nav"); nav.classList.toggle("x");`],
+]);
+
+Deno.test("restoreChromeHooks: an id the rebuilt nav dropped is put back", () => {
+  const built = page(`<nav class="site-nav"><a href="#a">בית</a></nav><h1>כותרת</h1>`);
+  const r = restoreChromeHooks(ORIGINAL_WITH_NAV, FILES, built);
+  assertEquals(r.restored, ["#nav"]);
+  assert(/<nav id="nav" class="site-nav">/.test(r.html), r.html);
+});
+
+Deno.test("restoreChromeHooks: nothing to do when the rebuild kept the id", () => {
+  const built = page(`<nav id="nav" class="site-nav">x</nav><h1>כותרת</h1>`);
+  const r = restoreChromeHooks(ORIGINAL_WITH_NAV, FILES, built);
+  assertEquals(r.restored, []);
+  assertEquals(r.html, built);
+});
+
+Deno.test("restoreChromeHooks: ambiguity is left alone rather than guessed", () => {
+  // Two candidate <nav> elements: attaching the hook to the wrong one is worse
+  // than reporting it missing.
+  const built = page(`<nav>a</nav><nav>b</nav><h1>כותרת</h1>`);
+  const r = restoreChromeHooks(ORIGINAL_WITH_NAV, FILES, built);
+  assertEquals(r.restored, []);
+});
+
+Deno.test("restoreChromeHooks: an id that lived on a plain div is not guessed at", () => {
+  const original = `<body><div id="widget">x</div><main><h1>כ</h1></main></body>`;
+  const files = new Map([[PAGE, original], ["s.js", `getElementById("widget")`]]);
+  const r = restoreChromeHooks(original, files, page(`<div class="a">x</div><div class="b">y</div>`));
+  assertEquals(r.restored, []);
+});
+
+Deno.test("selfCheck: restores the hook and reports it", () => {
+  const built = page(`<nav class="site-nav">x</nav><h1>כותרת</h1><p>טקסט.</p>`);
+  const r = selfCheck(PAGE, built, FILES);
+  assertEquals(r.restoredHooks, ["#nav"]);
+  assert(r.html.includes('id="nav"'));
+});
+
+Deno.test("selfCheck: without the original it simply skips hook restoration", () => {
+  const built = page(`<nav class="site-nav">x</nav><h1>כותרת</h1>`);
+  assertEquals(selfCheck(PAGE, built).restoredHooks, []);
 });

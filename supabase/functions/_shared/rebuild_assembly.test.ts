@@ -1,6 +1,7 @@
 import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
 import {
   ensureSectionId,
+  missingSectionFacts,
   fixAnchors,
   renderContentSection,
   renderWidgetSection,
@@ -110,4 +111,37 @@ Deno.test("fixAnchors remaps unknown targets and keeps valid ones", () => {
 Deno.test("ensureSectionId adds the id only when the model omitted it", () => {
   assertStringIncludes(ensureSectionId("<section class='x'>y</section>", "hero"), `id="hero"`);
   assertEquals(ensureSectionId(`<section id="kept">y</section>`, "hero"), `<section id="kept">y</section>`);
+});
+
+Deno.test("missingSectionFacts: a rewrite that drops the address and hours is caught", () => {
+  const section = {
+    id: "contact",
+    text: "רחוב הנגרים 12, יפו העתיקה. א׳-ה׳ 10:00-19:00, ו׳ 09:00-14:00. טלפון 03-700-1987.",
+  };
+  const built = `<section><p>בואו לבקר אותנו בסטודיו ביפו העתיקה. טלפון 03-700-1987.</p></section>`;
+  const missing = missingSectionFacts(built, section);
+  assert(missing.includes("12"), "the street number must be reported missing");
+  assert(missing.includes("19:00") || missing.includes("19"), "the closing hour must be reported missing");
+});
+
+Deno.test("missingSectionFacts: a faithful rewrite reports nothing", () => {
+  const section = { id: "contact", text: "רחוב הנגרים 12. שעות 10:00-19:00." };
+  const built = `<section><p>מצאו אותנו ברחוב הנגרים 12, פתוח 10:00-19:00.</p></section>`;
+  assertEquals(missingSectionFacts(built, section), []);
+});
+
+Deno.test("missingSectionFacts: a section with no numbers cannot fail", () => {
+  assertEquals(missingSectionFacts("<section><p>אחר</p></section>", { id: "a", text: "טקסט בלבד" }), []);
+});
+
+Deno.test("renderContentSection: a section with both copy and cards keeps both", () => {
+  const out = renderContentSection({
+    id: "s",
+    heading: "כותרת",
+    body: "רחוב הנגרים 12, יפו העתיקה.\n\nפתוח 10:00-19:00.",
+    items: [{ title: "כרטיס", text: "טקסט" }],
+  }).html;
+  assertStringIncludes(out, "הנגרים 12");
+  assertStringIncludes(out, "10:00-19:00");
+  assertStringIncludes(out, "כרטיס");
 });

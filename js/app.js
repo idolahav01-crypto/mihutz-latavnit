@@ -1350,7 +1350,14 @@
       reenableFixButtons();
     }).catch(function (e) {
       hideProgress();
-      els["fix-hint"].textContent = P.err + " [rebuild]" + fmtReason(e);
+      /* content_loss is not a malfunction — it is the safety net refusing to
+         hand over a site that came back missing part of itself. Saying "try
+         again" there sends the user in a circle and hides what is wrong, so it
+         gets its own sentence and names exactly what went missing. */
+      var reason = e && e.body && e.body.error;
+      els["fix-hint"].textContent = reason === "content_loss"
+        ? T.errContentLoss + (e.body.detail ? " (" + e.body.detail + ")" : "")
+        : P.err + " [rebuild]" + fmtReason(e);
       reenableFixButtons();
     });
   }
