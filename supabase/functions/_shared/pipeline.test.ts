@@ -11,6 +11,7 @@ import {
   keepPath,
   parseBundle,
   pickHomePage,
+  pickHomePageSmart,
   presentSignals,
   serializeBundle,
   unifiedDiff,
@@ -296,6 +297,68 @@ Deno.test("pickHomePage: order of input does not change the answer", () => {
 
 Deno.test("pickHomePage: a page merely containing 'index' is not an index", () => {
   assertEquals(pickHomePage(["contact.html", "index-of-terms.html"]), "contact.html");
+});
+
+// ---------- pickHomePageSmart (link graph) ----------
+
+// Every page shares a nav that links to the inner pages, and a logo that links
+// home. The home page is called "welcome" — a name heuristic alone would pick
+// "contact" (alphabetical). The link graph must still find welcome.
+const NAV = (logoHref: string) =>
+  `<header><a class="logo" href="${logoHref}">Site</a>` +
+  `<nav><a href="welcome.html">בית</a><a href="about.html">אודות</a>` +
+  `<a href="contact.html">צור קשר</a></nav></header><main>x</main>`;
+
+Deno.test("pickHomePageSmart: finds a non-standard home name via inbound links", () => {
+  const files = new Map([
+    ["welcome.html", NAV("welcome.html")],
+    ["about.html", NAV("welcome.html")],
+    ["contact.html", NAV("welcome.html")],
+  ]);
+  assertEquals(pickHomePageSmart(files), "welcome.html");
+});
+
+Deno.test("pickHomePageSmart: a root index still wins cleanly", () => {
+  const nav = `<a class="logo" href="/">Site</a><a href="/about.html">About</a><a href="/services.html">Services</a>`;
+  const files = new Map([
+    ["index.html", nav],
+    ["about.html", nav],
+    ["services.html", nav],
+  ]);
+  assertEquals(pickHomePageSmart(files), "index.html");
+});
+
+Deno.test("pickHomePageSmart: resolves ../ and /-rooted links across folders", () => {
+  const files = new Map([
+    ["index.html", `<a href="blog/post.html">Post</a>`],
+    ["blog/post.html", `<a class="brand" href="../index.html">Home</a><a href="/index.html">Home2</a>`],
+  ]);
+  assertEquals(pickHomePageSmart(files), "index.html");
+});
+
+Deno.test("pickHomePageSmart: no usable links falls back to the name heuristic", () => {
+  const files = new Map([
+    ["index.html", "<h1>ברוכים הבאים</h1>"],
+    ["about.html", "<h1>אודות</h1>"],
+  ]);
+  assertEquals(pickHomePageSmart(files), "index.html");
+});
+
+Deno.test("pickHomePageSmart: a single page is that page; no html is null", () => {
+  assertEquals(pickHomePageSmart(new Map([["about.html", "x"]])), "about.html");
+  assertEquals(pickHomePageSmart(new Map([["style.css", "x"], ["app.js", "y"]])), null);
+});
+
+Deno.test("pickHomePageSmart: the answer does not depend on file order", () => {
+  const entries: Array<[string, string]> = [
+    ["welcome.html", NAV("welcome.html")],
+    ["about.html", NAV("welcome.html")],
+    ["contact.html", NAV("welcome.html")],
+  ];
+  const a = pickHomePageSmart(new Map(entries));
+  const b = pickHomePageSmart(new Map([...entries].reverse()));
+  assertEquals(a, b);
+  assertEquals(a, "welcome.html");
 });
 
 // ---------- keepPath ----------

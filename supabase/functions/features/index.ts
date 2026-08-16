@@ -16,7 +16,7 @@
 //
 // Body: { scan_id, action, exclude? } — exclude carries already-rejected names.
 
-import { parseBundle, pickHomePage, serializeBundle } from "../_shared/pipeline.ts";
+import { parseBundle, pickHomePageSmart, serializeBundle } from "../_shared/pipeline.ts";
 import { callClaude, cleanApiKey } from "../_shared/anthropic.ts";
 import { adminClient, cors, json, requireUser } from "../_shared/http.ts";
 import { buildEntry, recordStageUsage } from "../_shared/usage.ts";
@@ -165,7 +165,7 @@ Deno.serve(async (req) => {
 
     // Features go into the primary HTML file, built on the redesigned bundle if
     // one exists.
-    const targetPath = pickHomePage(pristine.keys());
+    const targetPath = pickHomePageSmart(pristine);
     if (!targetPath) return json({ error: "no_html_file" }, 409);
 
     let edited = new Map<string, string>();
