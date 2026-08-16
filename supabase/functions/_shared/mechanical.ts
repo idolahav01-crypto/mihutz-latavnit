@@ -376,7 +376,7 @@ function checkOgImage(files: Map<string, string>): Verdict {
 // Pictographs, symbols, transport, dingbats and the enclosed keycaps — the
 // decorative ranges. Text-presentation characters that happen to live nearby
 // (arrows, punctuation) are deliberately not included.
-const EMOJI_RE =
+export const EMOJI_RE =
   /[\u{1F300}-\u{1FAFF}\u{1F000}-\u{1F0FF}\u{2600}-\u{27BF}\u{FE0F}\u{1F1E6}-\u{1F1FF}]/gu;
 
 /** #109 — emoji anywhere the reader can see them. */

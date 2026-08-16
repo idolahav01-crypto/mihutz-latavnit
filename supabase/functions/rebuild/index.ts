@@ -32,6 +32,7 @@ import {
   unreferencedAssets,
 } from "../_shared/pipeline.ts";
 import { checkPreservation, summarize } from "../_shared/preservation.ts";
+import { selfCheck } from "../_shared/selfcheck.ts";
 import { callClaude, cleanApiKey } from "../_shared/anthropic.ts";
 import { adminClient, cors, json, requireUser } from "../_shared/http.ts";
 import { buildEntry, recordStageUsage } from "../_shared/usage.ts";
@@ -770,7 +771,17 @@ Deno.serve(async (req) => {
     const done = part >= parts;
     if (done) {
       // Every section built — assemble the final self-contained document.
-      const full = assemble(spec, shell, merged, scripts, siteUrl);
+      const assembled = assemble(spec, shell, merged, scripts, siteUrl);
+
+      // Then audit our own output and repair what code can repair. The builder
+      // is asked in two prompts not to emit emoji or physical CSS properties;
+      // it mostly complies and occasionally does not, and both are high-weight
+      // signals that were still lit after real rebuilds. The repair is verified
+      // by re-running the same detector, so nothing is reported as fixed unless
+      // the second pass agrees. Runs before the preservation guard, so the
+      // guard validates the bytes that actually ship.
+      const check = selfCheck(target, assembled);
+      const full = check.html;
       const editedMap = new Map<string, string>([[target, full]]);
 
       // The rebuilt page is self-contained: its CSS is inline and the original
@@ -830,6 +841,14 @@ Deno.serve(async (req) => {
 
       await admin.from("scans").update({
         pipeline_status: "applied",
+        // What the self-check repaired, what it could not, and what a
+        // deterministic re-scan of the shipped page still finds. Stored so the
+        // next run is judged against a record rather than a memory.
+        self_check: {
+          repaired: check.repaired,
+          unrepaired: check.unrepaired,
+          still_present: check.stillPresent,
+        },
         // Only a run that reached here is deliverable, so clear whatever a
         // previous failed attempt left behind. Without this a scan can sit as
         // "applied" while still carrying an error from an earlier try, which is
