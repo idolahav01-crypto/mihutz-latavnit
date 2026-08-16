@@ -1229,7 +1229,8 @@
     }
     return labels;
   }
-  function rebuildPass(n) {
+  function rebuildPass(n, attempt) {
+    attempt = attempt || 1;
     /* Step n names itself: the spec pass first, then the shell, then one per
        section using the section's own heading once the spec has told us them. */
     var labels = rbLabels();
@@ -1253,6 +1254,16 @@
       if (rebuildTotal) prog.to(null, (n / rebuildTotal) * 100);
       if (data && data.done) return data;
       return rebuildPass(n + 1);
+    }).catch(function (e) {
+      /* Every finished part is persisted server-side (spec.json, shell.json,
+         rebuild-sections.json is merged by index), so re-running THIS part
+         never repeats earlier work and can't duplicate a section. When a part
+         overruns the function's budget — a load spike, not a dead end — retry
+         the same part a few times to ride it out, then give up so a genuinely
+         stuck part can't loop forever and burn money. */
+      var msg = (e && e.body && e.body.error) || "";
+      if (String(msg).indexOf("stage_timeout") === -1 || attempt >= 4) throw e;
+      return rebuildPass(n, attempt + 1);
     });
   }
 

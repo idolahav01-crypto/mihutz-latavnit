@@ -25,7 +25,7 @@ import {
   DELETED_FILE,
   type DetectedSignal,
   parseBundle,
-  pickHomePage,
+  pickHomePageSmart,
   presentSignals,
   serializeBundle,
   unreferencedAssets,
@@ -33,6 +33,16 @@ import {
 import { callClaude, cleanApiKey } from "../_shared/anthropic.ts";
 import { adminClient, cors, json, requireUser } from "../_shared/http.ts";
 import { buildEntry, recordStageUsage } from "../_shared/usage.ts";
+import { buildLedger } from "../_shared/ledger.ts";
+import {
+  ensureSectionId,
+  fixAnchors,
+  renderContentSection,
+  renderWidgetSection,
+  sectionCoverage,
+  stripSkipLinks,
+  widgetWrapId,
+} from "../_shared/rebuild_assembly.ts";
 
 const MODEL = "claude-opus-4-8";
 
@@ -75,6 +85,32 @@ async function writeJson(admin: ReturnType<typeof adminClient>, path: string, va
   if (up.error) throw new Error(`storage: ${up.error.message}`);
 }
 
+// A compact summary of the ORIGINAL site's look (palette, fonts, design
+// language) drawn from the detect stage's site_profile. It is fed to the
+// designer as "DEPART FROM THIS" — the one thing that stops the rebuild from
+// re-proposing what it just read and coming out looking like the original.
+function originalLookBlock(profile: unknown): string {
+  const p = (profile ?? {}) as {
+    palette?: Array<{ hex?: string; role?: string }>;
+    fonts?: Array<{ family?: string }>;
+    design_language?: string;
+    distinctive_elements?: string[];
+  };
+  const palette = (p.palette ?? [])
+    .map((c) => [c.hex, c.role].filter(Boolean).join(" "))
+    .filter(Boolean)
+    .join(", ");
+  const fonts = (p.fonts ?? []).map((f) => f.family).filter(Boolean).join(", ");
+  const lines: string[] = [];
+  if (palette) lines.push(`palette: ${palette}`);
+  if (fonts) lines.push(`fonts: ${fonts}`);
+  if (p.design_language) lines.push(`design_language: ${p.design_language}`);
+  if (p.distinctive_elements?.length) {
+    lines.push(`distinctive_elements: ${p.distinctive_elements.join("; ")}`);
+  }
+  return lines.join("\n");
+}
+
 // ---- spec / shell / section shapes ----
 interface Section {
   id: string;
@@ -86,6 +122,10 @@ interface Section {
   cta?: { label?: string; href?: string };
   image?: string;
   component_id?: string; // an interactive container this section must contain
+  /** For a component section: the widget container's exact inner HTML to carry. */
+  verbatim_html?: string;
+  /** The section's original visible text — the ground truth the coverage guard counts. */
+  text?: string;
   note?: string;
 }
 interface Spec {
@@ -117,16 +157,20 @@ interface BuiltSection {
 }
 
 // ================= PROMPTS =================
-const SPEC_SYSTEM =
-  `You are a content architect. You are given the source files of ONE website (its <script> blocks shown as <!--__MIHUTZ_SCRIPT_N__--> placeholders). Produce a PRECISE structured content model of what this site actually is and contains. You are NOT designing anything and NOT writing markup — you are inventorying real content so the site can be rebuilt from scratch.
+// The site's CONTENT is inventoried deterministically by _shared/ledger.ts — the
+// model is never asked what the page contains, only how it should look. That is
+// the whole reason content can no longer be summarised away: this pass returns a
+// design_direction and three soft descriptors, nothing load-bearing.
+const DESIGN_SYSTEM =
+  `You are RebuildDesigner's art director. You are shown a website's existing look and a short outline of its content. Propose ONE design_direction that turns it into a genuinely DIFFERENT, hand-built website for the same business, plus three short descriptors of the site. You are NOT writing content and NOT writing markup.
 
-Rules:
-- Extract ONLY content that is genuinely present in the source. NEVER invent, embellish, or add facts, sections, stats, testimonials, or features that are not there.
-- Capture every REAL, concrete fact into "facts": names, numbers, prices, dates, contact details, addresses, guarantees, brand claims. These are the ground truth the rebuild is allowed to use.
-- List the page's real sections IN ORDER. For each: a stable id (slug), a type (hero, about, services, features, testimonials, faq, pricing, gallery, contact, cta, stats, team, etc.), its heading/subheading, its body copy, its items (cards/list rows with title/text/value), and its primary cta {label, href} if any. You MAY improve wording and tone, but never change facts.
-- Identify interactive components (quiz, form, calculator, countdown, carousel, map). For each: name, purpose, the container_id the element uses, and which <!--__MIHUTZ_SCRIPT_N__--> index powers it (script_index). A rebuilt section that hosts a component MUST reference that same container_id so the carried-over script still works.
-- meta: name, purpose (one line), language (BCP-47 like "he" or "en"), audience, tone. dir: "rtl" for Hebrew/Arabic, else "ltr".
-- STRIP ALL EMOJI from every heading, subheading, body, item, and cta label you extract. Emoji are never content — they are an AI decoration. The content model must contain zero emoji so the rebuilt site is emoji-free.
+design_direction — the one creative decision:
+- DEPART from the original. Treat <original_look>'s palette, fonts and design language as exactly what to move AWAY from: choose a palette from a DIFFERENT colour family, a DIFFERENT typographic pairing, and a DIFFERENT layout paradigm. Same BUSINESS, unmistakably different WEBSITE — never a recolour of the old one.
+- AVOID every AI fingerprint in <avoid_ai_patterns>: the direction must not reintroduce a pattern the original was flagged for, nor reach for a different cliché in its place.
+- Look hand-built by a real studio. layout_principle must be SPECIFIC and opinionated (e.g. "editorial split-screen with off-grid imagery over a strong baseline grid"), never generic ("clean and modern"). personality must be concrete adjectives a human designer would say.
+- FORBIDDEN AI tells: default Inter, purple/indigo gradients, the dark-navy+gold cliché, Playfair-as-elegance, centre-everything symmetry, three identical cards as the only rhythm, and any emoji.
+
+meta — three short strings describing the site, for the shell to use: purpose (one line), audience, tone. Do not restate content.
 
 Return ONLY valid JSON matching the schema. No prose.`;
 
@@ -139,7 +183,9 @@ Return:
 - header_html: the site header/nav markup (logo text = site name, real nav links only). Use the token classes.
 - footer_html: a real footer using the site's real facts (name, contact). No invented links.
 
-Look hand-built and premium. FORBIDDEN AI fingerprints: default Inter, purple/indigo gradients, the dark-navy+gold cliché, Playfair-as-elegance, generic "Get Started" copy, perfectly symmetric three-card rows as the only rhythm, and — ABSOLUTELY NO EMOJI anywhere (not in the logo, nav, headings, buttons, or footer). Emoji are the single most obvious AI tell; never emit a single one. Return ONLY valid JSON. No prose.`;
+DEPART from the original. If <original_look> is provided, the tokens_css must NOT reuse its palette or fonts — build the shell in the NEW design_direction, clearly different from the old site.
+
+Look hand-built and premium — like a real studio designed it by hand, not like a generator filled a template. FORBIDDEN AI fingerprints: default Inter, purple/indigo gradients, the dark-navy+gold cliché, Playfair-as-elegance, generic "Get Started" copy, perfectly symmetric three-card rows as the only rhythm, and — ABSOLUTELY NO EMOJI anywhere (not in the logo, nav, headings, buttons, or footer). Emoji are the single most obvious AI tell; never emit a single one. Return ONLY valid JSON. No prose.`;
 
 /**
  * The AI fingerprints this specific site was caught with, each with the audit's
@@ -199,82 +245,14 @@ Hard rules:
 - Use ONLY the content in this section's spec (its heading, body, items, cta, facts). NEVER invent facts, testimonials, stats, logos, or copy that isn't given. If a field is empty, omit that element — do not fill it with placeholder text.
 - Reuse the design tokens and component classes from tokens_css (CSS variables, .container, .btn, spacing). Your section CSS should add only what's specific to this section, scoped under a unique wrapper class derived from the section id (e.g. .sec-<id>) so it can't collide.
 - If the spec gives this section a component_id, include an element with exactly that id (the original interactive script will be re-attached to it). Do not write any <script>.
-- Compose with real design judgement: vary layouts between sections, use asymmetry and editorial rhythm, real whitespace. No AI clichés (see below). RTL if dir is rtl (logical properties, right alignment).
+- Compose with real design judgement, like a human designer laying out this one section by hand: vary the layout from what a generator would do, use asymmetry and editorial rhythm, real whitespace, an intentional focal point. Do NOT default to a centred heading over a symmetric card grid — that is the #1 "this was AI-built" tell. Follow the design_direction's layout_principle. RTL if dir is rtl (logical properties, right alignment).
+- AVOID every AI fingerprint in <avoid_ai_patterns>: do not reintroduce a pattern the original site was flagged for.
 - FORBIDDEN: default Inter, purple/indigo gradients, "Get Started", identical symmetric card rows every time, lorem/placeholder text.
 - ABSOLUTELY NO EMOJI — never put an emoji in a heading, card, badge, list item, button, or anywhere in markup or text. If the source content had emoji (as icons or beside headings), DROP them and replace with a real inline SVG icon, a typographic treatment, or nothing. Emoji are the #1 AI fingerprint. For a stats/achievements block, KEEP the real numbers but present them with editorial variety — never as a symmetric row of identical emoji-topped cards.
 
 Return ONLY valid JSON { "html": "...", "css": "..." } for this one section. No prose.`;
 
 // ================= SCHEMAS =================
-const SPEC_SCHEMA = {
-  type: "object",
-  additionalProperties: false,
-  properties: {
-    meta: {
-      type: "object",
-      additionalProperties: false,
-      properties: {
-        name: { type: "string" },
-        purpose: { type: "string" },
-        language: { type: "string" },
-        audience: { type: "string" },
-        tone: { type: "string" },
-      },
-      required: ["name", "purpose", "language", "audience", "tone"],
-    },
-    dir: { type: "string", enum: ["rtl", "ltr"] },
-    facts: { type: "array", items: { type: "string" } },
-    sections: {
-      type: "array",
-      items: {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          id: { type: "string" },
-          type: { type: "string" },
-          heading: { type: "string" },
-          subheading: { type: "string" },
-          body: { type: "string" },
-          items: {
-            type: "array",
-            items: {
-              type: "object",
-              additionalProperties: false,
-              properties: { title: { type: "string" }, text: { type: "string" }, value: { type: "string" } },
-              required: [],
-            },
-          },
-          cta: {
-            type: "object",
-            additionalProperties: false,
-            properties: { label: { type: "string" }, href: { type: "string" } },
-            required: [],
-          },
-          image: { type: "string" },
-          component_id: { type: "string" },
-          note: { type: "string" },
-        },
-        required: ["id", "type"],
-      },
-    },
-    components: {
-      type: "array",
-      items: {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          name: { type: "string" },
-          purpose: { type: "string" },
-          container_id: { type: "string" },
-          script_index: { type: "number" },
-        },
-        required: ["name", "container_id"],
-      },
-    },
-  },
-  required: ["meta", "dir", "facts", "sections", "components"],
-};
-
 const DIRECTION_SCHEMA = {
   type: "object",
   additionalProperties: false,
@@ -301,11 +279,23 @@ const DIRECTION_SCHEMA = {
   required: ["brand_palette", "typography", "layout_principle", "personality", "rationale"],
 };
 
-const SPEC_PLUS_DIRECTION_SCHEMA = {
+const DESIGN_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  properties: { spec: SPEC_SCHEMA, design_direction: DIRECTION_SCHEMA },
-  required: ["spec", "design_direction"],
+  properties: {
+    design_direction: DIRECTION_SCHEMA,
+    meta: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        purpose: { type: "string" },
+        audience: { type: "string" },
+        tone: { type: "string" },
+      },
+      required: ["purpose", "audience", "tone"],
+    },
+  },
+  required: ["design_direction", "meta"],
 };
 
 const SHELL_SCHEMA = {
@@ -469,6 +459,13 @@ function assemble(spec: Spec, shell: Shell, sections: BuiltSection[], scripts: s
   const sectionHtml = ordered.map((s) => s.html || "").join("\n\n");
   const lang = spec.meta.language || (spec.dir === "rtl" ? "he" : "en");
   const scriptBlock = scripts.length ? "\n" + scripts.join("\n") + "\n" : "";
+
+  // Every real section id, so nav/footer links can only point at sections that
+  // exist. The shell model may also emit its own skip-link — drop it, since the
+  // one below is the page's single, canonical one.
+  const anchorTargets = spec.sections.map((s) => ({ id: s.id, heading: s.heading }));
+  const header = fixAnchors(stripSkipLinks(shell.header_html || ""), anchorTargets);
+  const footer = fixAnchors(shell.footer_html || "", anchorTargets);
   return `<!doctype html>
 <html lang="${lang}" dir="${spec.dir}">
 <head>
@@ -488,11 +485,11 @@ ${sectionCss}
 </head>
 <body>
 <a class="skip-link" href="#main">${spec.dir === "rtl" ? "דלג לתוכן העמוד" : "Skip to content"}</a>
-${shell.header_html}
+${header}
 <main id="main">
 ${sectionHtml}
 </main>
-${shell.footer_html}
+${footer}
 ${scriptBlock}</body>
 </html>
 `;
@@ -548,48 +545,87 @@ Deno.serve(async (req) => {
     // "#78 currency order" on its own tells the builder nothing, so the block
     // carries what the audit saw in this site alongside each signal.
     const avoidBlock = buildAvoidBlock(present);
+    // The ORIGINAL site's look, to push every design stage AWAY from it.
+    const originalLook = originalLookBlock(scan.site_profile);
 
     // ---------- PART 1: content spec + design direction ----------
     if (part === 1) {
       const { data: file, error: dlErr } = await admin.storage.from("scans").download(P.bundle);
       if (dlErr || !file) throw new Error("bundle_not_found");
       const pristine = parseBundle(await file.text());
-      // The one page this run rebuilds. Alphabetical order used to decide it,
-      // which on a multi-page site meant contact.html and never the home page.
-      const target = pickHomePage(pristine.keys());
+      // The one page this run rebuilds. The site's own link graph decides it —
+      // the page every other page's logo and nav point back to — so a home page
+      // that isn't called "index" is still found, not a filename guess.
+      const target = pickHomePageSmart(pristine);
       if (!target) return json({ error: "no_html_file" }, 409);
 
-      // Carry the original scripts byte-for-byte; the model only sees placeholders.
-      const { stripped, scripts } = extractScripts(pristine.get(target) ?? "");
-      // Include the other files' text as extra context (also stripped of scripts).
-      const context = [...pristine.entries()]
-        .filter(([p]) => p !== target)
-        .map(([p, c]) => `=== ${p} ===\n${extractScripts(c).stripped}`)
-        .join("\n\n")
-        .slice(0, 40_000);
+      const rawTarget = pristine.get(target) ?? "";
+      // Carry the original scripts byte-for-byte; the rebuilt page re-attaches them.
+      const { scripts } = extractScripts(rawTarget);
+
+      // CONTENT is inventoried deterministically — every section, every repeated
+      // item, and the verbatim DOM of any widget a script drives. The model is
+      // never asked what the page contains, so content cannot be summarised away.
+      const ledger = buildLedger(rawTarget);
+      if (!ledger.sections.length) throw new Error("empty_ledger");
+
+      // A headings-only outline is all the design pass needs — enough to judge
+      // the site's shape, with none of its copy to be tempted into rewriting.
+      const outline = ledger.sections
+        .map((s, i) => `${i + 1}. [${s.type}] ${s.heading || s.id}`)
+        .join("\n");
 
       const userContent =
         `<site_profile>\n${JSON.stringify(scan.site_profile ?? {}, null, 2)}\n</site_profile>\n\n` +
-        `<primary_page file="${target}">\n${stripped}\n</primary_page>\n\n` +
-        (context ? `<other_files>\n${context}\n</other_files>\n\n` : "") +
-        `Inventory this site into the content model, and propose ONE design_direction for this business.`;
+        (originalLook
+          ? `<original_look note="This is the OLD design that is being REPLACED. Do NOT reuse its colours, fonts, or design language — the design_direction must clearly DEPART from everything here.">\n${originalLook}\n</original_look>\n\n`
+          : "") +
+        (avoidList
+          ? `<avoid_ai_patterns note="AI fingerprints detected on the ORIGINAL site. The new design_direction must avoid every one of these.">\n${avoidList}\n</avoid_ai_patterns>\n\n`
+          : "") +
+        `<content_outline note="What the site contains, for context only. Do NOT restate or rewrite it.">\n${outline}\n</content_outline>\n\n` +
+        `Propose ONE design_direction that makes this a genuinely DIFFERENT, hand-built website for the same business: a different colour family, a different type pairing, and a different layout paradigm from <original_look>. It must not look AI-generated. Also return the three short meta descriptors.`;
 
+      // This pass now emits only a design_direction and three descriptors, so it
+      // is small and fast — no content to stream. medium effort; a 4k ceiling is
+      // ample for the direction JSON.
       const res = await callClaude({
-        apiKey, model: MODEL, effort: "high", maxTokens: 12000, stream: true,
-        system: SPEC_SYSTEM, schema: SPEC_PLUS_DIRECTION_SCHEMA, userContent, timeoutMs: 135_000,
+        apiKey, model: MODEL, effort: "medium", maxTokens: 4000, stream: true,
+        system: DESIGN_SYSTEM, schema: DESIGN_SCHEMA, userContent, timeoutMs: 135_000,
       });
-      await recordStageUsage(admin, scanId, buildEntry("rebuild_spec", MODEL, res.usage, Date.now() - startedAt, "high"));
+      await recordStageUsage(admin, scanId, buildEntry("rebuild_design", MODEL, res.usage, Date.now() - startedAt, "medium"));
 
-      const out = (res.json ?? {}) as { spec?: Spec; design_direction?: Direction };
-      const spec = out.spec;
-      if (!spec || !Array.isArray(spec.sections) || !spec.sections.length) throw new Error("empty_spec");
+      const out = (res.json ?? {}) as {
+        design_direction?: Direction;
+        meta?: { purpose?: string; audience?: string; tone?: string };
+      };
       const direction = out.design_direction ?? (scan.design_direction as Direction | null);
+      const md = out.meta ?? {};
 
-      // The share image has to be a real image off the real page, so it is read
-      // out of the source markup here rather than asked of the model.
-      spec.images = extractImageUrls(pristine.get(target) ?? "");
+      // The spec is the deterministic ledger plus the model's soft descriptors —
+      // name, language, dir, facts, sections and components all come from the page.
+      const spec: Spec = {
+        meta: {
+          name: ledger.meta.name,
+          purpose: md.purpose ?? "",
+          language: ledger.meta.language,
+          audience: md.audience ?? "",
+          tone: md.tone ?? "",
+        },
+        dir: ledger.dir,
+        facts: ledger.facts,
+        sections: ledger.sections as Section[],
+        components: ledger.components.map((c) => ({
+          name: c.name,
+          purpose: "",
+          container_id: c.container_id,
+          script_index: c.script_index,
+        })),
+        // The share image must be a real image off the real page.
+        images: extractImageUrls(rawTarget),
+      };
 
-      await writeJson(admin, P.spec, { spec, design_direction: direction, scripts, target });
+      await writeJson(admin, P.spec, { spec, design_direction: direction, scripts, target, styleText: ledger.styleText });
       // Reset any prior section builds from an earlier run.
       await writeJson(admin, P.sections, []);
 
@@ -611,9 +647,10 @@ Deno.serve(async (req) => {
     }
 
     // For parts > 1 the spec must already exist.
-    const stored = await readJson<{ spec: Spec; design_direction: Direction | null; scripts: string[]; target: string }>(admin, P.spec);
+    const stored = await readJson<{ spec: Spec; design_direction: Direction | null; scripts: string[]; target: string; styleText?: string }>(admin, P.spec);
     if (!stored || !stored.spec) throw new Error("spec_missing_run_part_1");
     const { spec, target, scripts } = stored;
+    const styleText = stored.styleText ?? "";
     const direction = stored.design_direction ?? (scan.design_direction as Direction | null);
     const parts = 2 + spec.sections.length;
     if (part > parts) part = parts;
@@ -624,6 +661,9 @@ Deno.serve(async (req) => {
         `<meta>\n${JSON.stringify(spec.meta, null, 2)}\ndir: ${spec.dir}\n</meta>\n\n` +
         `<design_direction>\n${JSON.stringify(direction ?? {}, null, 2)}\n</design_direction>\n\n` +
         `<facts>\n${(spec.facts ?? []).join("\n")}\n</facts>\n\n` +
+        (originalLook
+          ? `<original_look note="The OLD design being replaced. Do NOT reuse its palette or fonts — depart from it.">\n${originalLook}\n</original_look>\n\n`
+          : "") +
         `<avoid_ai_patterns>\n${avoidList}\n</avoid_ai_patterns>\n\n` +
         `Build the global shell: head_extras, tokens_css, header_html, footer_html.`;
 
@@ -646,49 +686,76 @@ Deno.serve(async (req) => {
     const section = spec.sections[sectionIndex];
     if (!section) return json({ ok: true, scan_id: scanId, part, parts, done: true });
 
-    /* Each section is built in its own request, so without this it cannot see
-       what the others look like — and independently reaching for the same
-       device is exactly how every section ended up with a kicker label, and in
-       another run with the same bento grid. Show it the markup already built so
-       it can deliberately do something else. */
     const built0 = (await readJson<BuiltSection[]>(admin, P.sections)) ?? [];
-    const previous = built0
-      .filter((s) => s.index < sectionIndex)
-      .sort((a, b) => b.index - a.index)
-      .slice(0, 3)
-      .map((s) => `--- section ${s.index + 1} ---\n${clip(s.html, 700)}`)
-      .join("\n\n");
-    const alreadyBuilt = previous
-      ? `<already_built_sections>\n${previous}\n</already_built_sections>\n\n` +
-        `The sections above are already on this page. Give THIS section a visibly ` +
-        `different composition — do not repeat their layout pattern, their heading ` +
-        `treatment, or any small label above the heading.\n\n`
-      : "";
 
-    const userContent =
-      `<design_direction>\n${JSON.stringify(direction ?? {}, null, 2)}\n</design_direction>\n\n` +
-      `<tokens_css>\n${shell.tokens_css}\n</tokens_css>\n\n` +
-      `<dir>${spec.dir}</dir>\n\n` +
-      `<section_spec>\n${JSON.stringify(section, null, 2)}\n</section_spec>\n\n` +
-      alreadyBuilt +
-      `Build ONLY this section (html + css), using only the content above.`;
+    let sectionHtml: string;
+    let sectionCss: string;
 
-    /* Sections produce nearly all of the page's markup and CSS, so they get the
-       same effort the shell already had — this stage was the one doing the most
-       work on the least thinking. */
-    const res = await callClaude({
-      apiKey, model: MODEL, effort: "high", maxTokens: 10000, stream: true,
-      system: SECTION_SYSTEM + avoidBlock, schema: SECTION_BUILD_SCHEMA, userContent, timeoutMs: 135_000,
-    });
-    await recordStageUsage(admin, scanId, buildEntry(`rebuild_section_${sectionIndex + 1}`, MODEL, res.usage, Date.now() - startedAt, "high"));
+    if (section.component_id && section.verbatim_html) {
+      // Interactive section: carried verbatim so the script's DOM survives, its
+      // original styles scoped under a private wrapper. No model call — this path
+      // cannot drift, cannot drop the widget, and cannot orphan its script.
+      const rendered = renderWidgetSection(section, styleText, widgetWrapId(sectionIndex));
+      sectionHtml = rendered.html;
+      sectionCss = rendered.css;
+    } else {
+      /* Each section is built in its own request, so without this it cannot see
+         what the others look like — and independently reaching for the same
+         device is exactly how every section ended up with a kicker label, and in
+         another run with the same bento grid. Show it the markup already built so
+         it can deliberately do something else. */
+      const previous = built0
+        .filter((s) => s.index < sectionIndex)
+        .sort((a, b) => b.index - a.index)
+        .slice(0, 3)
+        .map((s) => `--- section ${s.index + 1} ---\n${clip(s.html, 700)}`)
+        .join("\n\n");
+      const alreadyBuilt = previous
+        ? `<already_built_sections>\n${previous}\n</already_built_sections>\n\n` +
+          `The sections above are already on this page. Give THIS section a visibly ` +
+          `different composition — do not repeat their layout pattern, their heading ` +
+          `treatment, or any small label above the heading.\n\n`
+        : "";
 
-    const built = (res.json ?? {}) as { html?: string; css?: string };
-    if (!built.html) throw new Error(`empty_section_${sectionIndex + 1}`);
+      const userContent =
+        `<design_direction>\n${JSON.stringify(direction ?? {}, null, 2)}\n</design_direction>\n\n` +
+        `<tokens_css>\n${shell.tokens_css}\n</tokens_css>\n\n` +
+        `<dir>${spec.dir}</dir>\n\n` +
+        (avoidList ? `<avoid_ai_patterns>\n${avoidList}\n</avoid_ai_patterns>\n\n` : "") +
+        `<section_spec>\n${JSON.stringify(section, null, 2)}\n</section_spec>\n\n` +
+        alreadyBuilt +
+        `Build ONLY this section (html + css) and include EVERY item in section_spec.items — all of them, not a sample. Lay it out like a human designer would — not the symmetric, centred default a generator produces.`;
+
+      /* Sections produce nearly all of the page's markup and CSS, so they get the
+         same effort the shell already had — this stage was the one doing the most
+         work on the least thinking. */
+      const res = await callClaude({
+        apiKey, model: MODEL, effort: "high", maxTokens: 10000, stream: true,
+        system: SECTION_SYSTEM + avoidBlock, schema: SECTION_BUILD_SCHEMA, userContent, timeoutMs: 135_000,
+      });
+      await recordStageUsage(admin, scanId, buildEntry(`rebuild_section_${sectionIndex + 1}`, MODEL, res.usage, Date.now() - startedAt, "high"));
+
+      const built = (res.json ?? {}) as { html?: string; css?: string };
+      const modelHtml = built.html ? ensureSectionId(built.html, section.id) : "";
+
+      // Completeness floor: if the model dropped content (kept a sample of a
+      // repeated group, or skipped copy), render every item from the ledger
+      // instead. The page always ships whole — the guarantee never depends on the
+      // model getting it right, and there is no failure branch.
+      if (modelHtml && sectionCoverage(modelHtml, section) >= 0.85) {
+        sectionHtml = modelHtml;
+        sectionCss = built.css ?? "";
+      } else {
+        const floor = renderContentSection(section);
+        sectionHtml = floor.html;
+        sectionCss = built.css ? `${built.css}\n${floor.css}` : floor.css;
+      }
+    }
 
     // Accumulate this section (merge-upload, keyed by index). Parts run strictly
     // one at a time per scan, so the copy read before the call is still current.
     const merged = built0.filter((s) => s.index !== sectionIndex);
-    merged.push({ index: sectionIndex, html: built.html, css: built.css ?? "" });
+    merged.push({ index: sectionIndex, html: sectionHtml, css: sectionCss });
     await writeJson(admin, P.sections, merged);
 
     const done = part >= parts;
