@@ -69,7 +69,8 @@
     searchCount: function (n, total) { return n + " מתוך " + total; },
     noApiKey: "מנוע האבחון לא מוגדר — חסר ANTHROPIC_API_KEY ב-Supabase (Edge Functions → Secrets).",
     badApiKey: "מפתח ה-ANTHROPIC_API_KEY לא תקין — כנראה נדבקו איתו רווח או ירידת שורה. הגדירו אותו מחדש.",
-    errTimeout: "האבחון ארך יותר מ-150 שניות ונקטע. נסו ריפו קטן יותר, או פנו אלינו."
+    errTimeout: "האבחון ארך יותר מ-150 שניות ונקטע. נסו ריפו קטן יותר, או פנו אלינו.",
+    errContentLoss: "עצרנו את הבנייה: התוצאה יצאה חסרה לעומת האתר המקורי, ולא נמסור אתר שאיבד תוכן. זה לא משהו שעשיתם — זו בדיקת בטיחות אצלנו."
   } : {
     hi: "Hi, ",
     signout: "Sign out",
@@ -118,7 +119,8 @@
     searchCount: function (n, total) { return n + " of " + total; },
     noApiKey: "Diagnosis engine not configured — ANTHROPIC_API_KEY is missing in Supabase (Edge Functions → Secrets).",
     badApiKey: "ANTHROPIC_API_KEY is invalid — a space or newline was probably pasted with it. Set it again.",
-    errTimeout: "Diagnosis ran past 150 seconds and was cut off. Try a smaller repo, or contact us."
+    errTimeout: "Diagnosis ran past 150 seconds and was cut off. Try a smaller repo, or contact us.",
+    errContentLoss: "We stopped the rebuild: the result came back missing content the original had, and we will not hand over a site that lost part of itself. This is our safety check, not something you did."
   };
 
   /* ===== file filtering =====
@@ -1674,6 +1676,11 @@
     else if (reason === "no_scannable_files") msg = T.errNoFiles;
     else if (reason === "github_not_connected") msg = T.ghNotConnected;
     else if (reason === "github_token_expired") msg = T.ghExpired;
+    else if (reason === "content_loss") {
+      /* The one failure the user must be able to act on: name the missing
+         things, not just the category. body.detail already reads as a sentence. */
+      msg = T.errContentLoss + (body && body.detail ? " (" + body.detail + ")" : "");
+    }
     else if (reason === "missing_anthropic_api_key") msg = T.noApiKey;
     else if (reason === "invalid_anthropic_api_key_characters") msg = T.badApiKey;
     else if (e && (e.status === 546 || e.status === 504)) msg = T.errTimeout;

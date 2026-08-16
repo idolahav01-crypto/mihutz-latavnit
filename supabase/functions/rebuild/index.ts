@@ -24,12 +24,14 @@
 import {
   DELETED_FILE,
   type DetectedSignal,
+  assembleFinalFiles,
   parseBundle,
   pickHomePage,
   presentSignals,
   serializeBundle,
   unreferencedAssets,
 } from "../_shared/pipeline.ts";
+import { checkPreservation, summarize } from "../_shared/preservation.ts";
 import { callClaude, cleanApiKey } from "../_shared/anthropic.ts";
 import { adminClient, cors, json, requireUser } from "../_shared/http.ts";
 import { buildEntry, recordStageUsage } from "../_shared/usage.ts";
@@ -707,12 +709,16 @@ Deno.serve(async (req) => {
       // Only assets nothing references are dropped, and only after the whole
       // project is assembled — a stylesheet a page we did NOT rebuild still
       // links stays exactly where it is.
-      const { data: origFile } = await admin.storage.from("scans").download(P.bundle);
-      if (origFile) {
-        const originals = parseBundle(await origFile.text());
-        for (const dead of unreferencedAssets(new Map([...originals, ...editedMap]))) {
-          editedMap.set(dead, DELETED_FILE);
-        }
+      //
+      // Reading the original back is required, not best-effort: both the dead
+      // asset sweep and the preservation guard below compare against it, and a
+      // run that cannot compare must not pretend it did.
+      const { data: origFile, error: origErr } = await admin.storage
+        .from("scans").download(P.bundle);
+      if (origErr || !origFile) throw new Error("bundle_not_found");
+      const originals = parseBundle(await origFile.text());
+      for (const dead of unreferencedAssets(new Map([...originals, ...editedMap]))) {
+        editedMap.set(dead, DELETED_FILE);
       }
       const up = await admin.storage.from("scans").upload(
         P.edited,
@@ -720,6 +726,33 @@ Deno.serve(async (req) => {
         { upsert: true, contentType: "text/plain" },
       );
       if (up.error) throw new Error(`storage: ${up.error.message}`);
+
+      // The safety net. The score cannot tell cleaning apart from deleting —
+      // signals live inside content, so a page that loses half its body loses
+      // half its signals and reports a large improvement. One real run shipped
+      // with 94% of the site gone and scored 47 -> 33 for it.
+      //
+      // The bundle above is uploaded first and on purpose: a run that fails
+      // here still cost real money, and the artefact has to be inspectable.
+      // What the failure withholds is DELIVERY — the scan never reaches
+      // "applied", so the dashboard offers no download and no pull request.
+      const guard = checkPreservation({
+        original: originals,
+        rebuilt: assembleFinalFiles(originals, editedMap),
+        page: target,
+      });
+      if (!guard.ok) {
+        await admin.from("scans").update({
+          pipeline_status: "content_loss",
+          error: `preservation: ${summarize(guard)}`,
+        }).eq("id", scanId);
+        return json({
+          error: "content_loss",
+          detail: summarize(guard),
+          failures: guard.failures,
+          stats: guard.stats,
+        }, 409);
+      }
 
       await admin.from("scans").update({
         pipeline_status: "applied",
