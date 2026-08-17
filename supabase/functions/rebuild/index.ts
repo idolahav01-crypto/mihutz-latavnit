@@ -33,6 +33,7 @@ import {
 } from "../_shared/pipeline.ts";
 import { checkPreservation, summarize } from "../_shared/preservation.ts";
 import { selfCheck } from "../_shared/selfcheck.ts";
+import { checkRichness, collectCss, richnessTargets } from "../_shared/richness.ts";
 import { callClaude, cleanApiKey } from "../_shared/anthropic.ts";
 import { adminClient, cors, json, requireUser } from "../_shared/http.ts";
 import { buildEntry, recordStageUsage } from "../_shared/usage.ts";
@@ -636,7 +637,18 @@ Deno.serve(async (req) => {
         images: extractImageUrls(rawTarget),
       };
 
-      await writeJson(admin, P.spec, { spec, design_direction: direction, scripts, target, styleText: ledger.styleText });
+      // The design brief, derived from the site being replaced rather than
+      // invented. Stored with the spec so the shell pass can state a floor in the
+      // same request that lists the prohibitions.
+      const depthBrief = richnessTargets(collectCss(pristine, target));
+      await writeJson(admin, P.spec, {
+        spec,
+        design_direction: direction,
+        scripts,
+        target,
+        styleText: ledger.styleText,
+        depth_target: depthBrief,
+      });
       // Reset any prior section builds from an earlier run.
       await writeJson(admin, P.sections, []);
 
@@ -658,10 +670,18 @@ Deno.serve(async (req) => {
     }
 
     // For parts > 1 the spec must already exist.
-    const stored = await readJson<{ spec: Spec; design_direction: Direction | null; scripts: string[]; target: string; styleText?: string }>(admin, P.spec);
+    const stored = await readJson<{
+      spec: Spec;
+      design_direction: Direction | null;
+      scripts: string[];
+      target: string;
+      styleText?: string;
+      depth_target?: string;
+    }>(admin, P.spec);
     if (!stored || !stored.spec) throw new Error("spec_missing_run_part_1");
     const { spec, target, scripts } = stored;
     const styleText = stored.styleText ?? "";
+    const depthTarget = stored.depth_target ?? "";
     const direction = stored.design_direction ?? (scan.design_direction as Direction | null);
     const parts = 2 + spec.sections.length;
     if (part > parts) part = parts;
@@ -676,6 +696,11 @@ Deno.serve(async (req) => {
           ? `<original_look note="The OLD design being replaced. Do NOT reuse its palette or fonts — depart from it.">\n${originalLook}\n</original_look>\n\n`
           : "") +
         `<avoid_ai_patterns>\n${avoidList}\n</avoid_ai_patterns>\n\n` +
+        // The prohibitions above are only half an instruction. Without a floor
+        // the builder satisfies all 45 of them by removing every device it has,
+        // which is how one run came back at 58% of the original's design depth
+        // and scored better for it.
+        (depthTarget ? `${depthTarget}\n\n` : "") +
         `Build the global shell: head_extras, tokens_css, header_html, footer_html.`;
 
       const res = await callClaude({
@@ -825,9 +850,24 @@ Deno.serve(async (req) => {
       // here still cost real money, and the artefact has to be inspectable.
       // What the failure withholds is DELIVERY — the scan never reaches
       // "applied", so the dashboard offers no download and no pull request.
+      const shipped = assembleFinalFiles(originals, editedMap);
+
+      // Second floor, same idea as the first. The audit only measures what is
+      // WRONG, so stripping a site's design language scores as a triumph: one
+      // run cleared 30 signals, scored 50 -> 19, and came back with 47 colours
+      // reduced to 12, every gradient and shadow gone, and six font weights
+      // down to three. Nothing was broken and nothing was lost — the builder
+      // obeyed 45 prohibitions and had nothing left to design with.
+      //
+      // Parity with the original is the bar, by product decision. The check is
+      // on design DEPTH as a total across substitutable categories, never on
+      // specific devices: requiring the gradients back would reintroduce the
+      // very signals we are paid to remove.
+      const depth = checkRichness(originals, shipped, target);
+
       const guard = checkPreservation({
         original: originals,
-        rebuilt: assembleFinalFiles(originals, editedMap),
+        rebuilt: shipped,
         page: target,
       });
       if (!guard.ok) {
@@ -843,12 +883,26 @@ Deno.serve(async (req) => {
         }, 409);
       }
 
+      if (!depth.ok) {
+        await admin.from("scans").update({
+          pipeline_status: "design_thin",
+          error: `richness: ${depth.detail}`,
+        }).eq("id", scanId);
+        return json({
+          error: "design_thin",
+          detail: depth.detail,
+          ratio: depth.ratio,
+          thinnest: depth.thinnest,
+        }, 409);
+      }
+
       await admin.from("scans").update({
         pipeline_status: "applied",
         // What the self-check repaired, what it could not, and what a
         // deterministic re-scan of the shipped page still finds. Stored so the
         // next run is judged against a record rather than a memory.
         self_check: {
+          design_depth: { ratio: depth.ratio, before: depth.before.total, after: depth.after.total },
           restored_hooks: check.restoredHooks,
           repaired: check.repaired,
           unrepaired: check.unrepaired,

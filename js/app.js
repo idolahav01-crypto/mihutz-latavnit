@@ -80,7 +80,8 @@
       analytics_account: "חשבון מדידה — Google Tag Manager או Analytics",
       more_content: "תוכן נוסף — עמודים פנימיים או תרגום"
     },
-    errContentLoss: "עצרנו את הבנייה: התוצאה יצאה חסרה לעומת האתר המקורי, ולא נמסור אתר שאיבד תוכן. זה לא משהו שעשיתם — זו בדיקת בטיחות אצלנו."
+    errContentLoss: "עצרנו את הבנייה: התוצאה יצאה חסרה לעומת האתר המקורי, ולא נמסור אתר שאיבד תוכן. זה לא משהו שעשיתם — זו בדיקת בטיחות אצלנו.",
+    errDesignThin: "עצרנו את הבנייה: האתר יצא נקי מדי — הוסרו כל הסימנים, אבל גם רוב העיצוב. לא נמסור אתר חיוור מהמקורי. הריצו שוב, הבנאי מקבל עכשיו יעד עיצובי מפורש."
   } : {
     hi: "Hi, ",
     signout: "Sign out",
@@ -140,7 +141,8 @@
       analytics_account: "An analytics account — Google Tag Manager or Analytics",
       more_content: "More content — inner pages or a translation"
     },
-    errContentLoss: "We stopped the rebuild: the result came back missing content the original had, and we will not hand over a site that lost part of itself. This is our safety check, not something you did."
+    errContentLoss: "We stopped the rebuild: the result came back missing content the original had, and we will not hand over a site that lost part of itself. This is our safety check, not something you did.",
+    errDesignThin: "We stopped the rebuild: the result came back clean but drained — the AI tells are gone and so is most of the design. We will not hand over a site paler than the original. Run it again; the builder now gets an explicit design floor."
   };
 
   /* ===== file filtering =====
@@ -1355,9 +1357,12 @@
          again" there sends the user in a circle and hides what is wrong, so it
          gets its own sentence and names exactly what went missing. */
       var reason = e && e.body && e.body.error;
-      els["fix-hint"].textContent = reason === "content_loss"
-        ? T.errContentLoss + (e.body.detail ? " (" + e.body.detail + ")" : "")
-        : P.err + " [rebuild]" + fmtReason(e);
+      var detail = e && e.body && e.body.detail ? " (" + e.body.detail + ")" : "";
+      var msg;
+      if (reason === "content_loss") msg = T.errContentLoss + detail;
+      else if (reason === "design_thin") msg = T.errDesignThin + detail;
+      else msg = P.err + " [rebuild]" + fmtReason(e);
+      els["fix-hint"].textContent = msg;
       reenableFixButtons();
     });
   }
@@ -1761,6 +1766,9 @@
     else if (reason === "no_scannable_files") msg = T.errNoFiles;
     else if (reason === "github_not_connected") msg = T.ghNotConnected;
     else if (reason === "github_token_expired") msg = T.ghExpired;
+    else if (reason === "design_thin") {
+      msg = T.errDesignThin + (body && body.detail ? " (" + body.detail + ")" : "");
+    }
     else if (reason === "content_loss") {
       /* The one failure the user must be able to act on: name the missing
          things, not just the category. body.detail already reads as a sentence. */
