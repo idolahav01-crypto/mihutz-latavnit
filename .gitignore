@@ -1,2 +1,5 @@
 .vercel
 .claude/settings.local.json
+
+# Supabase CLI scratch — version stamps and link state, not project source.
+supabase/.temp/
