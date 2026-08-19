@@ -140,11 +140,15 @@ Deno.test("checkRichness: parity is the configured bar", () => {
 
 Deno.test("richnessTargets: states counts, never devices to add", () => {
   const brief = richnessTargets(RICH_CSS);
-  assertStringIncludes(brief, "distinct colours");
+  assertStringIncludes(brief, "solid colours");
+  assertStringIncludes(brief, "named tokens");
   assertStringIncludes(brief, "font weights");
   assertStringIncludes(brief, "Depth score to beat");
-  // It must not tell the builder to emit the very things the audit penalises.
+  // It must not tell the builder to emit the very things the audit penalises,
+  // and it must not invite padding the palette with cheap transparent blacks —
+  // the habit that made an untokenised stylesheet outscore a designed one.
   assertFalse(/add a gradient|use a glow|drop shadow on every/i.test(brief));
+  assertStringIncludes(brief, "do NOT pad with ad-hoc transparent blacks");
 });
 
 Deno.test("richnessBrief: silent on success, category-shaped on failure", () => {

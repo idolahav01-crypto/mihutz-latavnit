@@ -43,10 +43,43 @@ export function collectCss(files: Map<string, string>, page: string): string {
   return parts.join("\n");
 }
 
-function distinctColours(css: string): number {
+/**
+ * Distinct colour literals, split by whether they carry transparency.
+ *
+ * The split matters because the two say different things. A set of solid values
+ * is a palette. A pile of rgba(0,0,0,.06) variants is a habit — cheap to emit,
+ * endless in supply, and the reason an untokenised stylesheet can look richer
+ * than a designed one when you only count.
+ */
+function distinctColours(css: string, kind: "all" | "solid" | "alpha" = "all"): number {
+  const solid = new Set<string>();
+  const alpha = new Set<string>();
+  for (const m of css.matchAll(/#[0-9a-fA-F]{3,8}\b/g)) {
+    const v = m[0].toLowerCase();
+    // 4- and 8-digit hex carry an alpha channel.
+    (v.length === 5 || v.length === 9 ? alpha : solid).add(v);
+  }
+  for (const m of css.matchAll(/(?:rgb|hsl)a?\([^)]*\)/gi)) {
+    const v = m[0].replace(/\s+/g, "").toLowerCase();
+    (/^(rgba|hsla)\(/.test(v) || /[,/]\s*0?\.\d/.test(v) ? alpha : solid).add(v);
+  }
+  if (kind === "solid") return solid.size;
+  if (kind === "alpha") return alpha.size;
+  return solid.size + alpha.size;
+}
+
+/**
+ * Custom properties whose value is a colour — the palette someone sat down and
+ * named, as opposed to the colours that ended up in the file.
+ */
+function colourTokens(css: string): number {
   const set = new Set<string>();
-  for (const m of css.matchAll(/#[0-9a-fA-F]{3,8}\b/g)) set.add(m[0].toLowerCase());
-  for (const m of css.matchAll(/(?:rgb|hsl)a?\([^)]*\)/gi)) set.add(m[0].replace(/\s+/g, "").toLowerCase());
+  for (const m of css.matchAll(/--([\w-]+)\s*:\s*([^;}]+)/g)) {
+    const value = m[2].trim().toLowerCase();
+    if (/^(#[0-9a-f]{3,8}|(?:rgb|hsl)a?\(|color-mix\(|oklch\(|lch\()/.test(value)) {
+      set.add(`${m[1]}:${value}`);
+    }
+  }
   return set.size;
 }
 
@@ -93,7 +126,8 @@ export interface RichnessBreakdown {
  * with rules and edges and never emit the uniform soft shadow of signal #16.
  */
 const CAP = {
-  colours: 48,
+  colours: 32,
+  tokens: 20,
   fontSizes: 32,
   motion: 40,
   depth: 28,
@@ -106,7 +140,18 @@ export function scoreRichness(css: string): RichnessBreakdown {
   const n = (re: RegExp) => count(css, re);
   const cap = (v: number, c: number) => Math.min(v, c);
 
-  const palette = cap(distinctColours(css), CAP.colours) + cap(d("opacity"), 8);
+  // Palette is structure, not literal count. Counting every colour literal
+  // rewarded the untokenised original — 47 literals, of which 22 were ad-hoc
+  // rgba blacks scattered through the file, held together by 10 variables —
+  // over a rebuild that defined 48 real tokens and needed only 28 literals.
+  // That is backwards, and it fought signal #17, which exists to penalise
+  // exactly the sprinkled-hex approach. So alpha variants are capped low
+  // (they are cheap to produce and say little), and declared colour tokens
+  // count for the deliberate palette they represent.
+  const solid = distinctColours(css, "solid");
+  const alpha = distinctColours(css, "alpha");
+  const palette = cap(solid, CAP.colours) + cap(alpha, 6) +
+    cap(colourTokens(css), CAP.tokens) + cap(d("opacity"), 6);
 
   const type = d("font-weight") * 3 + d("font-family") * 3 +
     cap(d("font-size"), CAP.fontSizes);
@@ -279,7 +324,7 @@ removing design: a page with one accent colour, three font weights and no
 layering passes every check we run and still looks dead.
 
 What the ORIGINAL site spends, and what yours has to match or beat:
-- ${distinctColours(css)} distinct colours (it does not have to be the same hues — it has to be as considered a palette; tints and shades of one brand colour count)
+- a palette of at least ${Math.max(distinctColours(css, "solid"), 12)} solid colours, declared as named tokens (tints and shades of one brand colour count, and a proper token set scores higher than scattered literals — do NOT pad with ad-hoc transparent blacks)
 - ${d("font-weight")} font weights and ${d("font-size")} distinct sizes, with the largest heading at least 2.5x the body
 - ${d("box-shadow") + distinctGradients(css) + d("border")} separate surface-separation decisions (borders, rules, edges, shadows — your choice which)
 - ${d("transition") + d("transform")} distinct motion/interaction decisions, with hover, focus-visible and active each reading differently
