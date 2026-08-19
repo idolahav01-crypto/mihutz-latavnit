@@ -80,8 +80,9 @@
       analytics_account: "חשבון מדידה — Google Tag Manager או Analytics",
       more_content: "תוכן נוסף — עמודים פנימיים או תרגום"
     },
-    errContentLoss: "עצרנו את הבנייה: התוצאה יצאה חסרה לעומת האתר המקורי, ולא נמסור אתר שאיבד תוכן. זה לא משהו שעשיתם — זו בדיקת בטיחות אצלנו.",
-    errDesignThin: "עצרנו את הבנייה: האתר יצא נקי מדי — הוסרו כל הסימנים, אבל גם רוב העיצוב. לא נמסור אתר חיוור מהמקורי. הריצו שוב, הבנאי מקבל עכשיו יעד עיצובי מפורש."
+    warnContentLoss: "שימו לב: התוצאה יצאה חסרה לעומת האתר המקורי. האתר מוכן להורדה, אבל כדאי לבדוק לפני שמעלים אותו.",
+    warnDesignThin: "שימו לב: האתר יצא נקי אבל חיוור מהמקורי — הוסרו הסימנים, ואיתם חלק מהעיצוב. אפשר להוריד כמו שהוא, או לבנות שוב ולקבל תוצאה עשירה יותר.",
+    warnHeading: "מה מצאנו בתוצאה"
   } : {
     hi: "Hi, ",
     signout: "Sign out",
@@ -141,8 +142,9 @@
       analytics_account: "An analytics account — Google Tag Manager or Analytics",
       more_content: "More content — inner pages or a translation"
     },
-    errContentLoss: "We stopped the rebuild: the result came back missing content the original had, and we will not hand over a site that lost part of itself. This is our safety check, not something you did.",
-    errDesignThin: "We stopped the rebuild: the result came back clean but drained — the AI tells are gone and so is most of the design. We will not hand over a site paler than the original. Run it again; the builder now gets an explicit design floor."
+    warnContentLoss: "Heads up: the result came back missing content the original had. The site is ready to download, but check it before you publish.",
+    warnDesignThin: "Heads up: the site came back clean but paler than the original — the AI tells are gone, and some of the design went with them. Download it as is, or build again for a richer result.",
+    warnHeading: "What we found in the result"
   };
 
   /* ===== file filtering =====
@@ -218,6 +220,7 @@
      "history", "history-list", "history-all", "history-empty",
      "history-dialog", "history-all-list",
      "fix-pipeline", "rebuild-site", "propose-fixes", "fix-hint", "design-direction",
+     "build-warnings",
      "proposals", "fix-actions", "apply-fixes", "apply-result", "qa-result",
      "deliver-actions", "download-zip", "push-github", "deliver-result",
      "add-features", "features-result", "rb-progress", "score-delta",
@@ -1344,6 +1347,7 @@
     rebuildPass(1).then(function (data) {
       prog.done();
       renderDesign(data && data.design_direction);
+      renderBuildWarnings(data && data.warnings);
       showDeliver(); /* the rebuilt bundle is saved — offer download / PR */
       return runAfterScan(); /* measure the honest before/after AI score */
     }).then(function () {
@@ -1352,17 +1356,7 @@
       reenableFixButtons();
     }).catch(function (e) {
       hideProgress();
-      /* content_loss is not a malfunction — it is the safety net refusing to
-         hand over a site that came back missing part of itself. Saying "try
-         again" there sends the user in a circle and hides what is wrong, so it
-         gets its own sentence and names exactly what went missing. */
-      var reason = e && e.body && e.body.error;
-      var detail = e && e.body && e.body.detail ? " (" + e.body.detail + ")" : "";
-      var msg;
-      if (reason === "content_loss") msg = T.errContentLoss + detail;
-      else if (reason === "design_thin") msg = T.errDesignThin + detail;
-      else msg = P.err + " [rebuild]" + fmtReason(e);
-      els["fix-hint"].textContent = msg;
+      els["fix-hint"].textContent = P.err + " [rebuild]" + fmtReason(e);
       reenableFixButtons();
     });
   }
@@ -1538,6 +1532,29 @@
   /* ===== stage 6: hand the result back to the user ===== */
   function showDeliver() {
     if (els["deliver-actions"]) els["deliver-actions"].hidden = false;
+  }
+
+  /* Findings from the two floors, shown NEXT TO the download rather than instead
+     of it. They used to withhold the build. That confiscated work the user had
+     already paid for on the strength of a check that can be wrong — the design
+     floor blocked a page whose content was whole and whose palette was better
+     organised than the original's — so now they report and the user decides.
+     Loud, specific, and never silent: a lossy run passing unnoticed is the
+     failure that started all of this. */
+  function renderBuildWarnings(warnings) {
+    var el = els["build-warnings"];
+    if (!el) return;
+    if (!warnings || !warnings.length) { el.hidden = true; el.innerHTML = ""; return; }
+    var text = { content_loss: T.warnContentLoss, design_thin: T.warnDesignThin };
+    el.hidden = false;
+    el.innerHTML =
+      '<h3 class="build-warnings-title">' + esc(T.warnHeading) + "</h3>" +
+      '<ul class="build-warnings-list">' +
+        warnings.map(function (w) {
+          return "<li><span>" + esc(text[w.kind] || w.kind) + "</span>" +
+            '<span class="build-warnings-detail" dir="ltr">' + esc(w.detail || "") + "</span></li>";
+        }).join("") +
+      "</ul>";
   }
 
   function deliverSay(msg, cls) {
@@ -1766,14 +1783,6 @@
     else if (reason === "no_scannable_files") msg = T.errNoFiles;
     else if (reason === "github_not_connected") msg = T.ghNotConnected;
     else if (reason === "github_token_expired") msg = T.ghExpired;
-    else if (reason === "design_thin") {
-      msg = T.errDesignThin + (body && body.detail ? " (" + body.detail + ")" : "");
-    }
-    else if (reason === "content_loss") {
-      /* The one failure the user must be able to act on: name the missing
-         things, not just the category. body.detail already reads as a sentence. */
-      msg = T.errContentLoss + (body && body.detail ? " (" + body.detail + ")" : "");
-    }
     else if (reason === "missing_anthropic_api_key") msg = T.noApiKey;
     else if (reason === "invalid_anthropic_api_key_characters") msg = T.badApiKey;
     else if (e && (e.status === 546 || e.status === 504)) msg = T.errTimeout;

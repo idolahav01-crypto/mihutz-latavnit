@@ -796,6 +796,9 @@ Deno.serve(async (req) => {
     await writeJson(admin, P.sections, merged);
 
     const done = part >= parts;
+    // Findings from the final part, returned with the deliverable so the
+    // dashboard can show them next to the download rather than instead of it.
+    let deliveryWarnings: Array<{ kind: string; detail: string; items: unknown }> = [];
     if (done) {
       // Every section built — assemble the final self-contained document.
       const assembled = assemble(spec, shell, merged, scripts, siteUrl);
@@ -870,38 +873,38 @@ Deno.serve(async (req) => {
         rebuilt: shipped,
         page: target,
       });
-      if (!guard.ok) {
-        await admin.from("scans").update({
-          pipeline_status: "content_loss",
-          error: `preservation: ${summarize(guard)}`,
-        }).eq("id", scanId);
-        return json({
-          error: "content_loss",
-          detail: summarize(guard),
-          failures: guard.failures,
-          stats: guard.stats,
-        }, 409);
-      }
-
-      if (!depth.ok) {
-        await admin.from("scans").update({
-          pipeline_status: "design_thin",
-          error: `richness: ${depth.detail}`,
-        }).eq("id", scanId);
-        return json({
-          error: "design_thin",
-          detail: depth.detail,
-          ratio: depth.ratio,
-          thinnest: depth.thinnest,
-        }, 409);
-      }
+      // Both checks REPORT. Neither refuses.
+      //
+      // They used to withhold the build, and the reasoning was that a result we
+      // know is damaged should not be handed over. What that missed is who pays
+      // for the certainty. A refusal confiscates work the user already bought,
+      // so it is only defensible when the finding is beyond doubt — and the
+      // design floor is a proxy for "does this look good", which it cannot be
+      // certain about. It proved that by blocking a build whose content was
+      // whole, whose scripts ran clean, and whose palette was better organised
+      // than the original's; the fault was in the measure, not the page.
+      //
+      // So the findings travel with the deliverable instead of replacing it.
+      // Nothing is hidden — the original failure was a lossy run passing
+      // SILENTLY — and nothing is seized. The user reads what we found and
+      // decides whether to ship it or build again.
+      const warnings: Array<{ kind: string; detail: string; items: unknown }> = [
+        ...(guard.ok ? [] : [{ kind: "content_loss", detail: summarize(guard), items: guard.failures }]),
+        ...(depth.ok ? [] : [{ kind: "design_thin", detail: depth.detail, items: depth.thinnest }]),
+      ];
+      deliveryWarnings = warnings;
 
       await admin.from("scans").update({
         pipeline_status: "applied",
         // What the self-check repaired, what it could not, and what a
         // deterministic re-scan of the shipped page still finds. Stored so the
         // next run is judged against a record rather than a memory.
+        // Recorded whether or not they passed, so a run's weaknesses are on the
+        // record next to its result rather than only in a message that scrolled
+        // away.
         self_check: {
+          warnings,
+          content_ok: guard.ok,
           design_depth: { ratio: depth.ratio, before: depth.before.total, after: depth.after.total },
           restored_hooks: check.restoredHooks,
           repaired: check.repaired,
@@ -923,6 +926,7 @@ Deno.serve(async (req) => {
       ok: true, scan_id: scanId, part, parts, done,
       phase: "section", section: { id: section.id, type: section.type, heading: section.heading },
       design_direction: direction,
+      warnings: deliveryWarnings,
     });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);

@@ -781,3 +781,38 @@ code, .mono { font-family: var(--font-mono); }
   font-size: 0.88rem;
   color: var(--color-neutral-600);
 }
+
+/* What the two floors found in a finished build, shown beside the download.
+   They used to withhold the result; withholding confiscates work the user has
+   already paid for on the strength of a check that can be wrong, so they report
+   instead. Styled as a sibling of .owner-needs — a finding to weigh, not an
+   error to recover from. */
+.build-warnings {
+  background: var(--color-paper-raised);
+  border: 1px solid var(--color-neutral-300);
+  border-inline-start: 3px solid var(--color-primary);
+  border-radius: var(--r-surface);
+  padding: var(--s-2) var(--s-3);
+  margin-block-end: var(--s-3);
+}
+.build-warnings-title {
+  margin: 0 0 var(--s-1);
+  font-size: 1rem;
+}
+.build-warnings-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.build-warnings-list li {
+  padding-block: var(--s-1);
+  border-block-end: 1px solid var(--color-neutral-300);
+}
+.build-warnings-list li:last-child { border-block-end: 0; }
+.build-warnings-detail {
+  display: block;
+  margin-block-start: var(--s-1);
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  color: var(--color-neutral-600);
+}
