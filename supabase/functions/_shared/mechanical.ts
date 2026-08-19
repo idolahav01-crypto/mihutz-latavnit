@@ -37,7 +37,7 @@ const META = new Map<number, SignalMeta>(
 );
 
 /** The ids this module owns. The model is never asked about them. */
-export const MECHANICAL_IDS: number[] = [1, 27, 30, 31, 40, 41, 45, 64, 94, 98, 109];
+export const MECHANICAL_IDS: number[] = [1, 2, 27, 30, 31, 40, 41, 45, 64, 94, 98, 109];
 
 interface Verdict {
   present: boolean;
@@ -148,6 +148,77 @@ function checkInter(files: Map<string, string>): Verdict {
     present: true,
     why: "Inter בשימוש ללא שום כוונון — אין letter-spacing, font-feature-settings או font-variation-settings בקוד.",
     evidence: hits.slice(0, 5),
+    occurrences: hits.length,
+  };
+}
+
+/**
+ * #2 — a font from the worn list.
+ *
+ * The catalogue names seven families and nothing else counts, which makes this
+ * a lookup rather than a judgement. It was left to the model anyway, and on a
+ * real audit the model marked it present while its own explanation said the
+ * opposite: "Heebo ... not on the exact worn list ... therefore not marked".
+ * The verdict and the reasoning disagreed in the same field, and the site was
+ * charged for it.
+ *
+ * A closed list of literal strings has no business being a question.
+ */
+const WORN_FAMILIES = [
+  "Roboto",
+  "Open Sans",
+  "Lato",
+  "Montserrat",
+  "Poppins",
+  "Nunito",
+  "Raleway",
+];
+
+function checkWornFont(files: Map<string, string>): Verdict {
+  const hits: Array<{ file: string; snippet: string }> = [];
+  const seen = new Set<string>();
+  // Lower-cased for matching, canonical for reporting: an explanation that
+  // says "montserrat" reads like a bug even when the verdict is right.
+  const worn = new Map(WORN_FAMILIES.map((f) => [f.toLowerCase(), f]));
+
+  const note = (file: string, snippet: string, family: string) => {
+    seen.add(family);
+    if (hits.length < 5) hits.push({ file, snippet: clip(snippet) });
+  };
+
+  // Whole family names, split on commas and unquoted. "Roboto Slab" is its own
+  // typeface and is not Roboto; a word-boundary match called it one.
+  for (const [file, text] of allCss(files)) {
+    for (const m of text.matchAll(/font-family\s*:([^;{}]*)/gi)) {
+      for (const raw of m[1].split(",")) {
+        const name = raw.trim().replace(/^["']|["']$/g, "").toLowerCase();
+        const canonical = worn.get(name);
+        if (canonical) note(file, m[0], canonical);
+      }
+    }
+  }
+
+  // Loaded but not yet declared still counts: that is how a builder pulls it in.
+  for (const [file, content] of htmlFiles(files)) {
+    for (const link of content.matchAll(/fonts\.googleapis\.com[^"']*/gi)) {
+      for (const fam of link[0].matchAll(/family=([^&:"']+)/gi)) {
+        const name = decodeURIComponent(fam[1]).replace(/\+/g, " ").trim().toLowerCase();
+        const canonical = worn.get(name);
+        if (canonical) note(file, link[0], canonical);
+      }
+    }
+  }
+
+  if (!seen.size) {
+    return {
+      present: false,
+      why: `אף אחד משבעת הפונטים השחוקים אינו בשימוש (${WORN_FAMILIES.join(", ")}).`,
+    };
+  }
+  return {
+    present: true,
+    why: `האתר משתמש בפונט מהרשימה השחוקה: ${[...seen].join(", ")}.`,
+    evidence: hits,
     occurrences: hits.length,
   };
 }
@@ -405,6 +476,7 @@ function checkEmoji(files: Map<string, string>): Verdict {
 
 const CHECKS: Record<number, (f: Map<string, string>) => Verdict> = {
   1: checkInter,
+  2: checkWornFont,
   27: checkJsonLd,
   30: checkMetaDescription,
   31: checkOpenGraph,

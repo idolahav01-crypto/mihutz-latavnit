@@ -221,14 +221,17 @@ function extractItems(block: Element): LedgerItem[] {
   return group.map((el) => {
     const title = firstText(el, "h1, h2, h3, h4, h5, .name, .title, dt, b, strong");
     const value = firstText(el, ".num, .value, .big, .stat-num, [class*='num']");
-    const full = normalizeText(el.textContent ?? "");
+    const full = elementText(el);
     // Body text = everything in the item that is not its own title/value, so a
     // card's paragraph survives without repeating its heading.
     let text = full;
     for (const strip of [title, value]) {
-      if (strip && text.startsWith(strip)) text = text.slice(strip.length).trim();
-      else if (strip) text = text.replace(strip, "").trim();
+      if (strip && text.startsWith(strip)) text = text.slice(strip.length);
+      else if (strip) text = text.replace(strip, "");
     }
+    // Cutting a title out of the middle leaves the spaces that surrounded it on
+    // both sides, which is how "חדש  אגוז" reached a shipped card.
+    text = normalizeText(text);
     const item: LedgerItem = {};
     if (title) item.title = title;
     if (value) item.value = value;
@@ -286,7 +289,7 @@ function isCardLike(el: Element): boolean {
 function sectionBody(block: Element, heading: string, subheading?: string): string | undefined {
   const p = paragraphText(block);
   if (p) return p;
-  let t = normalizeText(block.textContent ?? "");
+  let t = elementText(block);
   for (const strip of [heading, subheading]) {
     if (strip && t.startsWith(strip)) t = t.slice(strip.length).trim();
   }
@@ -441,7 +444,7 @@ function extractSubheading(block: Element, heading: string): string | undefined 
 
 function paragraphText(block: Element): string | undefined {
   const parts = (Array.from(block.querySelectorAll("p")) as Element[])
-    .map((p) => normalizeText(p.textContent ?? ""))
+    .map((p) => elementText(p))
     .filter(Boolean);
   const joined = parts.join("\n\n").trim();
   return joined || undefined;
@@ -539,7 +542,7 @@ function referencedIds(code: string): string[] {
 
 function firstText(scope: Element, selector: string): string {
   const el = scope.querySelector(selector);
-  return el ? normalizeText(el.textContent ?? "") : "";
+  return el ? elementText(el as Element) : "";
 }
 
 function getMeta(doc: ReturnType<DOMParser["parseFromString"]>, prop: string): string | null {
@@ -564,6 +567,31 @@ const EMOJI = /[\p{Extended_Pictographic}\u{1F1E6}-\u{1F1FF}️‍]/gu;
 
 function normalizeText(s: string): string {
   return s.replace(EMOJI, "").replace(/\s+/g, " ").trim();
+}
+
+// Elements that end one piece of content and begin another. A link is on the
+// list: a price and the "read more" beside it are two things, not one word.
+// Inline formatting is NOT — a decorative <span> inside a heading is part of
+// the same run of text, and separating it would put a space before a full stop.
+const TEXT_BOUNDARY =
+  /<\s*\/?\s*(?:a|p|div|section|article|header|footer|aside|nav|main|li|ul|ol|dl|dt|dd|table|tr|td|th|h[1-6]|address|blockquote|figure|figcaption|form|label|button|br)\b[^>]*>/gi;
+
+/**
+ * An element's text with its internal boundaries preserved.
+ *
+ * textContent concatenates across elements, which is faithful to the bytes and
+ * wrong for an inventory: the real page holds
+ * `<span class="price">₪ 24,900</span><a>לפרטים ←</a>` with no whitespace
+ * between them — the browser keeps them apart with CSS — and reading
+ * textContent produced "₪ 24,900לפרטים ←", which then shipped into a rebuilt
+ * card exactly like that. The footer had the same fault, with the street and
+ * the city glued into "אזור תעשייהראשון לציון"; it was patched there and left
+ * everywhere else. This is the general fix.
+ */
+function elementText(el: Element): string {
+  const html = el.innerHTML ?? "";
+  if (!html) return normalizeText(el.textContent ?? "");
+  return normalizeText(html.replace(TEXT_BOUNDARY, " ").replace(/<[^>]+>/g, ""));
 }
 
 function hasHebrew(s: string): boolean {

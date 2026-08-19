@@ -1,4 +1,4 @@
-import { assertEquals } from "jsr:@std/assert@1";
+import { assert, assertEquals } from "jsr:@std/assert@1";
 import { MECHANICAL_IDS, mechanicalSignals, overlayMechanical } from "./mechanical.ts";
 
 function verdict(files: Record<string, string>, id: number) {
@@ -131,4 +131,43 @@ Deno.test("mechanical verdicts overwrite the model's on the same id", () => {
   assertEquals(merged.find((s) => s.id === 50)?.name, "kept");
   // and the list stays in id order
   assertEquals(merged.map((s) => Number(s.id)), [...merged.map((s) => Number(s.id))].sort((a, b) => a - b));
+});
+
+// ---------- #2, the worn font list ----------
+//
+// Seven names and nothing else counts, so this is a lookup. It was a model
+// question until an audit marked it present while explaining that the font was
+// NOT on the list — the verdict and the reasoning disagreed in one field.
+
+Deno.test("#2: a worn family in a font-family declaration is found", () => {
+  const v = verdict({ "style.css": "body{font-family:'Poppins',sans-serif}" }, 2);
+  assertEquals(v.present, true);
+  assertEquals(v.confidence, 1);
+});
+
+Deno.test("#2: a worn family pulled in by a Google Fonts link counts", () => {
+  const v = verdict({
+    "index.html": `<link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400">`,
+  }, 2);
+  assertEquals(v.present, true);
+});
+
+Deno.test("#2: Heebo and Amiri are not on the list", () => {
+  const v = verdict({
+    "index.html": `<link href="https://fonts.googleapis.com/css2?family=Amiri&family=Heebo:wght@400;700">`,
+    "style.css": "body{font-family:'Heebo',system-ui,sans-serif}h1{font-family:'Amiri',serif}",
+  }, 2);
+  assertEquals(v.present, false);
+});
+
+Deno.test("#2: a name that merely contains a worn name is not a match", () => {
+  assertEquals(verdict({ "style.css": "body{font-family:'Roboto Slab',serif}" }, 2).present, false);
+  assertEquals(verdict({ "style.css": "body{font-family:Latopia,serif}" }, 2).present, false);
+});
+
+Deno.test("#2: the family is named in the explanation, both directions", () => {
+  const hit = verdict({ "style.css": "body{font-family:Montserrat,sans-serif}" }, 2);
+  assert(String(hit.explanation).includes("Montserrat"), String(hit.explanation));
+  const miss = verdict({ "style.css": "body{font-family:Heebo,sans-serif}" }, 2);
+  assert(String(miss.explanation).includes("Roboto"), "the clean verdict should still name the list");
 });
