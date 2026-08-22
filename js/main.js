@@ -1,4 +1,4 @@
-/* מחוץ לתבנית — shared behavior for EN + HE pages */
+/* תשנה — shared behavior for EN + HE pages */
 "use strict";
 
 /* analytics scaffold: dataLayer + named events (signals #61, #62).
@@ -209,4 +209,77 @@ document.querySelectorAll("[data-evt]").forEach(function (el) {
       sb.auth.onAuthStateChange(function (_evt, session) { applySession(session); });
     }).catch(function () { /* CDN blocked or offline — buttons still show the note */ });
   }
+})();
+
+/* ---------- scroll reveal ----------
+   Progressive enhancement: the page is fully visible without JS. We only
+   hide-then-reveal when the browser both supports IntersectionObserver and
+   the visitor hasn't asked to reduce motion. Each element reveals once. */
+(function () {
+  if (!("IntersectionObserver" in window)) return;
+  if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+
+  var selector = ".folio, .section-intro, .ba-wrap, .signals-layout, .steps, .keep-grid, .fp-head, .human-grid, .join-steps, .join-card, .faq, .scan-cta-inner";
+  var targets = Array.prototype.slice.call(document.querySelectorAll(selector));
+  if (!targets.length) return;
+
+  targets.forEach(function (el) { el.classList.add("reveal"); });
+
+  var io = new IntersectionObserver(function (entries) {
+    entries.forEach(function (entry) {
+      if (entry.isIntersecting) {
+        entry.target.classList.add("in");
+        io.unobserve(entry.target);
+      }
+    });
+  }, { rootMargin: "0px 0px -10% 0px", threshold: 0.06 });
+
+  targets.forEach(function (el) { io.observe(el); });
+})();
+
+/* ---------- before/after: auto-sweep once, then invite the drag ----------
+   When the slider scrolls into view it plays a single self-demo sweep so
+   visitors see it is interactive. The moment they grab the handle themselves
+   we mark the frame touched, which stops the inviting pulse. */
+(function () {
+  var frame = document.getElementById("ba-frame");
+  var range = document.getElementById("ba-range");
+  if (!frame || !range) return;
+
+  frame.addEventListener("pointerdown", function () { frame.classList.add("ba-touched"); }, { once: true });
+  range.addEventListener("keydown", function () { frame.classList.add("ba-touched"); }, { once: true });
+
+  if (!("IntersectionObserver" in window)) return;
+  if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+
+  function setVal(v) {
+    range.value = String(Math.round(v));
+    range.dispatchEvent(new Event("input"));
+  }
+  function ease(t) { return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2; }
+
+  var played = false;
+  function sweep() {
+    if (played || frame.classList.contains("ba-touched")) return;
+    played = true;
+    var start = null, dur = 2000;
+    function step(ts) {
+      if (frame.classList.contains("ba-touched")) return; /* user took over */
+      if (!start) start = ts;
+      var p = Math.min(1, (ts - start) / dur), v;
+      if (p < 0.34) v = 50 + (90 - 50) * ease(p / 0.34);
+      else if (p < 0.67) v = 90 + (12 - 90) * ease((p - 0.34) / 0.33);
+      else v = 12 + (50 - 12) * ease((p - 0.67) / 0.33);
+      setVal(v);
+      if (p < 1) requestAnimationFrame(step);
+    }
+    requestAnimationFrame(step);
+  }
+
+  var io = new IntersectionObserver(function (entries) {
+    entries.forEach(function (entry) {
+      if (entry.isIntersecting) { setTimeout(sweep, 450); io.unobserve(entry.target); }
+    });
+  }, { threshold: 0.45 });
+  io.observe(frame);
 })();
