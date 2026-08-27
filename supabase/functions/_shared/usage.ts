@@ -117,6 +117,64 @@ export function totalCost(entries: StageUsageEntry[]): number {
 }
 
 /**
+ * The actual cost of each C-category for one site, rolled up from stage_usage.
+ *
+ * The pricing model reasons in C-categories (scan, design, shell, sections,
+ * after-scan), but stage_usage records one entry PER CALL — three detect parts,
+ * a rebuild_design, a rebuild_shell, one rebuild_section_N per section. This maps
+ * each entry to its category by stage name and sums the real cost, so the price
+ * of every C for this specific site is one object rather than a hand-sum. It is
+ * what a future estimate calibrates against: measured, not guessed.
+ *
+ * `section_count` counts only the sections that cost a model call — a widget
+ * section is built deterministically and records no usage, so it never appears
+ * here, which is exactly the N the build-cost formula multiplies.
+ */
+export interface CostBreakdown {
+  scan_usd: number;
+  scan_after_usd: number;
+  design_usd: number;
+  shell_usd: number;
+  sections_usd: number;
+  section_count: number;
+  /** sections_usd / section_count, or null when no section call was billed. */
+  per_section_usd: number | null;
+  /** Any stage that maps to no C-category (other pipelines: transform, qa, features). */
+  other_usd: number;
+  /** Sum of every entry — reconciles with total_cost_usd / totalCost(). */
+  total_usd: number;
+}
+
+export function rollupCostBreakdown(entries: StageUsageEntry[]): CostBreakdown {
+  let scan = 0, scanAfter = 0, design = 0, shell = 0, sections = 0, sectionCount = 0, other = 0;
+  for (const e of entries) {
+    const s = e.stage ?? "";
+    const c = e.cost_usd ?? 0;
+    // Order matters: "detect_after" must be tested before the "detect" prefix.
+    if (s.startsWith("detect_after")) scanAfter += c;
+    else if (s.startsWith("detect")) scan += c;
+    else if (s === "rebuild_design") design += c;
+    else if (s === "rebuild_shell") shell += c;
+    else if (s.startsWith("rebuild_section")) {
+      sections += c;
+      sectionCount += 1;
+    } else other += c;
+  }
+  const r = (n: number) => Number(n.toFixed(6));
+  return {
+    scan_usd: r(scan),
+    scan_after_usd: r(scanAfter),
+    design_usd: r(design),
+    shell_usd: r(shell),
+    sections_usd: r(sections),
+    section_count: sectionCount,
+    per_section_usd: sectionCount ? r(sections / sectionCount) : null,
+    other_usd: r(other),
+    total_usd: r(scan + scanAfter + design + shell + sections + other),
+  };
+}
+
+/**
  * Append one stage's usage to the scan and refresh the running total.
  *
  * Read-modify-write rather than a jsonb append in SQL: the pipeline stages run
@@ -139,7 +197,13 @@ export async function recordStageUsage(
     const entries: StageUsageEntry[] = [...((data?.stage_usage ?? []) as StageUsageEntry[]), entry];
     await admin
       .from("scans")
-      .update({ stage_usage: entries, total_cost_usd: totalCost(entries) })
+      .update({
+        stage_usage: entries,
+        total_cost_usd: totalCost(entries),
+        // Derived from the same entries in the same write, so the per-C rollup
+        // can never drift from stage_usage or total_cost_usd.
+        cost_breakdown: rollupCostBreakdown(entries),
+      })
       .eq("id", scanId);
   } catch {
     // metrics are best-effort

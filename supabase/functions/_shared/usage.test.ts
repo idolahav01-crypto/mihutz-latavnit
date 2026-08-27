@@ -1,5 +1,12 @@
 import { assertEquals } from "jsr:@std/assert@1";
-import { buildEntry, cacheHitRate, costUsd, totalCost } from "./usage.ts";
+import {
+  buildEntry,
+  cacheHitRate,
+  costUsd,
+  rollupCostBreakdown,
+  type StageUsageEntry,
+  totalCost,
+} from "./usage.ts";
 
 Deno.test("costUsd prices cached input far below uncached input", () => {
   // 1M uncached input on opus-4-8 = $5.00
@@ -98,4 +105,69 @@ Deno.test("buildEntry records the speed tier that was billed", () => {
   const e = buildEntry("detect", "claude-opus-4-8", { output_tokens: 1_000_000 }, 10, "medium", "fast");
   assertEquals(e.speed, "fast");
   assertEquals(e.cost_usd, 50);
+});
+
+/** A cost-only stage entry — the only fields rollupCostBreakdown reads. */
+function stage(name: string, cost: number): StageUsageEntry {
+  return {
+    stage: name,
+    model: "claude-opus-4-8",
+    input_tokens: 0,
+    output_tokens: 0,
+    cache_read_input_tokens: 0,
+    cache_creation_input_tokens: 0,
+    cost_usd: cost,
+    duration_ms: 0,
+    at: "2026-08-25T00:00:00.000Z",
+  };
+}
+
+Deno.test("rollupCostBreakdown maps each stage to its C and reconciles the total", () => {
+  const entries = [
+    stage("detect_part1", 0.20),
+    stage("detect_part2", 0.15),
+    stage("detect_part3", 0.15), // scan = 0.50
+    stage("rebuild_design", 0.07),
+    stage("rebuild_shell", 0.22),
+    stage("rebuild_section_1", 0.18),
+    stage("rebuild_section_2", 0.20), // sections = 0.38 over 2 calls
+    stage("detect_after_part1", 0.25),
+    stage("detect_after_part2", 0.25), // scan_after = 0.50
+  ];
+  const b = rollupCostBreakdown(entries);
+
+  assertEquals(b.scan_usd, 0.5);
+  assertEquals(b.scan_after_usd, 0.5);
+  assertEquals(b.design_usd, 0.07);
+  assertEquals(b.shell_usd, 0.22);
+  assertEquals(b.sections_usd, 0.38);
+  assertEquals(b.section_count, 2);
+  assertEquals(b.per_section_usd, 0.19);
+  assertEquals(b.other_usd, 0);
+  // The rollup total must match the independent per-entry sum.
+  assertEquals(b.total_usd, totalCost(entries));
+});
+
+Deno.test("rollupCostBreakdown keeps other-pipeline stages out of the C buckets but in the total", () => {
+  const entries = [
+    stage("detect_part1", 0.40),
+    stage("transform_css_1", 0.30), // belongs to no rebuild C
+    stage("qa", 0.10),
+  ];
+  const b = rollupCostBreakdown(entries);
+
+  assertEquals(b.scan_usd, 0.4);
+  assertEquals(b.design_usd, 0);
+  assertEquals(b.sections_usd, 0);
+  assertEquals(b.section_count, 0);
+  assertEquals(b.per_section_usd, null); // no section call was billed
+  assertEquals(b.other_usd, 0.4);
+  assertEquals(b.total_usd, 0.8);
+});
+
+Deno.test("rollupCostBreakdown tests detect_after before the detect prefix", () => {
+  // A naive startsWith('detect') check would bucket the after-scan as a before-scan.
+  const b = rollupCostBreakdown([stage("detect_after_gap1", 0.33)]);
+  assertEquals(b.scan_usd, 0);
+  assertEquals(b.scan_after_usd, 0.33);
 });

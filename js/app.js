@@ -1,4 +1,4 @@
-/* מחוץ לתבנית — dashboard: input selection + Stage 1 detection.
+/* תשנה — dashboard: input selection + Stage 1 detection.
    Shared by /app/ (en) and /he/app/ (he). Language comes from <html lang>. */
 "use strict";
 

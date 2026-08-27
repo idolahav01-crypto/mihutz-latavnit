@@ -1,5 +1,5 @@
 /* ============================================================
-   מחוץ לתבנית — Editorial Craft Studio
+   תשנה — Editorial Craft Studio
    Shared stylesheet for EN (ltr) and HE (rtl).
    Logical properties only; direction comes from dir="" in HTML.
    ============================================================ */
@@ -648,4 +648,428 @@ a:hover { color: var(--color-primary-deep); }
 
 @media print {
   .site-header, .site-footer, .hero-actions, .signin-card { display: none; }
+}
+
+/* ============================================================
+   AI → human landing enhancements (marquee, cards, reveals)
+   Every motion here sits behind prefers-reduced-motion, and the
+   base HTML stays fully visible when JS or motion is off.
+   ============================================================ */
+
+/* ---------- hero: animated highlight on the key word ---------- */
+.hl { position: relative; z-index: 0; white-space: nowrap; }
+.hl::after {
+  content: "";
+  position: absolute;
+  inset-inline: -0.08em;
+  inset-block-end: 0.06em;
+  block-size: 0.34em;
+  background: rgba(196, 67, 43, 0.28);
+  border-radius: 2px;
+  z-index: -1;
+  transform: scaleX(1);
+  transform-origin: inline-start;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .hl::after { animation: hl-in 720ms 520ms cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+}
+@keyframes hl-in { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+
+/* ---------- scroll reveal (JS adds .reveal; .in when in view) ---------- */
+@media (prefers-reduced-motion: no-preference) {
+  .reveal { opacity: 0; transform: translateY(22px); transition: opacity 640ms cubic-bezier(0.2, 0.7, 0.2, 1), transform 640ms cubic-bezier(0.2, 0.7, 0.2, 1); }
+  .reveal.in { opacity: 1; transform: none; }
+  .human-grid.reveal .human-card { opacity: 0; transform: translateY(18px); transition: opacity 560ms cubic-bezier(0.2, 0.7, 0.2, 1), transform 560ms cubic-bezier(0.2, 0.7, 0.2, 1); }
+  .human-grid.reveal.in .human-card { opacity: 1; transform: none; }
+  .human-grid.reveal.in .human-card:nth-child(2) { transition-delay: 90ms; }
+  .human-grid.reveal.in .human-card:nth-child(3) { transition-delay: 180ms; }
+  .human-grid.reveal.in .human-card:nth-child(4) { transition-delay: 270ms; }
+}
+
+/* ---------- fingerprint marquee: the tells AI leaves on every site ---------- */
+.fingerprint {
+  padding-block: clamp(var(--s-6), 6vw, var(--s-8));
+  border-block-start: 1px solid var(--color-neutral-300);
+  overflow: hidden;
+}
+.fp-head { margin-block-end: var(--s-4); }
+.fp-head h2 { font-size: clamp(1.5rem, 3.4vw, 2.2rem); margin-block-end: var(--s-1); }
+.fp-head p { color: var(--color-ink-soft); font-size: 1.05rem; }
+.fp-track {
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 7%, #000 93%, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 7%, #000 93%, transparent);
+}
+.fp-row { display: flex; gap: var(--s-2); inline-size: max-content; }
+.fp-row + .fp-row { margin-block-start: var(--s-2); }
+.fp-chip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  white-space: nowrap;
+  font-family: "Inter", "Rubik", sans-serif; /* the AI default font, on purpose */
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--color-neutral-600);
+  background: var(--color-paper-raised);
+  border: 1px solid var(--color-neutral-300);
+  border-radius: 999px;
+  padding: 9px 17px;
+  max-width: none;
+}
+.fp-chip::before {
+  content: "";
+  inline-size: 8px;
+  block-size: 8px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  flex: none;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .fp-row { animation: fp-scroll 46s linear infinite; }
+  .fp-row.fp-rev { animation-duration: 62s; animation-direction: reverse; }
+  .fp-track:hover .fp-row { animation-play-state: paused; }
+}
+@keyframes fp-scroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+
+/* ---------- "what makes a site human" cards ---------- */
+.human-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: var(--s-3);
+}
+.human-card {
+  border: 1px solid var(--color-neutral-300);
+  border-block-start: 3px solid var(--color-primary);
+  background: var(--color-paper-raised);
+  border-radius: var(--r-surface);
+  padding: clamp(var(--s-3), 3vw, var(--s-4));
+  box-shadow: var(--shadow-lift);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .human-card { transition: transform 220ms cubic-bezier(0.2, 0.7, 0.2, 1), box-shadow 220ms ease; }
+  .human-card:hover { transform: translateY(-5px); box-shadow: 0 2px 4px rgba(26, 22, 16, 0.1), 0 14px 34px rgba(26, 22, 16, 0.1); }
+}
+.human-card .hc-mark {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 1.6rem;
+  color: var(--color-primary);
+  line-height: 1;
+  display: block;
+  margin-block-end: var(--s-2);
+}
+:lang(he) .human-card .hc-mark { font-family: "Frank Ruhl Libre", serif; font-weight: 900; }
+.human-card h3 { font-size: 1.15rem; margin-block-end: var(--s-1); }
+.human-card p { font-size: 0.95rem; color: var(--color-ink-soft); margin: 0; }
+
+/* ---------- demoted signals label (replaces the giant count) ---------- */
+.signals-kicker {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 1.15rem;
+  letter-spacing: 0.03em;
+  color: var(--color-primary);
+}
+:lang(he) .signals-kicker { font-family: "Frank Ruhl Libre", serif; font-weight: 900; }
+
+/* ---------- section 01: a more cinematic before / after ---------- */
+.ba-wrap { max-width: 1040px; }
+.ba-frame {
+  border: 1px solid var(--color-neutral-300);
+  border-block-start: 3px solid var(--color-primary);
+  border-radius: 8px;
+  box-shadow: 0 2px 6px rgba(26, 22, 16, 0.08), 0 20px 60px rgba(26, 22, 16, 0.12);
+}
+.ba-pane { min-height: 520px; }
+@media (max-width: 640px) { .ba-pane { min-height: 440px; } }
+
+/* the seam: a glowing terracotta line instead of a flat black rule */
+.ba-divider {
+  width: 3px;
+  background: var(--color-primary);
+  box-shadow: 0 0 0 1px rgba(247, 244, 239, 0.7), 0 0 20px rgba(196, 67, 43, 0.4);
+}
+
+/* the handle: bigger, branded, with a clean double-chevron */
+.ba-handle {
+  inline-size: 54px;
+  block-size: 54px;
+  border: 2px solid var(--color-primary);
+  color: var(--color-primary);
+  box-shadow: 0 2px 6px rgba(26, 22, 16, 0.18), 0 12px 30px rgba(26, 22, 16, 0.16);
+}
+.ba-handle svg { inline-size: 24px; block-size: 24px; display: block; }
+
+/* an inviting pulse — only until the visitor first grabs the handle */
+@media (prefers-reduced-motion: no-preference) {
+  .ba-frame:not(.ba-touched) .ba-handle::after {
+    content: "";
+    position: absolute;
+    inset: -8px;
+    border-radius: 50%;
+    border: 2px solid var(--color-primary);
+    animation: ba-pulse 1.9s ease-out infinite;
+    pointer-events: none;
+  }
+}
+@keyframes ba-pulse {
+  0% { transform: scale(1); opacity: 0.6; }
+  100% { transform: scale(1.6); opacity: 0; }
+}
+
+/* always-visible corner tags read stronger than the faint originals */
+.mini-tag { box-shadow: 0 1px 3px rgba(26, 22, 16, 0.2); }
+
+/* ============================================================
+   Section 06 — the join / conversion zone
+   ============================================================ */
+.audit-join {
+  background:
+    radial-gradient(130% 90% at 100% 0, rgba(196, 67, 43, 0.08), transparent 55%),
+    radial-gradient(120% 90% at 0 100%, rgba(196, 67, 43, 0.05), transparent 55%),
+    var(--color-paper-raised);
+}
+.join-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 6fr) minmax(0, 5fr);
+  gap: clamp(var(--s-4), 5vw, var(--s-12));
+  align-items: center;
+}
+@media (max-width: 900px) { .join-grid { grid-template-columns: 1fr; } }
+
+/* the three steps */
+.join-steps { list-style: none; margin: var(--s-4) 0 0; padding: 0; }
+.join-steps li {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--s-3);
+  align-items: start;
+  padding-block: var(--s-3);
+  border-block-start: 1px solid var(--color-neutral-300);
+  max-width: none;
+}
+.join-steps li:first-child { border-block-start: 0; padding-block-start: 0; }
+.js-n {
+  inline-size: 42px;
+  block-size: 42px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--color-primary);
+  color: #FFF7F2;
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 1.2rem;
+  flex: none;
+}
+:lang(he) .js-n { font-family: "Frank Ruhl Libre", serif; font-weight: 900; }
+.join-steps h3 { font-size: 1.1rem; margin-block-end: 4px; }
+.join-steps p { font-size: 0.95rem; color: var(--color-ink-soft); margin: 0; }
+
+/* trust row */
+.join-trust {
+  list-style: none;
+  margin: var(--s-4) 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2) var(--s-3);
+}
+.join-trust li {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--color-ink-soft);
+  max-width: none;
+}
+.join-trust li::before {
+  content: "";
+  inline-size: 7px;
+  block-size: 7px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  flex: none;
+}
+
+/* the elevated join card */
+.join-card {
+  position: relative;
+  overflow: hidden;
+  background: var(--color-paper-raised);
+  border: 1px solid var(--color-neutral-300);
+  border-block-start: 3px solid var(--color-primary);
+  border-radius: 10px;
+  box-shadow: 0 2px 8px rgba(26, 22, 16, 0.08), 0 24px 60px rgba(26, 22, 16, 0.14);
+  padding: clamp(var(--s-4), 4vw, var(--s-6));
+}
+@media (prefers-reduced-motion: no-preference) {
+  .join-card { transition: transform 260ms cubic-bezier(0.2, 0.7, 0.2, 1), box-shadow 260ms ease; }
+  .join-card:hover { transform: translateY(-4px); box-shadow: 0 4px 12px rgba(26, 22, 16, 0.1), 0 34px 80px rgba(26, 22, 16, 0.18); }
+}
+.join-card-title { font-family: var(--font-display); font-size: 1.5rem; font-weight: 800; margin-block-end: 4px; }
+:lang(he) .join-card-title { font-family: "Frank Ruhl Libre", serif; font-weight: 900; }
+.join-card-sub { color: var(--color-ink-soft); font-size: 0.98rem; margin-block-end: var(--s-4); }
+.join-providers { display: grid; gap: var(--s-2); }
+.join-card-note { font-size: 0.85rem; color: var(--color-neutral-600); margin-block-start: var(--s-3); }
+
+/* a slow shine sweeping across the card */
+.join-card-shine {
+  position: absolute;
+  top: -50%;
+  height: 200%;
+  width: 45%;
+  left: -60%;
+  background: linear-gradient(100deg, transparent, rgba(255, 255, 255, 0.55), transparent);
+  transform: skewX(-20deg);
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .join-card-shine { animation: join-shine 7s ease-in-out 1.5s infinite; }
+}
+@keyframes join-shine {
+  0% { left: -60%; }
+  22% { left: 130%; }
+  100% { left: 130%; }
+}
+
+/* big provider buttons */
+.btn-join {
+  inline-size: 100%;
+  justify-content: center;
+  gap: 10px;
+  min-height: 56px;
+  font-size: 1.05rem;
+  font-weight: 700;
+  background: var(--color-paper);
+  color: var(--color-ink);
+  border: 1.5px solid var(--color-neutral-300);
+}
+.btn-join svg { inline-size: 20px; block-size: 20px; flex: none; }
+.btn-join:hover {
+  color: var(--color-ink);
+  border-color: var(--color-ink);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-lift);
+}
+.btn-join:active { transform: translateY(0); box-shadow: var(--shadow-press); }
+
+/* staggered reveal of the steps */
+@media (prefers-reduced-motion: no-preference) {
+  .join-steps.reveal li { opacity: 0; transform: translateY(14px); transition: opacity 520ms cubic-bezier(0.2, 0.7, 0.2, 1), transform 520ms cubic-bezier(0.2, 0.7, 0.2, 1); }
+  .join-steps.reveal.in li { opacity: 1; transform: none; }
+  .join-steps.reveal.in li:nth-child(2) { transition-delay: 110ms; }
+  .join-steps.reveal.in li:nth-child(3) { transition-delay: 220ms; }
+}
+
+/* ============================================================
+   Section 07 — FAQ (editorial <details>, no generic accordion)
+   ============================================================ */
+.faq { max-width: 840px; }
+.faq-item { border-block-start: 1px solid var(--color-neutral-300); }
+.faq-item:last-child { border-block-end: 1px solid var(--color-neutral-300); }
+.faq summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3);
+  padding-block: var(--s-3);
+  font-family: var(--font-display);
+  font-size: clamp(1.05rem, 2vw, 1.3rem);
+  font-weight: 800;
+  line-height: 1.3;
+  color: var(--color-ink);
+  max-width: none;
+  transition: color 160ms ease;
+}
+:lang(he) .faq summary { font-family: "Frank Ruhl Libre", serif; font-weight: 900; }
+.faq summary::-webkit-details-marker { display: none; }
+.faq summary:hover { color: var(--color-primary); }
+.faq summary:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 4px; border-radius: var(--r-surface); }
+
+/* the plus that becomes a minus */
+.faq-mark { position: relative; inline-size: 20px; block-size: 20px; flex: none; }
+.faq-mark::before, .faq-mark::after {
+  content: "";
+  position: absolute;
+  background: var(--color-primary);
+  inset-block-start: 50%;
+  inset-inline: 2px;
+  block-size: 2px;
+  transform: translateY(-50%);
+}
+.faq-mark::after { transition: transform 260ms cubic-bezier(0.2, 0.7, 0.2, 1); transform: translateY(-50%) rotate(90deg); }
+details[open] .faq-mark::after { transform: translateY(-50%) rotate(0deg); }
+
+.faq-a { padding-block: 0 var(--s-3); }
+.faq-a p { color: var(--color-ink-soft); margin: 0; max-width: 70ch; font-size: 1rem; }
+@media (prefers-reduced-motion: no-preference) {
+  details[open] .faq-a { animation: faq-open 320ms cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+}
+@keyframes faq-open { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+
+/* ---------- "first scan free" marketing ---------- */
+.hero-free-note {
+  margin-block-start: var(--s-2);
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--color-neutral-600);
+}
+.join-badge {
+  display: inline-block;
+  margin-block-end: var(--s-3);
+  padding: 5px 14px;
+  border-radius: 999px;
+  background: rgba(196, 67, 43, 0.1);
+  border: 1px solid rgba(196, 67, 43, 0.3);
+  color: var(--color-primary-deep);
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+:lang(he) .join-badge { font-family: "Rubik", sans-serif; }
+
+/* ---------- repeatable "free first scan" CTA band ---------- */
+.scan-cta {
+  padding-block: clamp(var(--s-6), 6vw, var(--s-8));
+  border-block-start: 1px solid var(--color-neutral-300);
+  background: radial-gradient(120% 100% at 50% 0, rgba(196, 67, 43, 0.06), transparent 62%);
+  text-align: center;
+}
+.scan-cta-inner { display: flex; flex-direction: column; align-items: center; gap: var(--s-2); }
+.scan-cta-lead {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: clamp(1.35rem, 3.4vw, 2rem);
+  line-height: 1.2;
+  margin: 0;
+  max-width: 22ch;
+}
+:lang(he) .scan-cta-lead { font-family: "Frank Ruhl Libre", serif; font-weight: 900; }
+.scan-cta .btn { margin-block-start: var(--s-2); }
+.scan-cta-hint { font-size: 0.92rem; color: var(--color-neutral-600); max-width: 54ch; margin: 0; }
+.btn-lg { min-height: 56px; padding: 14px 34px; font-size: 1.1rem; }
+.scan-cta-final {
+  background: radial-gradient(120% 100% at 50% 100%, rgba(196, 67, 43, 0.08), transparent 62%), var(--color-paper-raised);
+}
+
+/* section folio numbers removed by request */
+.folio-no { display: none; }
+
+/* staggered reveal of the questions */
+@media (prefers-reduced-motion: no-preference) {
+  .faq.reveal .faq-item { opacity: 0; transform: translateY(14px); transition: opacity 480ms cubic-bezier(0.2, 0.7, 0.2, 1), transform 480ms cubic-bezier(0.2, 0.7, 0.2, 1); }
+  .faq.reveal.in .faq-item { opacity: 1; transform: none; }
+  .faq.reveal.in .faq-item:nth-child(2) { transition-delay: 60ms; }
+  .faq.reveal.in .faq-item:nth-child(3) { transition-delay: 120ms; }
+  .faq.reveal.in .faq-item:nth-child(4) { transition-delay: 180ms; }
+  .faq.reveal.in .faq-item:nth-child(5) { transition-delay: 240ms; }
+  .faq.reveal.in .faq-item:nth-child(6) { transition-delay: 300ms; }
+  .faq.reveal.in .faq-item:nth-child(7) { transition-delay: 360ms; }
+  .faq.reveal.in .faq-item:nth-child(8) { transition-delay: 420ms; }
 }
