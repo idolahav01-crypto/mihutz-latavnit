@@ -5,7 +5,7 @@
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { UntarStream } from "jsr:@std/tar@0.1/untar-stream";
-import { keepPath, safeRelPath } from "../_shared/pipeline.ts";
+import { isSiteCode, keepPath, safeRelPath } from "../_shared/pipeline.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -93,6 +93,7 @@ Deno.serve(async (req) => {
     const parts: string[] = [];
     let total = 0;
     let fileCount = 0;
+    let siteFiles = 0;
     const decoder = new TextDecoder();
 
     for await (const entry of entries) {
@@ -117,10 +118,14 @@ Deno.serve(async (req) => {
       const block = `=== FILE: ${rel} ===\n${text}\n\n`;
       total += block.length;
       fileCount += 1;
+      if (isSiteCode(rel)) siteFiles += 1;
       parts.push(block);
     }
 
     if (fileCount === 0) throw new Error("no_scannable_files");
+    // Files, but no website among them — a docs repo, a dataset, a config-only
+    // repo. Stop here rather than pay a model pass to discover it.
+    if (siteFiles === 0) throw new Error("no_site_code");
 
     const bundlePath = `${user.id}/${scanId}/bundle.txt`;
     const { error: upErr } = await admin.storage

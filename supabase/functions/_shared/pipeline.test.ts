@@ -3,6 +3,7 @@ import {
   assembleFinalFiles,
   buildSignalList,
   DELETED_FILE,
+  isSiteCode,
   keepPath,
   parseBundle,
   pickHomePage,
@@ -396,4 +397,29 @@ Deno.test("keepPath: an ordinary config file is NOT mistaken for a secret", () =
   assert(keepPath("data/services.json"));
   assert(keepPath("keyboard.js"));
   assert(keepPath("monkey.html"));
+});
+
+Deno.test("isSiteCode: a website's own files count", () => {
+  assert(isSiteCode("index.html"));
+  assert(isSiteCode("pages/about.htm"));
+  assert(isSiteCode("src/app.js"));
+  assert(isSiteCode("src/App.jsx"));
+  assert(isSiteCode("src/main.ts"));
+  assert(isSiteCode("src/App.tsx"));
+  assert(isSiteCode("src/App.vue"));
+  assert(isSiteCode("src/App.svelte"));
+  assert(isSiteCode("src/index.astro"));
+  assert(isSiteCode("index.php"));
+});
+
+Deno.test("isSiteCode: an upload with none of these has nothing to audit", () => {
+  assertFalse(isSiteCode("package.json"));
+  assertFalse(isSiteCode("styles/site.css"));
+  assertFalse(isSiteCode("notes.txt"));
+  assertFalse(isSiteCode("data.csv"));
+  assertFalse(isSiteCode("logo.png"));
+  assertFalse(isSiteCode("script.py"));
+  // The extension has to end the path, not merely appear in it.
+  assertFalse(isSiteCode("html/readme.txt"));
+  assertFalse(isSiteCode("app.js.bak"));
 });

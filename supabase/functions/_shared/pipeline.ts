@@ -495,6 +495,17 @@ const SKIP_LOCKFILES = /(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|bun\.lock
 const SKIP_SECRETS =
   /((^|\/)(secrets?\.(json|ya?ml|toml)|credentials?\.(json|ya?ml)|service[-_]?account[^/]*\.json|id_(rsa|dsa|ecdsa|ed25519)(\.pub)?|htpasswd)$)|\.(pem|key|p12|pfx|keystore|jks|ppk|asc|gpg)$/i;
 
+// The allow-list that answers the question keepPath cannot: is any of this a
+// website? keepPath is a deny-list, so a repo of nothing but a package.json,
+// a CSS export or a folder of notes passes it intact and reaches the model
+// with nothing to audit. Mirrored in js/app.js as SITE_CODE / hasSiteCode.
+const SITE_CODE = /\.(html?|js|jsx|ts|tsx|vue|svelte|astro|php)$/i;
+
+/** True if this path is site code — the thing a scan actually reads. */
+export function isSiteCode(path: string): boolean {
+  return SITE_CODE.test(path);
+}
+
 /** True if this path should go into the bundle. Accepts "dir/" for directories. */
 export function keepPath(path: string): boolean {
   // A path that cannot be expressed safely inside the project is not a file we

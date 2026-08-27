@@ -24,12 +24,21 @@
   var T = he ? {
     hi: "שלום, ",
     signout: "התנתקות",
-    zipTooBig: "הקובץ גדול מ-5MB.",
+    zipTooBig: "הקובץ שהעליתם גדול מהמותר (מקסימום 5MB). לרוב זה קורה כשמעלים תיקיות טכניות כמו node_modules יחד עם הקוד. נסו לדחוס רק את קבצי האתר עצמו — HTML,‏ CSS,‏ JS ותמונות.",
+    zipNotZip: "הקובץ שהעליתם אינו ZIP תקין. ודאו שאתם מייצאים או דוחסים את התיקייה בפורמט ZIP, ומעלים מחדש.",
+    zipNoSiteCode: "לא נמצא קוד אתר בקובץ שהעליתם. ודאו שהעליתם את התיקייה הנכונה.",
     zipEmpty: "הארכיון ריק מקוד. ודאו שהוא מכיל את קבצי המקור ולא רק תיקיית build.",
     urlFormat: "פורמט לא תקין. דוגמה: https://github.com/user/repo",
     urlChecking: "בודק את הריפו...",
     urlOk: "הריפו נמצא וזמין.",
-    urlNotFound: "הריפו לא נמצא. בדוק את הכתובת.",
+    /* GitHub answers 404, not 403, for a private repo seen by a caller with no
+       access — so "not found" and "no permission" arrive as the same status
+       and the message has to cover both without guessing which one it is. */
+    urlNotFound: function (connected) {
+      return "לא הצלחנו לגשת ל-repository. ודאו שהכתובת נכונה ושהוא ציבורי (Public) בהגדרות ה-repo" +
+        (connected ? "." : ", או חברו את GitHub כדי לסרוק גם ריפו פרטי.");
+    },
+    urlRateLimited: "GitHub הגביל אותנו זמנית (rate limit). נסו שוב בעוד כמה דקות, או חברו את GitHub.",
     urlPrivate: "הריפו פרטי — חברו את GitHub כדי לגשת אליו.",
     ghNotConnected: "GitHub לא מחובר. השתמשו בשורת GitHub כדי לחבר.",
     ghExpired: "החיבור ל-GitHub פג. התחבר מחדש עם GitHub.",
@@ -87,12 +96,21 @@
   } : {
     hi: "Hi, ",
     signout: "Sign out",
-    zipTooBig: "File is larger than 5MB.",
+    zipTooBig: "That file is over the 5MB limit. This usually happens when technical folders like node_modules go up along with the code. Try zipping just the site's own files — HTML, CSS, JS and images.",
+    zipNotZip: "That file isn't a valid ZIP. Check that you're exporting or compressing the folder as a ZIP, then upload it again.",
+    zipNoSiteCode: "No site code found in what you uploaded. Check that you picked the right folder.",
     zipEmpty: "The archive has no source code in it. Check that it holds your source files, not just a build folder.",
     urlFormat: "Invalid format. Example: https://github.com/user/repo",
     urlChecking: "Checking the repo...",
     urlOk: "Repo found and accessible.",
-    urlNotFound: "Repo not found. Check the URL.",
+    /* GitHub answers 404, not 403, for a private repo seen by a caller with no
+       access — so "not found" and "no permission" arrive as the same status
+       and the message has to cover both without guessing which one it is. */
+    urlNotFound: function (connected) {
+      return "We couldn't reach that repository. Check the URL, and that it's Public in the repo's settings" +
+        (connected ? "." : " — or connect GitHub to scan private repos too.");
+    },
+    urlRateLimited: "GitHub is rate-limiting us for the moment. Try again in a few minutes, or connect GitHub.",
     urlPrivate: "Repo is private — connect GitHub to access it.",
     ghNotConnected: "GitHub is not connected. Use the GitHub row to connect.",
     ghExpired: "GitHub connection expired. Reconnect with GitHub.",
@@ -169,6 +187,16 @@
     return !!safeRelPath(p) && !SKIP_DIR.test(p) && !SKIP_DOTTED.test(p) &&
       !SKIP_ARCHIVE_ARTIFACT.test(p) && !SKIP_DOCS.test(p) &&
       !SKIP_LOCKFILES.test(p) && !SKIP_SECRETS.test(p) && !SKIP_FILE.test(p);
+  }
+
+  /* A ZIP can be perfectly valid, survive keepPath, and still hold no site:
+     a lone package.json, a folder of .txt notes, a CSS-only export. keepPath
+     is a deny-list, so it lets all of that through. This is the matching
+     allow-list — one of these has to be present or there is nothing to audit.
+     Mirrored in pipeline.ts as hasSiteCode(); change one, change both. */
+  var SITE_CODE = /\.(html?|js|jsx|ts|tsx|vue|svelte|astro|php)$/i;
+  function hasSiteCode(paths) {
+    return paths.some(function (p) { return SITE_CODE.test(p); });
   }
 
   /* A copy of safeRelPath() in pipeline.ts — same reason as keepPath above.
@@ -432,14 +460,58 @@
     });
   }
 
+  /* A .zip is one file, so its own size is the thing to weigh. Anything else
+     is weighed as a sum — the node_modules case is thousands of small files,
+     not one big one, and checking them one at a time never catches it. The sum
+     counts only what keepPath keeps: refusing a folder over bytes we were
+     going to throw away anyway would be us inventing a limit. */
+  function overSizeLimit(entries, lone) {
+    if (lone) return lone.size > MAX_ZIP_BYTES;
+    var total = 0;
+    for (var i = 0; i < entries.length; i++) {
+      if (!keepPath(entries[i].path)) continue;
+      total += entries[i].file.size;
+      if (total > MAX_ZIP_BYTES) return true;
+    }
+    return false;
+  }
+
+  /* A .zip file starts with "PK" and one of three record signatures. The
+     extension proves nothing — a renamed RAR, a PDF or an image reaches
+     JSZip and dies there with an English parser error, long after a scan row
+     has been opened for it. Read four bytes instead and stop it at the door. */
+  function looksLikeZip(file) {
+    return new Promise(function (resolve) {
+      var fr = new FileReader();
+      fr.onload = function () {
+        var b = new Uint8Array(fr.result || new ArrayBuffer(0));
+        if (b.length < 4 || b[0] !== 0x50 || b[1] !== 0x4b) { resolve(false); return; }
+        var ok = (b[2] === 0x03 && b[3] === 0x04) ||  /* local file header */
+                 (b[2] === 0x05 && b[3] === 0x06) ||  /* empty archive */
+                 (b[2] === 0x07 && b[3] === 0x08);    /* spanned archive */
+        resolve(ok);
+      };
+      fr.onerror = function () { resolve(false); };
+      fr.readAsArrayBuffer(file.slice(0, 4));
+    });
+  }
+
   function setPicked(entries) {
     hideError();
     if (!entries || !entries.length) return;
-    var over = entries.filter(function (e) { return e.file.size > MAX_ZIP_BYTES; });
-    if (over.length) { showError(T.zipTooBig); return; }
+    var single = entries.length === 1 ? entries[0] : null;
+    var lone = single && /\.zip$/i.test(single.file.name) ? single.file : null;
+    if (overSizeLimit(entries, lone)) { showError(T.zipTooBig); return; }
+    if (!lone) { commitPicked(entries, single); return; }
+    looksLikeZip(lone).then(function (ok) {
+      if (!ok) { showError(T.zipNotZip); return; }
+      commitPicked(entries, single);
+    });
+  }
+
+  function commitPicked(entries, single) {
     picked = entries;
     pickedRoot = commonRoot(entries);
-    var single = entries.length === 1 ? entries[0] : null;
     els["picked-what"].textContent = single
       ? single.file.name
       : T.filesPicked(entries.length, pickedRoot);
@@ -474,13 +546,18 @@
     var ref = isZip ? lone.name : T.filesPicked(picked.length, pickedRoot);
     var scanId = null;
 
-    createScan("zip", ref).then(function (id) {
-      scanId = id;
+    /* The bundle is built before the scan row exists on purpose: a corrupt
+       archive, an empty one, or one with no site code in it must not leave a
+       dead "pending" row in the user's history for a run that never started. */
+    Promise.resolve().then(function () {
       return isZip ? bundleFromZip(lone) : bundleFromEntries(picked);
     }).then(function (bundle) {
       if (!bundle) throw new Error("empty");
       setStage(2);
-      return uploadBundle(scanId, bundle);
+      return createScan("zip", ref).then(function (id) {
+        scanId = id;
+        return uploadBundle(scanId, bundle);
+      });
     }).then(function () {
       return runDetect(scanId);
     }).catch(function (e) {
@@ -488,11 +565,35 @@
     });
   }
 
-  /* Strip the single leading top-level dir exported zips wrap everything in,
-     then sanitise — the result is the path that gets stored and, later, the
-     path of an entry in the ZIP the user unpacks. keepPath only decides
-     whether to carry a file; this decides what it is called. */
-  function stripRoot(p) { return safeRelPath(p.replace(/^[^/]+\//, "")); }
+  /* Zips wrap their contents in a folder, or they don't, depending on which
+     tool and which OS made them — and some wrap twice, because the user
+     compressed a folder that already held a folder of the same name.
+     So: find the prefix that EVERY entry shares, one level at a time, and
+     strip exactly that much. Dropping the first segment unconditionally is
+     what this used to do, and it quietly flattened css/ and js/ into the root
+     of any zip that had no wrapper at all. The result is the path that gets
+     stored and, later, the path of an entry in the ZIP the user unpacks. */
+  function commonZipPrefix(names) {
+    var prefix = "";
+    var rest = names.slice();
+    for (;;) {
+      var root = null;
+      for (var i = 0; i < rest.length; i++) {
+        var cut = rest[i].indexOf("/");
+        if (cut < 0) return prefix;              /* a file sits at this level */
+        var seg = rest[i].slice(0, cut);
+        if (root === null) root = seg;
+        else if (seg !== root) return prefix;    /* more than one root here */
+      }
+      if (root === null) return prefix;
+      prefix += root + "/";
+      rest = rest.map(function (n) { return n.slice(root.length + 1); });
+    }
+  }
+
+  function stripRoot(p, prefix) {
+    return safeRelPath(prefix && p.indexOf(prefix) === 0 ? p.slice(prefix.length) : p);
+  }
 
   /* The same, for a folder pick: drop the common root the browser reports. */
   function relOf(p) { return safeRelPath(pickedRoot ? p.replace(pickedRoot + "/", "") : p); }
@@ -500,12 +601,21 @@
   function bundleFromZip(file) {
     return import(JSZIP_CDN).then(function (mod) {
       var JSZip = mod.default || mod;
-      return JSZip.loadAsync(file);
+      /* The header was checked at pick time, so a failure here is a zip that
+         is truncated or otherwise damaged past its first four bytes. Same
+         thing from the user's side, so: same message, not a parser dump. */
+      return JSZip.loadAsync(file).catch(function () {
+        throw new Error("not_a_zip");
+      });
     }).then(function (zip) {
       setStage(1);
       clearCarry();
       var all = Object.keys(zip.files).filter(function (n) { return !zip.files[n].dir; });
+      var prefix = commonZipPrefix(all);
       var names = all.filter(keepPath);
+      /* Checked before a single entry is decompressed, and against what
+         survived the filter — not against what happened to fit in the cap. */
+      if (!hasSiteCode(names)) throw new Error("no_site_code");
       /* Read the excluded-but-owed files as bytes, not text: a .p12 or a
          keystore is binary, and decoding it would hand the user back a
          corrupted file. */
@@ -514,7 +624,7 @@
       carry.forEach(function (n) {
         carryChain = carryChain.then(function () {
           return zip.files[n].async("uint8array").then(function (bytes) {
-            var rel = stripRoot(n);
+            var rel = stripRoot(n, prefix);
             if (rel) rememberCarry(rel, bytes, bytes.length);
           }).catch(function () {});
         });
@@ -526,7 +636,7 @@
           if (total >= MAX_BUNDLE_BYTES) return;
           return zip.files[n].async("string").then(function (text) {
             if (text.length > MAX_FILE_BYTES) return;
-            var rel = stripRoot(n);
+            var rel = stripRoot(n, prefix);
             if (!rel) return;
             var block = fileBlock(rel, text);
             total += block.length; parts.push(block);
@@ -548,6 +658,9 @@
       if (rel) rememberCarry(rel, e.file, e.file.size);
     });
     var keep = entries.filter(function (e) { return keepPath(e.path); });
+    if (!hasSiteCode(keep.map(function (e) { return e.path; }))) {
+      throw new Error("no_site_code");
+    }
     var parts = [], total = 0;
     var chain = Promise.resolve();
     keep.forEach(function (e) {
@@ -604,15 +717,28 @@
     fetch("https://api.github.com/repos/" + m.owner + "/" + m.repo, {
       headers: { Accept: "application/vnd.github+json" }
     }).then(function (r) {
-      if (r.status === 404) { setUrlStatus(T.urlNotFound, "err"); return null; }
+      if (r.status === 404) { setUrlStatus(T.urlNotFound(ghConnected), "err"); return null; }
+      if (r.status === 403 || r.status === 429) {
+        /* 403 used to fall through to the success path: the body parsed, it
+           had no `private` field, and the repo was reported as found. It is
+           either the 60/hr unauthenticated cap or a blocked repo — and only
+           the first is worth telling the user to wait out. */
+        var limited = r.headers.get("x-ratelimit-remaining") === "0" || r.status === 429;
+        setUrlStatus(limited ? T.urlRateLimited : T.urlNotFound(ghConnected), "err");
+        return null;
+      }
+      if (!r.ok) { setUrlStatus(T.urlNotFound(ghConnected), "err"); return null; }
       return r.json();
     }).then(function (data) {
       if (!data) return;
+      /* Only a real repo object is a pass. Anything else that happens to be
+         JSON — an error envelope, a redirect body — is not. */
+      if (!data.full_name && !data.name) { setUrlStatus(T.urlNotFound(ghConnected), "err"); return; }
       if (data.private && !ghConnected) { setUrlStatus(T.urlPrivate, "err"); return; }
       urlValid = { owner: data.owner ? data.owner.login : m.owner, repo: data.name || m.repo, ref: data.default_branch || undefined, full: data.full_name || (m.owner + "/" + m.repo) };
       setUrlStatus(T.urlOk, "ok");
       els["url-start"].disabled = false;
-    }).catch(function () { setUrlStatus(T.urlNotFound, "err"); });
+    }).catch(function () { setUrlStatus(T.urlNotFound(ghConnected), "err"); });
   }
 
   function setUrlStatus(msg, cls) {
@@ -1690,7 +1816,10 @@
     var msg = T.errGeneric;
     var body = e && e.body;
     var reason = body && body.error;
-    if (e && e.message === "empty") msg = T.zipEmpty;
+    if (e && e.message === "not_a_zip") msg = T.zipNotZip;
+    else if (e && e.message === "no_site_code") msg = T.zipNoSiteCode;
+    else if (reason === "no_site_code") msg = T.zipNoSiteCode;
+    else if (e && e.message === "empty") msg = T.zipEmpty;
     else if (reason === "repo_not_found_or_no_access") msg = T.errRepoPrivate;
     else if (reason === "no_scannable_files") msg = T.errNoFiles;
     else if (reason === "github_not_connected") msg = T.ghNotConnected;
