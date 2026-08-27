@@ -10,6 +10,8 @@
 // fallback. That pipeline (design -> apply -> QA) was removed when the rebuild
 // became the only path a user can take, and the engine went with it.
 
+import { isNonPageCodeWithContent } from "./frontend.ts";
+
 export interface Signal {
   id: number;
   name: string;
@@ -124,23 +126,37 @@ export function assembleFinalFiles(
  * Files nothing links to any more.
  *
  * Only stylesheets and scripts are candidates: an unreferenced image may still
- * be wanted, and another HTML page is a page, not an asset. A file is kept if
- * ANY surviving page mentions its name, so a stylesheet shared with a page we
- * did not rebuild stays. The match is deliberately loose in the keeping
- * direction — a false keep costs nothing, a false delete costs a file.
+ * be wanted, and another HTML page is a page, not an asset. The match is
+ * deliberately loose in the keeping direction — a false keep costs nothing, a
+ * false delete costs a file.
+ *
+ * "Referenced" used to mean "named in some HTML page", which quietly assumed
+ * every script a site loads is loaded by a <script> tag. On any site built out
+ * of ES modules it is not: main.js is in the markup and the four files it
+ * imports are not, and neither is a stylesheet pulled in by @import or a
+ * service worker registered from code. Measured on an ordinary module site,
+ * this deleted js/ui.js, js/api-client.js, css/tokens.css and sw.js and left
+ * main.js importing files that no longer existed. So the reference corpus is
+ * now every text file in the project, not only its pages.
+ *
+ * The second guard is what a file IS. The candidate extensions — .css, .js,
+ * .mjs — are also what a Node server, an API handler and a vite.config.js are
+ * made of, and no page links to any of those either. They are not the website,
+ * but they are the user's project, and this function hands its answer straight
+ * to a delete.
  */
 export function unreferencedAssets(files: Map<string, string>): string[] {
-  const pages = [...files.entries()]
-    .filter(([p]) => /\.html?$/i.test(p))
-    .map(([, c]) => c)
-    .join("\n");
-  if (!pages) return [];
+  const all = [...files.entries()];
+  if (!all.some(([p]) => /\.html?$/i.test(p))) return [];
   const dead: string[] = [];
-  for (const path of files.keys()) {
+  for (const [path, content] of all) {
     if (!/\.(css|js|mjs)$/i.test(path)) continue;
+    if (isNonPageCodeWithContent(path, content)) continue;
     const name = path.split("/").pop() ?? path;
-    // Quoted in an href/src, or named anywhere in an import — either counts.
-    if (pages.includes(name)) continue;
+    // Named in any OTHER file — a page's src=, another module's import, a
+    // stylesheet's @import. Its own body does not count: a sourceMappingURL
+    // comment naming the file would otherwise keep every minified asset alive.
+    if (all.some(([p, c]) => p !== path && c.includes(name))) continue;
     dead.push(path);
   }
   return dead;
@@ -268,8 +284,40 @@ export function pickHomePage(paths: Iterable<string>): string | null {
  * no usable links at all. Fully deterministic; no model, no network.
  */
 export function pickHomePageSmart(files: Map<string, string>): string | null {
+  return pickHomePageDiagnostic(files).path;
+}
+
+/** How the home page was chosen, for the log. `path` is what the run uses. */
+export interface HomePagePick {
+  path: string | null;
+  /** "only" one page · "links" the graph decided · "names" no usable links. */
+  method: "only" | "links" | "names";
+  /** Points between the winner and the runner-up. 0 means a coin toss. */
+  margin: number;
+  runnerUp: string | null;
+  pages: number;
+}
+
+/**
+ * The pick, with its reasoning attached.
+ *
+ * The choice decides what a whole paid run is worth, and until now it left no
+ * trace: a bundle whose pages link to nothing at all falls back to the
+ * name/depth heuristic, and a run where two pages score identically is settled
+ * by a tie-break, and both looked exactly like a confident answer from the
+ * outside. This changes nothing about which page wins — it only says how.
+ */
+export function pickHomePageDiagnostic(files: Map<string, string>): HomePagePick {
   const pages = [...files.keys()].filter((p) => /\.html?$/i.test(p));
-  if (pages.length <= 1) return pages[0] ?? pickHomePage(files.keys());
+  if (pages.length <= 1) {
+    return {
+      path: pages[0] ?? pickHomePage(files.keys()),
+      method: "only",
+      margin: 0,
+      runnerUp: null,
+      pages: pages.length,
+    };
+  }
 
   // Match resolved hrefs to real files case-insensitively; return real casing.
   const byNorm = new Map<string, string>();
@@ -300,7 +348,17 @@ export function pickHomePageSmart(files: Map<string, string>): string | null {
   }
 
   const linkTotal = [...inbound.values()].reduce((a, b) => a + b, 0);
-  if (linkTotal === 0) return pickHomePage(pages); // no usable links — fall back
+  if (linkTotal === 0) {
+    // Nothing links anywhere: an unlinked export, a one-file-per-page dump, or
+    // markup we failed to parse. The name/depth heuristic is all that is left.
+    return {
+      path: pickHomePage(pages),
+      method: "names",
+      margin: 0,
+      runnerUp: null,
+      pages: pages.length,
+    };
+  }
 
   const maxInbound = Math.max(1, ...inbound.values());
   const maxLogo = Math.max(1, ...logo.values());
@@ -322,14 +380,27 @@ export function pickHomePageSmart(files: Map<string, string>): string | null {
 
   let best = pages[0];
   let bestScore = score(best);
+  let runnerUp: string | null = null;
+  let runnerUpScore = -Infinity;
   for (const page of pages.slice(1)) {
     const s = score(page);
     if (s > bestScore || (s === bestScore && rankLess(page, best))) {
+      runnerUp = best;
+      runnerUpScore = bestScore;
       best = page;
       bestScore = s;
+    } else if (s > runnerUpScore) {
+      runnerUp = page;
+      runnerUpScore = s;
     }
   }
-  return best;
+  return {
+    path: best,
+    method: "links",
+    margin: runnerUp === null ? 0 : bestScore - runnerUpScore,
+    runnerUp,
+    pages: pages.length,
+  };
 }
 
 /** Pull every <a> link with a hint of whether it is a logo/brand link. */

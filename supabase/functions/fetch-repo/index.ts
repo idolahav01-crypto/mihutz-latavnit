@@ -6,6 +6,7 @@
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { UntarStream } from "jsr:@std/tar@0.1/untar-stream";
 import { isSiteCode, keepPath, safeRelPath } from "../_shared/pipeline.ts";
+import { orderForBundle } from "../_shared/frontend.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -13,6 +14,8 @@ const SERVER_GITHUB_TOKEN = Deno.env.get("GITHUB_TOKEN") ?? "";
 
 const MAX_BUNDLE_BYTES = 300_000; // cap code sent to detect (context + cost)
 const MAX_FILE_BYTES = 60_000; // skip single huge files
+// How much we are willing to hold before choosing what fits in the cap above.
+const MAX_READ_BYTES = 3 * MAX_BUNDLE_BYTES;
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
@@ -90,10 +93,13 @@ Deno.serve(async (req) => {
       .pipeThrough(new DecompressionStream("gzip"))
       .pipeThrough(new UntarStream());
 
-    const parts: string[] = [];
-    let total = 0;
-    let fileCount = 0;
-    let siteFiles = 0;
+    // Read wider than the cap, then choose. The cap is filled in iteration
+    // order, and tar order is the repo's directory order — so on a project
+    // with a backend, api/ and routes/ can fill 300KB before the tar reaches
+    // the page the audit exists to read. Collecting first costs a bounded
+    // amount of memory and lets the website go in ahead of the plumbing.
+    const collected: Array<[string, string]> = [];
+    let read = 0;
     const decoder = new TextDecoder();
 
     for await (const entry of entries) {
@@ -106,7 +112,7 @@ Deno.serve(async (req) => {
         await entry.readable.cancel();
         continue;
       }
-      if (total >= MAX_BUNDLE_BYTES) {
+      if (read >= MAX_READ_BYTES) {
         await entry.readable.cancel();
         continue;
       }
@@ -114,8 +120,18 @@ Deno.serve(async (req) => {
         await new Response(entry.readable).arrayBuffer(),
       );
       if (buf.byteLength > MAX_FILE_BYTES) continue;
-      const text = decoder.decode(buf);
-      const block = `=== FILE: ${rel} ===\n${text}\n\n`;
+      read += buf.byteLength;
+      collected.push([rel, decoder.decode(buf)]);
+    }
+
+    const byPath = new Map(collected);
+    const parts: string[] = [];
+    let total = 0;
+    let fileCount = 0;
+    let siteFiles = 0;
+    for (const rel of orderForBundle([...byPath.keys()])) {
+      if (total >= MAX_BUNDLE_BYTES) break;
+      const block = `=== FILE: ${rel} ===\n${byPath.get(rel)}\n\n`;
       total += block.length;
       fileCount += 1;
       if (isSiteCode(rel)) siteFiles += 1;

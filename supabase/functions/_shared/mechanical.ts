@@ -38,7 +38,8 @@ const META = new Map<number, SignalMeta>(
 
 /** The ids this module owns. The model is never asked about them. */
 export const MECHANICAL_IDS: number[] = [
-  1, 2, 27, 30, 31, 40, 41, 45, 56, 61, 64, 78, 94, 98, 99, 109,
+  1, 2, 8, 13, 27, 28, 29, 30, 31, 35, 36, 40, 41, 45, 55, 56, 61, 64, 78, 94,
+  97, 98, 99, 109,
 ];
 
 interface Verdict {
@@ -110,6 +111,12 @@ function allCss(files: Map<string, string>): Array<[string, string]> {
     }
   }
   return out;
+}
+
+/** One attribute off a single tag. */
+function attr(tag: string, name: string): string | null {
+  const m = tag.match(new RegExp(`\\b${name}\\s*=\\s*("([^"]*)"|'([^']*)'|([^\\s"'>]+))`, "i"));
+  return m ? (m[2] ?? m[3] ?? m[4] ?? "") : null;
 }
 
 function htmlFiles(files: Map<string, string>): Array<[string, string]> {
@@ -713,20 +720,332 @@ function checkCanonical(files: Map<string, string>): Verdict {
   };
 }
 
+// ---------- headings ----------
+
+/** Every heading in document order, as [level, text, raw]. */
+function headings(html: string): Array<[number, string, string]> {
+  const out: Array<[number, string, string]> = [];
+  for (const m of visibleMarkup(html).matchAll(/<h([1-6])\b[^>]*>([\s\S]*?)<\/h\1>/gi)) {
+    out.push([Number(m[1]), m[2].replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim(), m[0]]);
+  }
+  return out;
+}
+
+/** #28 — more than one <h1> on a page. A count, nothing else. */
+function checkMultipleH1(files: Map<string, string>): Verdict {
+  const pages = htmlFiles(files);
+  if (!pages.length) return { present: false, applicable: false, why: "אין קבצי HTML." };
+  const bad: Array<{ file: string; snippet: string }> = [];
+  let total = 0;
+  for (const [file, content] of pages) {
+    const h1s = headings(content).filter(([lvl]) => lvl === 1);
+    if (h1s.length > 1) {
+      total += h1s.length;
+      bad.push({ file, snippet: clip(`${h1s.length} תגיות h1: ` + h1s.map(([, t]) => t || "(ריק)").join(" | ")) });
+    }
+  }
+  if (!bad.length) return { present: false, why: "בכל עמוד יש h1 אחד לכל היותר." };
+  return { present: true, why: "יש עמוד עם יותר מ-h1 אחד.", evidence: bad.slice(0, 5), occurrences: total };
+}
+
+/**
+ * #29 — a skipped level in the heading hierarchy.
+ *
+ * The written rule names two faults and this implements both: a jump down of
+ * more than one level (h2 straight to h4), and an h3 that appears before the
+ * page's first h2. Nothing else counts — going back UP any distance is normal
+ * and is not a skip.
+ */
+function checkHeadingOrder(files: Map<string, string>): Verdict {
+  const pages = htmlFiles(files);
+  if (!pages.length) return { present: false, applicable: false, why: "אין קבצי HTML." };
+  const bad: Array<{ file: string; snippet: string }> = [];
+  let total = 0;
+  for (const [file, content] of pages) {
+    const hs = headings(content);
+    if (hs.length < 2) continue;
+    let seenH2 = false;
+    let prev = hs[0][0];
+    if (prev === 2) seenH2 = true;
+    for (const [lvl, text] of hs.slice(1)) {
+      if (lvl > prev + 1) {
+        total += 1;
+        bad.push({ file, snippet: clip(`h${prev} ואחריו h${lvl}: "${text || "(ריק)"}"`) });
+      } else if (lvl === 3 && !seenH2) {
+        total += 1;
+        bad.push({ file, snippet: clip(`h3 לפני ה-h2 הראשון: "${text || "(ריק)"}"`) });
+      }
+      if (lvl === 2) seenH2 = true;
+      prev = lvl;
+    }
+  }
+  if (!bad.length) return { present: false, why: "היררכיית הכותרות רציפה בכל עמוד." };
+  return { present: true, why: "יש דילוג בהיררכיית הכותרות.", evidence: bad.slice(0, 5), occurrences: total };
+}
+
+/** #97 — the same meta description on more than one page. */
+function checkDuplicateDescription(files: Map<string, string>): Verdict {
+  const pages = htmlFiles(files);
+  if (pages.length < 2) {
+    return { present: false, applicable: false, why: "לעמוד יחיד אין מול מה לשכפל description." };
+  }
+  const byDesc = new Map<string, string[]>();
+  for (const [file, content] of pages) {
+    const desc = (metaContent(head(content), "name", "description") ?? "").trim();
+    if (!desc) continue; // an absent description is #30's business, not this one
+    const key = desc.toLowerCase();
+    byDesc.set(key, [...(byDesc.get(key) ?? []), file]);
+  }
+  const dupes = [...byDesc.entries()].filter(([, f]) => f.length > 1);
+  if (!dupes.length) {
+    return { present: false, why: "אין שתי עמודים עם אותה meta description." };
+  }
+  return {
+    present: true,
+    why: "אותה meta description חוזרת ביותר מעמוד אחד.",
+    evidence: dupes.slice(0, 5).map(([desc, f]) => ({
+      file: f[0],
+      snippet: clip(`${f.length} עמודים (${f.slice(0, 3).join(", ")}) חולקים: ${desc}`),
+    })),
+    occurrences: dupes.reduce((n, [, f]) => n + f.length, 0),
+  };
+}
+
+// ---------- fonts, colour, images ----------
+
+/** #8 — a web font loaded without font-display. */
+function checkFontDisplay(files: Map<string, string>): Verdict {
+  const faces: Array<{ file: string; snippet: string }> = [];
+  let webfonts = 0;
+
+  for (const [file, css] of allCss(files)) {
+    for (const m of css.matchAll(/@font-face\s*\{[\s\S]*?\}/gi)) {
+      webfonts += 1;
+      if (!/font-display\s*:\s*(swap|optional)/i.test(m[0])) {
+        faces.push({ file, snippet: clip(m[0]) });
+      }
+    }
+    // @import url("https://fonts.googleapis.com/...") inside a stylesheet.
+    for (const m of css.matchAll(/@import\s+(?:url\()?["']?(https?:\/\/fonts\.googleapis\.com[^"')\s]+)/gi)) {
+      webfonts += 1;
+      if (!/[?&]display=(swap|optional)/i.test(m[1])) faces.push({ file, snippet: clip(m[1]) });
+    }
+  }
+  // <link href="https://fonts.googleapis.com/css2?family=...">
+  for (const [file, content] of htmlFiles(files)) {
+    for (const m of content.matchAll(/<link\b[^>]*href\s*=\s*["'](https?:\/\/fonts\.googleapis\.com[^"']+)["'][^>]*>/gi)) {
+      if (/\brel\s*=\s*["'](preconnect|dns-prefetch)["']/i.test(m[0])) continue;
+      webfonts += 1;
+      if (!/[?&]display=(swap|optional)/i.test(m[1])) faces.push({ file, snippet: clip(m[1]) });
+    }
+  }
+
+  if (!webfonts) {
+    return { present: false, applicable: false, why: "האתר לא טוען פונט web — אין למה להחיל font-display." };
+  }
+  if (!faces.length) {
+    return { present: false, why: "לכל פונט שנטען מוגדר font-display: swap או optional." };
+  }
+  return {
+    present: true,
+    why: "פונט נטען ללא font-display: swap / optional.",
+    evidence: faces.slice(0, 5),
+    occurrences: faces.length,
+  };
+}
+
+/**
+ * #13 — #000 as the base background in dark mode.
+ *
+ * Only inside a dark context, per the rule: a dark-only site whose body is
+ * black is the same fault, but a light site with a black footer is not.
+ */
+const DARK_CONTEXT = /@media[^{]*prefers-color-scheme\s*:\s*dark|\.dark\b|\[data-theme\s*=\s*["']?dark|:root\.dark|html\.dark/i;
+const BLACK = /background(-color)?\s*:\s*(#000{1,2}([0-9a-f]{2})?\b|#000000\b|black\b|rgba?\(\s*0\s*,\s*0\s*,\s*0\s*[,)])/i;
+
+/** The body of every `@media (prefers-color-scheme: dark) { … }` block. */
+function darkMediaBodies(css: string): string[] {
+  const out: string[] = [];
+  const re = /@media[^{]*prefers-color-scheme\s*:\s*dark[^{]*\{/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(css)) !== null) {
+    let depth = 1;
+    let i = re.lastIndex;
+    while (i < css.length && depth > 0) {
+      if (css[i] === "{") depth++;
+      else if (css[i] === "}") depth--;
+      i++;
+    }
+    out.push(css.slice(re.lastIndex, i - 1));
+    re.lastIndex = i;
+  }
+  return out;
+}
+
+/** Rules in a chunk of CSS whose selector names the page's base surface. */
+function baseSurfaceRules(chunk: string): Array<[string, string]> {
+  const out: Array<[string, string]> = [];
+  for (const m of chunk.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    const sel = m[1].trim();
+    if (!/(^|[\s,>+~])(body|html|:root)\b/i.test(sel)) continue;
+    out.push([sel, m[2]]);
+  }
+  return out;
+}
+
+function checkDarkBlack(files: Map<string, string>): Verdict {
+  const hits: Array<{ file: string; snippet: string }> = [];
+  let darkSeen = false;
+
+  for (const [file, css] of allCss(files)) {
+    if (!DARK_CONTEXT.test(css)) continue;
+    darkSeen = true;
+
+    // Inside a dark media query, any base-surface rule is a dark-mode rule.
+    for (const body of darkMediaBodies(css)) {
+      for (const [sel, decls] of baseSurfaceRules(body)) {
+        if (BLACK.test(decls)) hits.push({ file, snippet: clip(`@media dark → ${sel} { ${decls.trim()} }`) });
+      }
+    }
+    // Outside one, the selector itself has to carry the dark theme.
+    for (const [sel, decls] of baseSurfaceRules(css)) {
+      if (!DARK_CONTEXT.test(sel)) continue;
+      if (BLACK.test(decls)) hits.push({ file, snippet: clip(`${sel} { ${decls.trim()} }`) });
+    }
+  }
+
+  if (!darkSeen) {
+    return { present: false, applicable: false, why: "אין לאתר מצב dark — הסימן לא ישים." };
+  }
+  if (!hits.length) {
+    return { present: false, why: "מצב ה-dark לא משתמש בשחור מוחלט כרקע הבסיס." };
+  }
+  return {
+    present: true,
+    why: "רקע הבסיס במצב dark הוא שחור מוחלט (#000).",
+    evidence: hits.slice(0, 5),
+    occurrences: hits.length,
+  };
+}
+
+/** #35 — <img> without both width and height. */
+function checkImageDimensions(files: Map<string, string>): Verdict {
+  const bad: Array<{ file: string; snippet: string }> = [];
+  let imgs = 0;
+  for (const [file, content] of htmlFiles(files)) {
+    for (const m of visibleMarkup(content).matchAll(/<img\b[^>]*>/gi)) {
+      imgs += 1;
+      const hasW = /\bwidth\s*=\s*["']?\d/i.test(m[0]);
+      const hasH = /\bheight\s*=\s*["']?\d/i.test(m[0]);
+      if (!hasW || !hasH) bad.push({ file, snippet: clip(m[0]) });
+    }
+  }
+  if (!imgs) return { present: false, applicable: false, why: "אין תגיות <img> בעמודים." };
+  if (!bad.length) return { present: false, why: "לכל <img> יש width ו-height מפורשים." };
+  return {
+    present: true,
+    why: "יש <img> ללא width ו-height — מקור ל-CLS.",
+    evidence: bad.slice(0, 5),
+    occurrences: bad.length,
+  };
+}
+
+/**
+ * #36 — raster images still served as JPG/PNG.
+ *
+ * The binaries never reach the bundle (keepPath drops them), so this reads the
+ * REFERENCES, which is what the written rule points at: "src מכיל .jpg/.png".
+ *
+ * Only places that actually PAINT an image count — img/source src and srcset,
+ * and CSS url(). A first pass swept every .jpg-looking string in the markup
+ * and flagged an og:image, which is a social-card preview nobody downloads
+ * while the page renders. That is the wrong fault at the wrong weight.
+ */
+function checkImageFormat(files: Map<string, string>): Verdict {
+  const old: Array<{ file: string; snippet: string }> = [];
+  let refs = 0;
+
+  const note = (file: string, url: string) => {
+    if (!/\.(jpe?g|png|webp|avif)(\?[^\s]*)?$/i.test(url)) return;
+    refs += 1;
+    if (/\.(jpe?g|png)(\?[^\s]*)?$/i.test(url)) old.push({ file, snippet: clip(url, 80) });
+  };
+
+  for (const [file, content] of htmlFiles(files)) {
+    for (const m of visibleMarkup(content).matchAll(/<(img|source)\b[^>]*>/gi)) {
+      const src = attr(m[0], "src");
+      if (src) note(file, src);
+      const set = attr(m[0], "srcset");
+      if (set) {
+        for (const cand of set.split(",")) note(file, cand.trim().split(/\s+/)[0]);
+      }
+    }
+  }
+  for (const [file, css] of allCss(files)) {
+    for (const m of css.matchAll(/url\(\s*["']?([^"')]+)["']?\s*\)/gi)) note(file, m[1].trim());
+  }
+
+  if (!refs) return { present: false, applicable: false, why: "אין תמונות רסטר שהעמוד מציג." };
+  if (!old.length) return { present: false, why: "כל התמונות מוגשות ב-WebP או AVIF." };
+  return {
+    present: true,
+    why: "תמונות מוגשות ב-JPG/PNG ולא ב-WebP/AVIF.",
+    evidence: old.slice(0, 5),
+    occurrences: old.length,
+  };
+}
+
+/** #55 — a div or span wired as a button without the keyboard half. */
+function checkClickableDiv(files: Map<string, string>): Verdict {
+  const bad: Array<{ file: string; snippet: string }> = [];
+  for (const [file, content] of htmlFiles(files)) {
+    for (const m of visibleMarkup(content).matchAll(/<(div|span)\b[^>]*\bonclick\s*=[^>]*>/gi)) {
+      const tag = m[0];
+      const isButton = /\brole\s*=\s*["']button["']/i.test(tag);
+      const focusable = /\btabindex\s*=\s*["']?0/i.test(tag);
+      const keyboard = /\bon(keydown|keypress|keyup)\s*=/i.test(tag);
+      if (isButton && focusable && keyboard) continue;
+      const missing = [
+        isButton ? null : 'role="button"',
+        focusable ? null : 'tabindex="0"',
+        keyboard ? null : "onkeydown",
+      ].filter(Boolean).join(", ");
+      bad.push({ file, snippet: clip(`חסר ${missing} — ${tag}`) });
+    }
+  }
+  if (!bad.length) {
+    return { present: false, why: "אין div/span עם onclick שחסרים לו role, tabindex ומקלדת." };
+  }
+  return {
+    present: true,
+    why: "יש <div>/<span> עם onclick ללא role=\"button\" + tabindex=\"0\" + onkeydown.",
+    evidence: bad.slice(0, 5),
+    occurrences: bad.length,
+  };
+}
+
 const CHECKS: Record<number, (f: Map<string, string>) => Verdict> = {
   1: checkInter,
   2: checkWornFont,
+  8: checkFontDisplay,
+  13: checkDarkBlack,
   27: checkJsonLd,
+  28: checkMultipleH1,
+  29: checkHeadingOrder,
   30: checkMetaDescription,
   31: checkOpenGraph,
+  35: checkImageDimensions,
+  36: checkImageFormat,
   40: checkFontPreload,
   41: checkAssetVersioning,
   45: checkReducedMotion,
+  55: checkClickableDiv,
   56: checkFocusOutline,
   61: checkDataLayer,
   64: checkPhysicalProperties,
   78: checkNumberDirection,
   94: checkSkipLink,
+  97: checkDuplicateDescription,
   98: checkOgImage,
   99: checkCanonical,
   109: checkEmoji,

@@ -199,6 +199,35 @@
     return paths.some(function (p) { return SITE_CODE.test(p); });
   }
 
+  /* A copy of isNonPageCode()/orderForBundle() in _shared/frontend.ts, for the
+     same reason as keepPath above: the browser bundles before it uploads and
+     cannot import from there. The tests live with that copy.
+
+     The 300KB cap is filled in iteration order, and a ZIP's order is whatever
+     the compressor wrote. On a project with a backend that means api/ and
+     routes/ can fill the budget before the reader reaches the page the audit
+     exists to read. Nothing is excluded — the website simply goes first. */
+  var SERVER_DIR = /(^|\/)(api|routes?|controllers?|middlewares?|server|backend|lambda|handlers?|migrations|prisma|db|netlify|supabase|functions)(\/|$)/i;
+  var TOOL_FILE = /(^|\/)([\w.-]*\.config\.(m|c)?[jt]s|gulpfile\.(m|c)?js|gruntfile\.(m|c)?js|karma\.conf\.js|webpack\.[\w.-]*\.(m|c)?js|jest\.setup\.(m|c)?js)$/i;
+  var SERVER_FILE = /^(server|app|index|main|start|bin|cli|worker|daemon)\.(m|c)?[jt]s$/i;
+  var SERVICE_WORKER = /(^|\/)(sw|service-worker|serviceworker|firebase-messaging-sw)\.(m|c)?js$/i;
+  var TEST_FILE = /(\.(test|spec)\.(m|c)?[jt]sx?$)|(^|\/)(__tests__|__mocks__|test|tests|e2e|cypress|playwright)(\/|$)/i;
+
+  function isNonPageCode(p) {
+    var base = p.split("/").pop() || p;
+    var atRoot = p.indexOf("/") === -1;
+    return SERVER_DIR.test(p) || TOOL_FILE.test(p) || SERVICE_WORKER.test(p) ||
+      TEST_FILE.test(p) || (atRoot && SERVER_FILE.test(base));
+  }
+
+  /* Stable within each group, so a project with no server code at all bundles
+     in exactly the order it did before. */
+  function orderForBundle(paths) {
+    var site = [], rest = [];
+    paths.forEach(function (p) { (isNonPageCode(p) ? rest : site).push(p); });
+    return site.concat(rest);
+  }
+
   /* A copy of safeRelPath() in pipeline.ts — same reason as keepPath above.
      Returns a path that can only name a file inside the project, or null.
      It matters most right here: the path in the bundle becomes the path of an
@@ -612,7 +641,7 @@
       clearCarry();
       var all = Object.keys(zip.files).filter(function (n) { return !zip.files[n].dir; });
       var prefix = commonZipPrefix(all);
-      var names = all.filter(keepPath);
+      var names = orderForBundle(all.filter(keepPath));
       /* Checked before a single entry is decompressed, and against what
          survived the filter — not against what happened to fit in the cap. */
       if (!hasSiteCode(names)) throw new Error("no_site_code");
@@ -657,7 +686,9 @@
       var rel = isCarryThrough(e.path) ? relOf(e.path) : null;
       if (rel) rememberCarry(rel, e.file, e.file.size);
     });
-    var keep = entries.filter(function (e) { return keepPath(e.path); });
+    var byPath = {};
+    entries.forEach(function (e) { if (keepPath(e.path)) byPath[e.path] = e; });
+    var keep = orderForBundle(Object.keys(byPath)).map(function (p) { return byPath[p]; });
     if (!hasSiteCode(keep.map(function (e) { return e.path; }))) {
       throw new Error("no_site_code");
     }

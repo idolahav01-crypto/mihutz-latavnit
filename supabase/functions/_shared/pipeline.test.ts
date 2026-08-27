@@ -7,6 +7,7 @@ import {
   keepPath,
   parseBundle,
   pickHomePage,
+  pickHomePageDiagnostic,
   pickHomePageSmart,
   presentSignals,
   serializeBundle,
@@ -422,4 +423,50 @@ Deno.test("isSiteCode: an upload with none of these has nothing to audit", () =>
   // The extension has to end the path, not merely appear in it.
   assertFalse(isSiteCode("html/readme.txt"));
   assertFalse(isSiteCode("app.js.bak"));
+});
+
+// ---------- how the home page was chosen, not just which ----------
+
+Deno.test("the pick reports that the link graph decided it", () => {
+  const files = new Map<string, string>([
+    ["welcome.html", `<h1>ברוכים הבאים</h1><a href="about.html">אודות</a>`],
+    ["about.html", `<a class="logo" href="welcome.html">לוגו</a><a href="contact.html">צור קשר</a>`],
+    ["contact.html", `<a class="logo" href="welcome.html">לוגו</a><a href="about.html">אודות</a>`],
+  ]);
+  const pick = pickHomePageDiagnostic(files);
+  assertEquals(pick.path, "welcome.html");
+  assertEquals(pick.method, "links");
+  assert(pick.margin > 0, "a clear winner should have a margin");
+  // The wrapper still returns exactly what it always did.
+  assertEquals(pickHomePageSmart(files), pick.path);
+});
+
+Deno.test("a bundle with no usable links says so instead of looking confident", () => {
+  const files = new Map<string, string>([
+    ["about.html", "<h1>אודות</h1>"],
+    ["index.html", "<h1>בית</h1>"],
+    ["contact.html", "<h1>צור קשר</h1>"],
+  ]);
+  const pick = pickHomePageDiagnostic(files);
+  assertEquals(pick.method, "names");
+  assertEquals(pick.path, "index.html"); // the name heuristic still gets it right
+  assertEquals(pick.margin, 0);
+});
+
+Deno.test("a single-page bundle is reported as such", () => {
+  const pick = pickHomePageDiagnostic(new Map([["only.html", "<h1>hi</h1>"]]));
+  assertEquals(pick.method, "only");
+  assertEquals(pick.path, "only.html");
+  assertEquals(pick.pages, 1);
+});
+
+Deno.test("the diagnostic names the runner-up it beat", () => {
+  const files = new Map<string, string>([
+    ["index.html", `<a href="about.html">אודות</a>`],
+    ["about.html", `<a class="logo" href="index.html">לוגו</a>`],
+  ]);
+  const pick = pickHomePageDiagnostic(files);
+  assertEquals(pick.path, "index.html");
+  assertEquals(pick.runnerUp, "about.html");
+  assertEquals(pick.pages, 2);
 });

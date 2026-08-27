@@ -26,7 +26,7 @@ const GOOD = `<!doctype html><html lang="he" dir="rtl"><head>
 <meta property="og:description" content="דוכן מיצים טבעיים בשוק הכרמל.">
 <meta property="og:image" content="https://juice.example/stand.jpg">
 <meta property="og:url" content="https://juice.example">
-<link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Heebo">
+<link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Heebo&display=swap">
 <link rel="stylesheet" href="/css/styles.abc12345.css">
 <link rel="canonical" href="https://juice.example/">
 <script type="application/ld+json">{"@context":"https://schema.org"}</script>
@@ -345,4 +345,180 @@ Deno.test("#78 absent: a number and a symbol on different lines are not a pair",
 ₪45 דמי טיפול לכל הזמנה</p></body></html>`,
   }, 78);
   assertEquals(v.present, false);
+});
+
+// ---------- #28 / #29 headings ----------
+
+Deno.test("#28 present: two h1 on one page", () => {
+  const html = `<html><body><h1>מיץ טרי</h1><h2>טעמים</h2><h1>סניפים</h1></body></html>`;
+  const s = verdict({ "index.html": html }, 28);
+  assertEquals(s.present, true);
+  assertEquals(s.total_occurrences, 2);
+});
+
+Deno.test("#28 absent: one h1, however many lower headings", () => {
+  const html = `<html><body><h1>מיץ</h1><h2>א</h2><h2>ב</h2><h3>ג</h3></body></html>`;
+  assertEquals(verdict({ "index.html": html }, 28).present, false);
+});
+
+Deno.test("#28 ignores an h1 inside a comment or a script", () => {
+  const html = `<html><body><h1>מיץ</h1><!-- <h1>ישן</h1> --><script>var t="<h1>x</h1>"</script></body></html>`;
+  assertEquals(verdict({ "index.html": html }, 28).present, false);
+});
+
+Deno.test("#29 present: h2 straight to h4", () => {
+  const html = `<html><body><h1>א</h1><h2>ב</h2><h4>ג</h4></body></html>`;
+  const s = verdict({ "index.html": html }, 29);
+  assertEquals(s.present, true);
+});
+
+Deno.test("#29 present: h3 before the first h2", () => {
+  const html = `<html><body><h1>א</h1><h3>ב</h3><h2>ג</h2></body></html>`;
+  assertEquals(verdict({ "index.html": html }, 29).present, true);
+});
+
+Deno.test("#29 absent: climbing back up is not a skip", () => {
+  const html = `<html><body><h1>א</h1><h2>ב</h2><h3>ג</h3><h2>ד</h2><h3>ה</h3></body></html>`;
+  assertEquals(verdict({ "index.html": html }, 29).present, false);
+});
+
+// ---------- #97 duplicate description ----------
+
+const withDesc = (d: string) =>
+  `<html><head><title>t</title><meta name="description" content="${d}"></head><body></body></html>`;
+
+Deno.test("#97 present: the same description on two pages", () => {
+  const s = verdict({
+    "index.html": withDesc("ברוכים הבאים לאתר שלנו"),
+    "about.html": withDesc("ברוכים הבאים לאתר שלנו"),
+  }, 97);
+  assertEquals(s.present, true);
+});
+
+Deno.test("#97 absent: every page describes itself", () => {
+  const s = verdict({
+    "index.html": withDesc("דוכן מיצים בשוק הכרמל"),
+    "about.html": withDesc("הסיפור של הדוכן משנת 1974"),
+  }, 97);
+  assertEquals(s.present, false);
+});
+
+Deno.test("#97 does not apply to a single-page site", () => {
+  const s = verdict({ "index.html": withDesc("דוכן מיצים") }, 97);
+  assertEquals(s.applicable, false);
+  assertEquals(s.present, false);
+});
+
+Deno.test("#97 leaves a MISSING description to #30", () => {
+  const bare = `<html><head><title>t</title></head><body></body></html>`;
+  assertEquals(verdict({ "a.html": bare, "b.html": bare }, 97).present, false);
+});
+
+// ---------- #8 font-display ----------
+
+Deno.test("#8 present: @font-face without font-display", () => {
+  const css = `@font-face{font-family:Heebo;src:url(/f/heebo.woff2)}`;
+  assertEquals(verdict({ "index.html": "<html><body></body></html>", "s.css": css }, 8).present, true);
+});
+
+Deno.test("#8 absent: swap is set", () => {
+  const css = `@font-face{font-family:Heebo;src:url(/f/heebo.woff2);font-display:swap}`;
+  assertEquals(verdict({ "index.html": "<html><body></body></html>", "s.css": css }, 8).present, false);
+});
+
+Deno.test("#8 present: a Google Fonts link with no display parameter", () => {
+  const html = `<html><head><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Heebo:wght@400"></head><body></body></html>`;
+  assertEquals(verdict({ "index.html": html }, 8).present, true);
+});
+
+Deno.test("#8 ignores a preconnect, which loads no font", () => {
+  const html = `<html><head><link rel="preconnect" href="https://fonts.googleapis.com"></head><body></body></html>`;
+  const s = verdict({ "index.html": html }, 8);
+  assertEquals(s.applicable, false);
+});
+
+Deno.test("#8 does not apply to a site with no web font at all", () => {
+  const s = verdict({ "index.html": "<html><body></body></html>", "s.css": "body{font-family:system-ui}" }, 8);
+  assertEquals(s.applicable, false);
+  assertEquals(s.present, false);
+});
+
+// ---------- #13 dark #000 ----------
+
+Deno.test("#13 present: black body inside a dark media query", () => {
+  const css = `body{background:#fff}
+@media (prefers-color-scheme: dark){body{background-color:#000;color:#fff}}`;
+  assertEquals(verdict({ "index.html": "<html><body></body></html>", "s.css": css }, 13).present, true);
+});
+
+Deno.test("#13 present: black body on a .dark theme selector", () => {
+  const css = `.dark body{background:#000000}`;
+  assertEquals(verdict({ "index.html": "<html><body></body></html>", "s.css": css }, 13).present, true);
+});
+
+Deno.test("#13 absent: dark mode uses a near-black, not #000", () => {
+  const css = `@media (prefers-color-scheme: dark){body{background-color:#111827}}`;
+  assertEquals(verdict({ "index.html": "<html><body></body></html>", "s.css": css }, 13).present, false);
+});
+
+Deno.test("#13 ignores a black FOOTER on a light site", () => {
+  const css = `body{background:#fff}footer{background:#000;color:#fff}`;
+  const s = verdict({ "index.html": "<html><body></body></html>", "s.css": css }, 13);
+  assertEquals(s.applicable, false);
+  assertEquals(s.present, false);
+});
+
+// ---------- #35 / #36 images ----------
+
+Deno.test("#35 present: an img with neither dimension", () => {
+  const html = `<html><body><img src="/a.webp" alt="דוכן"></body></html>`;
+  assertEquals(verdict({ "index.html": html }, 35).present, true);
+});
+
+Deno.test("#35 present: width without height still causes CLS", () => {
+  const html = `<html><body><img src="/a.webp" width="400" alt="דוכן"></body></html>`;
+  assertEquals(verdict({ "index.html": html }, 35).present, true);
+});
+
+Deno.test("#35 absent: both dimensions given", () => {
+  const html = `<html><body><img src="/a.webp" width="400" height="300" alt="דוכן"></body></html>`;
+  assertEquals(verdict({ "index.html": html }, 35).present, false);
+});
+
+Deno.test("#36 present: a PNG in a CSS background", () => {
+  const s = verdict({ "index.html": "<html><body></body></html>", "s.css": ".hero{background:url('/img/hero.png')}" }, 36);
+  assertEquals(s.present, true);
+});
+
+Deno.test("#36 absent: an og:image is not an image the page paints", () => {
+  const html = `<html><head><meta property="og:image" content="https://x.example/card.jpg"></head>
+<body><img src="/a.webp" width="1" height="1" alt="a"></body></html>`;
+  assertEquals(verdict({ "index.html": html }, 36).present, false);
+});
+
+Deno.test("#36 reads every candidate in a srcset", () => {
+  const html = `<html><body><img src="/a.webp" srcset="/a.webp 1x, /a@2x.png 2x" alt="a"></body></html>`;
+  assertEquals(verdict({ "index.html": html }, 36).present, true);
+});
+
+// ---------- #55 clickable div ----------
+
+Deno.test("#55 present: a div with onclick and nothing else", () => {
+  const html = `<html><body><div onclick="buy()">קנה</div></body></html>`;
+  assertEquals(verdict({ "index.html": html }, 55).present, true);
+});
+
+Deno.test("#55 present: role and tabindex but no key handler", () => {
+  const html = `<html><body><div onclick="buy()" role="button" tabindex="0">קנה</div></body></html>`;
+  assertEquals(verdict({ "index.html": html }, 55).present, true);
+});
+
+Deno.test("#55 absent: all three parts are there", () => {
+  const html = `<html><body><div onclick="buy()" onkeydown="k(event)" role="button" tabindex="0">קנה</div></body></html>`;
+  assertEquals(verdict({ "index.html": html }, 55).present, false);
+});
+
+Deno.test("#55 absent: a real button needs none of it", () => {
+  const html = `<html><body><button onclick="buy()">קנה</button></body></html>`;
+  assertEquals(verdict({ "index.html": html }, 55).present, false);
 });

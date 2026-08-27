@@ -26,7 +26,7 @@ import {
   type DetectedSignal,
   assembleFinalFiles,
   parseBundle,
-  pickHomePageSmart,
+  pickHomePageDiagnostic,
   presentSignals,
   serializeBundle,
   unreferencedAssets,
@@ -564,8 +564,18 @@ Deno.serve(async (req) => {
       // The one page this run rebuilds. The site's own link graph decides it —
       // the page every other page's logo and nav point back to — so a home page
       // that isn't called "index" is still found, not a filename guess.
-      const target = pickHomePageSmart(pristine);
+      const pick = pickHomePageDiagnostic(pristine);
+      const target = pick.path;
       if (!target) return json({ error: "no_html_file" }, 409);
+      // The pick decides what this whole run is worth, so a pick that was not
+      // clear-cut says so. AMBIGUOUS means the link graph was unusable or two
+      // pages scored within a hair of each other and a tie-break settled it.
+      if (pick.method !== "only" && (pick.method === "names" || pick.margin < 10)) {
+        console.warn(
+          `home page AMBIGUOUS: ${target} (via ${pick.method}, margin ${pick.margin}` +
+          `, runner-up ${pick.runnerUp ?? "none"}, ${pick.pages} pages)`,
+        );
+      }
 
       const rawTarget = pristine.get(target) ?? "";
       // Carry the original scripts byte-for-byte; the rebuilt page re-attaches them.
