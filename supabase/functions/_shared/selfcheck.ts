@@ -239,6 +239,139 @@ function escapeRegExp(s: string): string {
 }
 
 // ============================================================
+// Structurally broken CSS
+// ============================================================
+
+/** What a balance pass did, and whether the result can be trusted. */
+export interface CssBalanceReport {
+  /** Closing braces appended because the text ran out mid-rule. */
+  added: number;
+  /** Stray "}" at depth zero, dropped. */
+  dropped: number;
+  /** An unterminated comment or string the pass had to close. */
+  closedLiteral: boolean;
+  /** True if anything was repaired. */
+  changed: boolean;
+  /** The repair did not verify. Should be impossible; reported, never assumed. */
+  unbalanced: boolean;
+}
+
+/** A balance pass over one stylesheet: the report, plus the repaired text. */
+export interface CssBalance extends CssBalanceReport {
+  css: string;
+}
+
+/**
+ * Close the braces a truncated stylesheet left open.
+ *
+ * A missing "}" does not break one rule, it eats every rule after it: the
+ * parser keeps reading declarations into a block that never ends. The rebuild
+ * concatenates every section's CSS into a single <style>, so one section that
+ * came back mid-rule silently deletes the design of all the sections below it —
+ * including FALLBACK_CSS, the completeness floor's own styling.
+ *
+ * That is the real damage, and it survives the failure path: when a section's
+ * markup is rejected and re-rendered from the ledger, the model's CSS is still
+ * carried into the page.
+ *
+ * So this is binary, cheap and deterministic, in the spirit of the rest of this
+ * module: count braces outside comments and strings, append what is missing,
+ * drop a "}" that closes nothing. It does not attempt to understand the CSS —
+ * a repaired tail may be an odd rule, but it is a rule the parser survives,
+ * and everything after it lives.
+ */
+export function balanceCss(css: string): CssBalance {
+  const scan = scanBraces(css);
+  let out = css;
+  let dropped = 0;
+
+  // A "}" with nothing open before it. Left in place it is harmless to the
+  // parser but it means the count lies, so it goes.
+  if (scan.strayCloses.length) {
+    dropped = scan.strayCloses.length;
+    const drop = new Set(scan.strayCloses);
+    out = [...out].filter((_, i) => !drop.has(i)).join("");
+  }
+
+  // Truncated inside a comment or a string: close it first, or the braces we
+  // append land inside it and change nothing.
+  let closedLiteral = false;
+  if (scan.endedIn === "comment") {
+    out += " */";
+    closedLiteral = true;
+  } else if (scan.endedIn === "string") {
+    out += scan.quote;
+    closedLiteral = true;
+  }
+
+  const after = scanBraces(out);
+  const added = after.depth;
+  if (added > 0) out += "\n" + "}".repeat(added);
+
+  const changed = added > 0 || dropped > 0 || closedLiteral;
+  // Verify rather than trust — the same rule the emoji and RTL repairs follow.
+  const proof = scanBraces(out);
+  const unbalanced = proof.depth !== 0 || proof.strayCloses.length > 0;
+
+  return { css: out, added, dropped, closedLiteral, changed, unbalanced };
+}
+
+type ScanEnd = "normal" | "comment" | "string";
+
+/**
+ * Brace depth, ignoring braces that are not structure: inside comments and
+ * inside quoted strings (content: "{", a font family, a data URI).
+ */
+function scanBraces(css: string): {
+  depth: number;
+  strayCloses: number[];
+  endedIn: ScanEnd;
+  quote: string;
+} {
+  let depth = 0;
+  const strayCloses: number[] = [];
+  let i = 0;
+  let endedIn: ScanEnd = "normal";
+  let quote = "";
+
+  while (i < css.length) {
+    const c = css[i];
+    if (c === "/" && css[i + 1] === "*") {
+      const end = css.indexOf("*/", i + 2);
+      if (end === -1) { endedIn = "comment"; break; }
+      i = end + 2;
+      continue;
+    }
+    if (c === '"' || c === "'") {
+      const closed = skipString(css, i);
+      if (closed === -1) { endedIn = "string"; quote = c; break; }
+      i = closed;
+      continue;
+    }
+    if (c === "{") depth += 1;
+    else if (c === "}") {
+      if (depth === 0) strayCloses.push(i);
+      else depth -= 1;
+    }
+    i += 1;
+  }
+  return { depth, strayCloses, endedIn, quote };
+}
+
+/** Index just past the closing quote, or -1 if the string never closes. */
+function skipString(css: string, start: number): number {
+  const q = css[start];
+  for (let i = start + 1; i < css.length; i++) {
+    if (css[i] === "\\") { i += 1; continue; }
+    if (css[i] === q) return i + 1;
+    // A newline ends a CSS string; the value is invalid, but it is not an
+    // unterminated string swallowing the rest of the sheet.
+    if (css[i] === "\n") return i;
+  }
+  return -1;
+}
+
+// ============================================================
 // The loop
 // ============================================================
 
@@ -252,6 +385,8 @@ export interface SelfCheckResult {
   unrepaired: number[];
   /** Mechanically detected signals still present after the repair. */
   stillPresent: number[];
+  /** What the brace-balance pass had to repair in the assembled <style>. */
+  cssBalance: CssBalanceReport;
 }
 
 /** The signals this module knows how to repair, and can prove it repaired. */
@@ -278,6 +413,12 @@ export function selfCheck(
   const css = logicalProperties(out);
   out = css.html;
 
+  // Last net under the per-section pass in rebuild. A <style> block that ran
+  // out mid-rule silently deletes every rule below it, so it is closed here
+  // before anything else is measured against this page.
+  const balance = balanceStyleBlocks(out);
+  out = balance.html;
+
   let restoredHooks: string[] = [];
   if (original) {
     const hooks = restoreChromeHooks(original.get(page) ?? "", original, out);
@@ -294,6 +435,39 @@ export function selfCheck(
     repaired: targeted.filter((id) => !after.includes(id)),
     unrepaired: targeted.filter((id) => after.includes(id)),
     stillPresent: after,
+    cssBalance: balance.result,
+  };
+}
+
+/**
+ * Balance every <style> block in a document, reporting them as one.
+ *
+ * The blocks are independent stylesheets, so each is repaired on its own; the
+ * totals are summed because what the caller needs to know is whether the page
+ * that ships had broken CSS in it at all.
+ */
+function balanceStyleBlocks(html: string): { html: string; result: CssBalanceReport } {
+  let added = 0, dropped = 0, closedLiteral = false, unbalanced = false;
+  const out = html.replace(
+    /(<style\b[^>]*>)([\s\S]*?)(<\/style>)/gi,
+    (_whole, open: string, body: string, close: string) => {
+      const b = balanceCss(body);
+      added += b.added;
+      dropped += b.dropped;
+      closedLiteral = closedLiteral || b.closedLiteral;
+      unbalanced = unbalanced || b.unbalanced;
+      return open + b.css + close;
+    },
+  );
+  return {
+    html: out,
+    result: {
+      added,
+      dropped,
+      closedLiteral,
+      changed: added > 0 || dropped > 0 || closedLiteral,
+      unbalanced,
+    },
   };
 }
 

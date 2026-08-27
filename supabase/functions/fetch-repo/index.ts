@@ -5,7 +5,7 @@
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { UntarStream } from "jsr:@std/tar@0.1/untar-stream";
-import { keepPath } from "../_shared/pipeline.ts";
+import { keepPath, safeRelPath } from "../_shared/pipeline.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -96,8 +96,10 @@ Deno.serve(async (req) => {
     const decoder = new TextDecoder();
 
     for await (const entry of entries) {
-      // Tar paths are prefixed with "<owner>-<repo>-<sha>/"; strip it.
-      const rel = entry.path.replace(/^[^/]+\//, "");
+      // Tar paths are prefixed with "<owner>-<repo>-<sha>/"; strip it, then
+      // sanitise — a tar can name any path it likes, and this one ends up as a
+      // path in the ZIP the user unpacks and in the pull request we open.
+      const rel = safeRelPath(entry.path.replace(/^[^/]+\//, ""));
       if (!entry.readable) continue;
       if (!rel || entry.path.endsWith("/") || !keepPath(rel)) {
         await entry.readable.cancel();

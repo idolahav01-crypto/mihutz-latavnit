@@ -37,7 +37,9 @@ const META = new Map<number, SignalMeta>(
 );
 
 /** The ids this module owns. The model is never asked about them. */
-export const MECHANICAL_IDS: number[] = [1, 2, 27, 30, 31, 40, 41, 45, 64, 94, 98, 109];
+export const MECHANICAL_IDS: number[] = [
+  1, 2, 27, 30, 31, 40, 41, 45, 56, 61, 64, 78, 94, 98, 99, 109,
+];
 
 interface Verdict {
   present: boolean;
@@ -63,6 +65,37 @@ function visibleMarkup(html: string): string {
     .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, " ")
     .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, " ")
     .replace(/<!--[\s\S]*?-->/g, " ");
+}
+
+/**
+ * What a reader actually reads: markup with tags removed and entities decoded.
+ *
+ * Every tag becomes a SPACE rather than nothing. Dropping them outright would
+ * splice "180" and the word after its </span> into one run and invent a
+ * text-direction fault that the page does not have — the checks below read
+ * adjacency as evidence, so adjacency has to be real.
+ */
+function readableText(html: string): string {
+  return visibleMarkup(html)
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(Number(d)));
+}
+
+/** Script bodies: external JS files plus every inline <script>, tagged by file. */
+function allJs(files: Map<string, string>): Array<[string, string]> {
+  const out: Array<[string, string]> = [];
+  for (const [path, content] of files) {
+    if (/\.(m?js|ts)$/i.test(path)) out.push([path, content]);
+    if (isHtml(path)) {
+      for (const m of content.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)) {
+        // A src= tag has no body worth reading; its file arrives on its own.
+        if (!/\bsrc\s*=/i.test(m[1])) out.push([path, m[2]]);
+      }
+    }
+  }
+  return out;
 }
 
 /** Every stylesheet plus every inline <style> block, tagged by file. */
@@ -474,6 +507,212 @@ function checkEmoji(files: Map<string, string>): Verdict {
   };
 }
 
+/**
+ * #56 — a focus ring switched off with nothing put in its place.
+ *
+ * The written rule carries a clause — "ללא חלופה מעוצבת" — and the clause is
+ * the whole signal. `outline: none` next to a `:focus-visible` rule that draws
+ * a real ring is the CORRECT modern pattern, and a check that flagged it would
+ * punish the exact code we tell the builder to write.
+ *
+ * So a killed outline is only a fault when nothing else in that block, and no
+ * :focus-visible rule anywhere, marks the focused element. A model called this
+ * present on a block that restyled the border AND the background; the rule
+ * says that is a styled alternative, so this says so too.
+ */
+function checkFocusOutline(files: Map<string, string>): Verdict {
+  const cssBlocks: Array<[string, string, string]> = [];
+  for (const [file, text] of allCss(files)) {
+    for (const m of text.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      cssBlocks.push([file, m[1].trim(), m[2]]);
+    }
+  }
+  if (!cssBlocks.length) {
+    return { present: false, applicable: false, why: "אין CSS בפרויקט." };
+  }
+
+  const killsOutline = (body: string) => /outline\s*:\s*(?:none|0)\b/i.test(body);
+  // A ring drawn by any means: a real outline, a shadow, or a ring-width.
+  const drawsRing = (body: string) =>
+    /outline\s*:\s*(?!none\b|0\b)[^;]+/i.test(body) ||
+    /outline-(?:width|style|color)\s*:/i.test(body) ||
+    /box-shadow\s*:\s*(?!none\b)[^;]+/i.test(body);
+  // The rule says "styled alternative", not "outline". Anything that visibly
+  // marks the focused element counts, and a border or a fill both do.
+  const marksFocus = (body: string) =>
+    drawsRing(body) ||
+    /(?:^|[;{\s])(?:border|border-[a-z-]*color|background|background-color|text-decoration)\s*:/i
+      .test(body);
+
+  const globalRing = cssBlocks.some(
+    ([, sel, body]) => /:focus-visible/i.test(sel) && !killsOutline(body) && drawsRing(body),
+  );
+
+  const bare: Array<{ file: string; snippet: string }> = [];
+  let killed = 0;
+  for (const [file, sel, body] of cssBlocks) {
+    if (!/:focus\b|:focus-visible|:focus-within/i.test(sel)) continue;
+    if (!killsOutline(body)) continue;
+    killed += 1;
+    if (globalRing || marksFocus(body)) continue;
+    if (bare.length < 5) bare.push({ file, snippet: clip(`${sel} { ${body} }`) });
+  }
+
+  if (!killed) {
+    return { present: false, why: "אין כלל CSS שמכבה את מסגרת הפוקוס." };
+  }
+  if (!bare.length) {
+    return {
+      present: false,
+      why: "מסגרת הפוקוס מכובה, אך קיימת חלופה מעוצבת שמסמנת את האלמנט הממוקד.",
+      occurrences: 0,
+    };
+  }
+  return {
+    present: true,
+    why: `נמצאו ${bare.length} כללי :focus שמכבים את המסגרת בלי שום חלופה מעוצבת.`,
+    evidence: bare,
+    occurrences: bare.length,
+  };
+}
+
+/** #61 — no dataLayer anywhere in the site's JavaScript. */
+function checkDataLayer(files: Map<string, string>): Verdict {
+  for (const [file, body] of allJs(files)) {
+    const m = body.match(/[^\n;]*\bdataLayer\b[^\n;]*/);
+    if (m) {
+      return {
+        present: false,
+        why: "קיים dataLayer בקוד ה-JavaScript של האתר.",
+        evidence: [{ file, snippet: clip(m[0]) }],
+        occurrences: 1,
+      };
+    }
+  }
+  return {
+    present: true,
+    why: "לא נמצא window.dataLayer באף קובץ JavaScript או סקריפט מוטמע.",
+    occurrences: 0,
+  };
+}
+
+/**
+ * #78 — numbers and currency running the wrong way inside right-to-left text.
+ *
+ * Two runs in a row reported this present, and both times the evidence they
+ * quoted was `₪180` — the CORRECT Hebrew order, symbol first — under an
+ * explanation claiming the symbol came last. A search over the whole site
+ * found five symbol-first prices and zero number-first ones. The reading was
+ * confident, repeatable and backwards, which is precisely the case this file
+ * exists to take away from a model.
+ *
+ * Both halves of the written rule are encoded, and each is one of the rule's
+ * own examples: the currency order, and a digit run fused to Hebrew letters
+ * with no separator ("₪ 24,900לפרטים" shipped in a real build). Nothing here
+ * judges whether isolation is stylistically warranted — only whether the text
+ * reads in an order the bidirectional algorithm will visibly break.
+ */
+const CURRENCY = "₪$€£";
+
+function checkNumberDirection(files: Map<string, string>): Verdict {
+  if (!isRtl(files)) {
+    return { present: false, applicable: false, why: "האתר אינו RTL, ולכן כיוון המספרים אינו רלוונטי." };
+  }
+  // A Hebrew RUN of two letters or more. One letter is a legitimate prefix
+  // ("ב2024" is how the language is written) and flagging it would be wrong.
+  // At most one ordinary space between the number and its symbol. Allowing
+  // any whitespace let a match jump a line break and pair a number in one
+  // sentence with a symbol in the next, which is not a direction fault at all.
+  const gap = "[ \u00A0]?";
+  const numberFirst = new RegExp(`\\d[\\d,.]*${gap}[${CURRENCY}]`, "g");
+  const symbolFirst = new RegExp(`[${CURRENCY}]${gap}\\d`, "g");
+  const glued = /(?:\d[\d,.]*[֐-׿]{2}|[֐-׿]{2}\d)/g;
+
+  const hits: Array<{ file: string; snippet: string }> = [];
+  let wrong = 0;
+  let right = 0;
+
+  for (const [file, content] of htmlFiles(files)) {
+    const text = readableText(content);
+    right += [...text.matchAll(symbolFirst)].length;
+    for (const re of [numberFirst, glued]) {
+      for (const m of text.matchAll(re)) {
+        wrong += 1;
+        const at = m.index ?? 0;
+        if (hits.length < 5) {
+          hits.push({ file, snippet: clip(text.slice(Math.max(0, at - 50), at + 50)) });
+        }
+      }
+    }
+  }
+
+  if (wrong) {
+    return {
+      present: true,
+      why: `נמצאו ${wrong} מקומות שבהם מספר או מטבע רצים בכיוון שגוי בתוך טקסט עברי.`,
+      evidence: hits,
+      occurrences: wrong,
+    };
+  }
+  if (right) {
+    return {
+      present: false,
+      why: `כל ${right} סכומי המטבע כתובים בסדר הנכון (הסמל לפני המספר), ואין מספרים דבוקים לטקסט עברי.`,
+      occurrences: 0,
+    };
+  }
+  return {
+    present: false,
+    why: "אין מטבע בסדר הפוך ואין מספרים דבוקים לאותיות עבריות.",
+    occurrences: 0,
+  };
+}
+
+/**
+ * #99 — a canonical URL that is missing, or shared instead of self-referential.
+ *
+ * The rule asks for a canonical "that points at itself on every page", so two
+ * pages naming the same URL fail it exactly as an absent tag does: that is the
+ * duplicate-content case the rule is named for.
+ */
+function checkCanonical(files: Map<string, string>): Verdict {
+  const pages = htmlFiles(files);
+  if (!pages.length) return { present: false, applicable: false, why: "אין קבצי HTML." };
+
+  const found = pages.map(([file, content]) => {
+    const tag = head(content).match(/<link\b[^>]*\brel\s*=\s*["']canonical["'][^>]*>/i)?.[0];
+    return {
+      file,
+      tag,
+      href: tag?.match(/\bhref\s*=\s*["']([^"']*)["']/i)?.[1]?.trim().replace(/\/$/, "") ?? null,
+    };
+  });
+
+  const missing = found.filter((f) => !f.href);
+  if (missing.length) {
+    return {
+      present: true,
+      why: `${missing.length} מתוך ${pages.length} עמודים ללא תג canonical.`,
+      evidence: missing.slice(0, 5).map((f) => ({ file: f.file, snippet: "אין <link rel=\"canonical\">" })),
+      occurrences: missing.length,
+    };
+  }
+  const distinct = new Set(found.map((f) => f.href));
+  if (pages.length > 1 && distinct.size < pages.length) {
+    return {
+      present: true,
+      why: "יש canonical בכל עמוד, אך עמודים שונים מצביעים על אותה כתובת במקום על עצמם.",
+      evidence: found.slice(0, 5).map((f) => ({ file: f.file, snippet: clip(String(f.tag)) })),
+      occurrences: pages.length - distinct.size,
+    };
+  }
+  return {
+    present: false,
+    why: "לכל עמוד יש תג canonical משלו שמצביע על עצמו.",
+    occurrences: 0,
+  };
+}
+
 const CHECKS: Record<number, (f: Map<string, string>) => Verdict> = {
   1: checkInter,
   2: checkWornFont,
@@ -483,9 +722,13 @@ const CHECKS: Record<number, (f: Map<string, string>) => Verdict> = {
   40: checkFontPreload,
   41: checkAssetVersioning,
   45: checkReducedMotion,
+  56: checkFocusOutline,
+  61: checkDataLayer,
   64: checkPhysicalProperties,
+  78: checkNumberDirection,
   94: checkSkipLink,
   98: checkOgImage,
+  99: checkCanonical,
   109: checkEmoji,
 };
 

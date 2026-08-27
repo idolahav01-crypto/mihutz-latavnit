@@ -134,23 +134,17 @@
         </div>
           <button type="button" class="btn btn-primary" id="rebuild-site">בנה מחדש מאפס</button>
           <button type="button" class="btn" id="add-features">הצע פיצ'ר חדש</button>
-          <button type="button" class="btn" id="propose-fixes">שדרג ועצב מחדש (ישן)</button>
           <p class="fix-hint" id="fix-hint" aria-live="polite"></p>
           <div class="rb-progress" id="rb-progress" hidden aria-live="polite"></div>
           <div class="fix-stage" id="score-delta" hidden aria-live="polite"></div>
           <div class="fix-stage" id="design-direction" hidden></div>
-          <div class="fix-stage" id="proposals" hidden></div>
-          <div class="fix-actions" id="fix-actions" hidden>
-            <button type="button" class="btn btn-primary" id="apply-fixes">החל תיקונים מאושרים</button>
-          </div>
-          <div class="fix-stage" id="apply-result" hidden aria-live="polite"></div>
-          <div class="fix-stage" id="qa-result" hidden aria-live="polite"></div>
           <div class="fix-stage" id="features-result" hidden aria-live="polite"></div>
           <div class="build-warnings" id="build-warnings" hidden></div>
           <div class="deliver-actions" id="deliver-actions" hidden>
             <button type="button" class="btn btn-primary" id="download-zip">הורדת הפרויקט המתוקן (‎.zip)</button>
             <button type="button" class="btn" id="push-github">פתיחת Pull Request ב-GitHub</button>
             <p class="deliver-note" id="deliver-note">ההורדה לא משנה כלום. Pull Request נפתח בענף חדש — לעולם לא באתר החי שלכם.</p>
+            <p class="deliver-note" id="secrets-note" hidden></p>
           </div>
           <div class="fix-stage" id="deliver-result" hidden aria-live="polite"></div>
         </div>

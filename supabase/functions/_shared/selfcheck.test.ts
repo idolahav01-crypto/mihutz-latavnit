@@ -1,5 +1,6 @@
 import { assert, assertEquals, assertFalse } from "jsr:@std/assert@1";
 import {
+  balanceCss,
   logicalCssOutsideWidgets,
   logicalProperties,
   REPAIRABLE,
@@ -192,4 +193,92 @@ Deno.test("selfCheck: restores the hook and reports it", () => {
 Deno.test("selfCheck: without the original it simply skips hook restoration", () => {
   const built = page(`<nav class="site-nav">x</nav><h1>כותרת</h1>`);
   assertEquals(selfCheck(PAGE, built).restoredHooks, []);
+});
+
+// ============================================================
+// balanceCss — a truncated stylesheet must not eat the rules below it
+// ============================================================
+
+Deno.test("balanceCss: valid CSS comes back byte-for-byte", () => {
+  const css = `.a{color:red}\n@media (min-width:40em){.b{margin:0}}\n`;
+  const out = balanceCss(css);
+  assertEquals(out.css, css);
+  assertFalse(out.changed);
+  assertFalse(out.unbalanced);
+});
+
+Deno.test("balanceCss: a missing brace is closed, and later rules survive", () => {
+  // This is the real failure: .b never closes, so .c and .d are swallowed.
+  const broken = `.a{color:red}\n.b{padding:1rem\n.c{color:blue}\n.d{color:green}`;
+  const out = balanceCss(broken);
+  // .c and .d closed themselves, so only .b's own brace is outstanding.
+  assertEquals(out.added, 1);
+  assert(out.changed);
+  assertFalse(out.unbalanced);
+  // Everything that was in the input is still in the output.
+  assert(out.css.includes(".c{color:blue}"));
+  assert(out.css.includes(".d{color:green}"));
+});
+
+Deno.test("balanceCss: a nested @media that never closes is closed too", () => {
+  const out = balanceCss(`@media (min-width:40em){.a{color:red}`);
+  assertEquals(out.added, 1);
+  assertFalse(out.unbalanced);
+});
+
+Deno.test("balanceCss: a stray closing brace is dropped", () => {
+  const out = balanceCss(`.a{color:red}}\n.b{color:blue}`);
+  assertEquals(out.dropped, 1);
+  assertEquals(out.added, 0);
+  assertFalse(out.unbalanced);
+  assert(out.css.includes(".b{color:blue}"));
+  assertFalse(out.css.includes("}}"));
+});
+
+Deno.test("balanceCss: a brace inside a string is not structure", () => {
+  const css = `.a::before{content:"{"}\n.b::after{content:'}'}`;
+  const out = balanceCss(css);
+  assertEquals(out.css, css);
+  assertFalse(out.changed);
+});
+
+Deno.test("balanceCss: a brace inside a comment is not structure", () => {
+  const css = `/* .x{ */\n.a{color:red}`;
+  const out = balanceCss(css);
+  assertEquals(out.css, css);
+  assertFalse(out.changed);
+});
+
+Deno.test("balanceCss: an escaped quote does not end the string", () => {
+  const css = `.a::before{content:"say \\" {"}`;
+  const out = balanceCss(css);
+  assertEquals(out.css, css);
+  assertFalse(out.changed);
+});
+
+Deno.test("balanceCss: a comment cut mid-way is closed before the braces", () => {
+  const out = balanceCss(`.a{color:red}\n/* unfinished note`);
+  assert(out.closedLiteral);
+  assertFalse(out.unbalanced);
+  assertEquals(out.added, 0);
+});
+
+Deno.test("balanceCss: empty CSS is left alone", () => {
+  const out = balanceCss("");
+  assertEquals(out.css, "");
+  assertFalse(out.changed);
+});
+
+Deno.test("selfCheck: closes a broken <style> and reports it", () => {
+  const html = page("<h1>שלום</h1>", `.a{color:red}\n.b{padding:1rem\n.c{color:blue}`);
+  const out = selfCheck(PAGE, html);
+  assert(out.cssBalance.changed);
+  assertEquals(out.cssBalance.added, 1);
+  assertFalse(out.cssBalance.unbalanced);
+  assert(out.html.includes(".c{color:blue}"));
+});
+
+Deno.test("selfCheck: a healthy page reports no CSS repair", () => {
+  const out = selfCheck(PAGE, page("<h1>שלום</h1>", ".a{color:red}"));
+  assertFalse(out.cssBalance.changed);
 });

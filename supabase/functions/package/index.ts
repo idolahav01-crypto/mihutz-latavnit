@@ -37,7 +37,7 @@ Deno.serve(async (req) => {
 
   const { data: scan, error: scanErr } = await admin
     .from("scans")
-    .select("id, user_id, source_ref, change_log, qa_verdict, pipeline_status, ai_fingerprint_score, ai_fingerprint_score_after, design_direction")
+    .select("id, user_id, source_ref, change_log, self_check, pipeline_status, ai_fingerprint_score, ai_fingerprint_score_after, design_direction")
     .eq("id", scanId)
     .single();
   if (scanErr || !scan || scan.user_id !== user.id) {
@@ -73,7 +73,9 @@ Deno.serve(async (req) => {
       // rather than the user having to remember what the run concluded.
       changed_files: changed,
       change_log: scan.change_log ?? [],
-      qa_verdict: scan.qa_verdict ?? null,
+      // What the rebuild found in its own output, carried into the ZIP's
+      // report so the finding outlives the tab that produced it.
+      self_check: scan.self_check ?? null,
       pipeline_status: scan.pipeline_status,
       score_before: scan.ai_fingerprint_score,
       score_after: scan.ai_fingerprint_score_after,

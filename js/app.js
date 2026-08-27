@@ -82,6 +82,7 @@
     },
     warnContentLoss: "שימו לב: התוצאה יצאה חסרה לעומת האתר המקורי. האתר מוכן להורדה, אבל כדאי לבדוק לפני שמעלים אותו.",
     warnDesignThin: "שימו לב: האתר יצא נקי אבל חיוור מהמקורי — הוסרו הסימנים, ואיתם חלק מהעיצוב. אפשר להוריד כמו שהוא, או לבנות שוב ולקבל תוצאה עשירה יותר.",
+    warnCssRepaired: "שימו לב: העיצוב חזר מהבנאי עם CSS שבור. סגרנו אותו אוטומטית כדי שהעמוד לא יאבד את שאר הכללים, אבל כדאי להסתכל על התוצאה לפני שמעלים אותה.",
     warnHeading: "מה מצאנו בתוצאה"
   } : {
     hi: "Hi, ",
@@ -144,6 +145,7 @@
     },
     warnContentLoss: "Heads up: the result came back missing content the original had. The site is ready to download, but check it before you publish.",
     warnDesignThin: "Heads up: the site came back clean but paler than the original — the AI tells are gone, and some of the design went with them. Download it as is, or build again for a richer result.",
+    warnCssRepaired: "Heads up: the builder returned broken CSS. We closed it automatically so the rest of the page kept its styling, but look the result over before you publish it.",
     warnHeading: "What we found in the result"
   };
 
@@ -161,11 +163,68 @@
   var SKIP_DOCS = /(\.(md|markdown|mdx|rst)$|(^|\/)(LICENSE|LICENCE|COPYING|NOTICE|CHANGELOG|AUTHORS|CONTRIBUTING)(\.(txt|rst))?$)/i;
   var SKIP_FILE = /\.(min\.(js|css)|map|lock|png|jpe?g|gif|webp|avif|svg|ico|woff2?|ttf|otf|eot|mp4|webm|mp3|wav|pdf|zip|gz|br|wasm|ds_store)$/i;
   var SKIP_LOCKFILES = /(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|bun\.lockb)$/i;
+  /* Secrets that are not named like dotfiles, so the dotted rule misses them. */
+  var SKIP_SECRETS = /((^|\/)(secrets?\.(json|ya?ml|toml)|credentials?\.(json|ya?ml)|service[-_]?account[^/]*\.json|id_(rsa|dsa|ecdsa|ed25519)(\.pub)?|htpasswd)$)|\.(pem|key|p12|pfx|keystore|jks|ppk|asc|gpg)$/i;
   function keepPath(p) {
-    return !SKIP_DIR.test(p) && !SKIP_DOTTED.test(p) &&
+    return !!safeRelPath(p) && !SKIP_DIR.test(p) && !SKIP_DOTTED.test(p) &&
       !SKIP_ARCHIVE_ARTIFACT.test(p) && !SKIP_DOCS.test(p) &&
-      !SKIP_LOCKFILES.test(p) && !SKIP_FILE.test(p);
+      !SKIP_LOCKFILES.test(p) && !SKIP_SECRETS.test(p) && !SKIP_FILE.test(p);
   }
+
+  /* A copy of safeRelPath() in pipeline.ts — same reason as keepPath above.
+     Returns a path that can only name a file inside the project, or null.
+     It matters most right here: the path in the bundle becomes the path of an
+     entry in the ZIP the user unpacks on their own machine. */
+  function safeRelPath(path) {
+    if (!path) return null;
+    var p = String(path).replace(/\\/g, "/").replace(/^[A-Za-z]:/, "").replace(/^\/+/, "");
+    if (p.charAt(p.length - 1) === "/") return null;
+    var out = [];
+    var segs = p.split("/");
+    for (var i = 0; i < segs.length; i++) {
+      var seg = segs[i];
+      if (seg === "" || seg === ".") continue;
+      if (seg === "..") {
+        if (!out.length) return null;   /* escapes the project root */
+        out.pop();
+        continue;
+      }
+      out.push(seg);
+    }
+    return out.length ? out.join("/") : null;
+  }
+
+  /* ===== carry-through: what we filter out but must NOT take away =====
+     A .env or a secrets.json is excluded from the scan on purpose — it never
+     reaches our server and never reaches the model. But the user handed us a
+     project and expects a project back, so removing the file from the download
+     would be us deleting their configuration.
+
+     So the browser keeps its own copy, in memory, and puts it back into the ZIP
+     at download time. It is never uploaded, never stored, and never leaves this
+     machine. That also means it only works in the session that did the upload:
+     a download from the history has nothing to put back, which is the honest
+     consequence of never having sent it anywhere. */
+  var CARRY_DOTTED = /(^|\/)\.(env(\..+)?|npmrc|htpasswd)$/i;
+  var MAX_CARRY_BYTES = 2 * 1024 * 1024;
+  var carryThrough = [];   /* [{ path, data }] — data is a Blob or Uint8Array */
+  var carryBytes = 0;
+
+  /* True for a file we filtered out of the bundle but owe back to the user.
+     Deliberately narrow: not .git internals, not macOS sidecars, not
+     node_modules — those are noise the user did not ask us to preserve. */
+  function isCarryThrough(p) {
+    if (!safeRelPath(p) || SKIP_DIR.test(p) || SKIP_ARCHIVE_ARTIFACT.test(p)) return false;
+    return SKIP_SECRETS.test(p) || CARRY_DOTTED.test(p);
+  }
+
+  function rememberCarry(path, data, size) {
+    if (carryBytes + size > MAX_CARRY_BYTES) return;
+    carryBytes += size;
+    carryThrough.push({ path: path, data: data });
+  }
+
+  function clearCarry() { carryThrough = []; carryBytes = 0; }
 
   /* ===== dom ===== */
   var $ = function (id) { return document.getElementById(id); };
@@ -219,10 +278,9 @@
      "score", "report-caption", "report-body", "report-back",
      "history", "history-list", "history-all", "history-empty",
      "history-dialog", "history-all-list",
-     "fix-pipeline", "rebuild-site", "propose-fixes", "fix-hint", "design-direction",
+     "fix-pipeline", "rebuild-site", "fix-hint", "design-direction",
      "build-warnings",
-     "proposals", "fix-actions", "apply-fixes", "apply-result", "qa-result",
-     "deliver-actions", "download-zip", "push-github", "deliver-result",
+     "deliver-actions", "download-zip", "push-github", "deliver-result", "secrets-note",
      "add-features", "features-result", "rb-progress", "score-delta",
      "scan-progress", "site-url"
     ].forEach(function (id) { els[id] = $(id); });
@@ -390,6 +448,7 @@
 
   function clearPicked() {
     picked = []; pickedRoot = "";
+    clearCarry();
     els.picked.hidden = true;
     els["files-input"].value = "";
     els["dir-input"].value = "";
@@ -429,14 +488,36 @@
     });
   }
 
+  /* Strip the single leading top-level dir exported zips wrap everything in,
+     then sanitise — the result is the path that gets stored and, later, the
+     path of an entry in the ZIP the user unpacks. keepPath only decides
+     whether to carry a file; this decides what it is called. */
+  function stripRoot(p) { return safeRelPath(p.replace(/^[^/]+\//, "")); }
+
+  /* The same, for a folder pick: drop the common root the browser reports. */
+  function relOf(p) { return safeRelPath(pickedRoot ? p.replace(pickedRoot + "/", "") : p); }
+
   function bundleFromZip(file) {
     return import(JSZIP_CDN).then(function (mod) {
       var JSZip = mod.default || mod;
       return JSZip.loadAsync(file);
     }).then(function (zip) {
       setStage(1);
-      var names = Object.keys(zip.files).filter(function (n) {
-        return !zip.files[n].dir && keepPath(n);
+      clearCarry();
+      var all = Object.keys(zip.files).filter(function (n) { return !zip.files[n].dir; });
+      var names = all.filter(keepPath);
+      /* Read the excluded-but-owed files as bytes, not text: a .p12 or a
+         keystore is binary, and decoding it would hand the user back a
+         corrupted file. */
+      var carry = all.filter(isCarryThrough);
+      var carryChain = Promise.resolve();
+      carry.forEach(function (n) {
+        carryChain = carryChain.then(function () {
+          return zip.files[n].async("uint8array").then(function (bytes) {
+            var rel = stripRoot(n);
+            if (rel) rememberCarry(rel, bytes, bytes.length);
+          }).catch(function () {});
+        });
       });
       var parts = [], total = 0;
       var chain = Promise.resolve();
@@ -445,18 +526,27 @@
           if (total >= MAX_BUNDLE_BYTES) return;
           return zip.files[n].async("string").then(function (text) {
             if (text.length > MAX_FILE_BYTES) return;
-            /* strip a single leading top-level dir (common in exported zips) */
-            var block = fileBlock(n.replace(/^[^/]+\//, ""), text);
+            var rel = stripRoot(n);
+            if (!rel) return;
+            var block = fileBlock(rel, text);
             total += block.length; parts.push(block);
           }).catch(function () {});
         });
       });
-      return chain.then(function () { return parts.length ? parts.join("") : null; });
+      return carryChain.then(function () { return chain; })
+        .then(function () { return parts.length ? parts.join("") : null; });
     });
   }
 
   function bundleFromEntries(entries) {
     setStage(1);
+    clearCarry();
+    /* The File object itself is the copy — nothing is read, decoded or
+       re-encoded, so what goes back into the ZIP is the original bytes. */
+    entries.forEach(function (e) {
+      var rel = isCarryThrough(e.path) ? relOf(e.path) : null;
+      if (rel) rememberCarry(rel, e.file, e.file.size);
+    });
     var keep = entries.filter(function (e) { return keepPath(e.path); });
     var parts = [], total = 0;
     var chain = Promise.resolve();
@@ -466,7 +556,8 @@
         if (e.file.size > MAX_FILE_BYTES) return;
         return readText(e.file).then(function (text) {
           if (text == null || text.length > MAX_FILE_BYTES) return;
-          var rel = pickedRoot ? e.path.replace(pickedRoot + "/", "") : e.path;
+          var rel = relOf(e.path);
+          if (!rel) return;
           var block = fileBlock(rel, text);
           total += block.length; parts.push(block);
         }).catch(function () {});
@@ -730,19 +821,6 @@
 
   /* Stage 2 is split for the same reason stage 1 is: it emits a full code pair
      per present signal, so a template-heavy site outruns the 150s function
-     limit in one call. Pass 1 sets the design direction; later passes reuse it. */
-  function designPass(n, total) {
-    return invokeFn("design", { scan_id: currentScanId, part: n, parts: total })
-      .then(function (data) {
-        if (data && data.done) return data;
-        setFixProgress(n, total);
-        return designPass(n + 1, total);
-      });
-  }
-
-  function setFixProgress(done, total) {
-    if (els["fix-hint"]) els["fix-hint"].textContent = P.designPass(done, total);
-  }
 
   /* Keeps the user oriented across a multi-pass audit that can take a while.
      Rewrites the diagnosis step's own label rather than adding new chrome. */
@@ -917,18 +995,16 @@
     });
   }
 
-  /* ===== fix pipeline: stage 2 (design) → 4 (apply) → 5 (QA) =====
-     The report view exposes a "Propose fixes" button. It runs Stage 2, shows the
-     design_direction + per-signal proposals, then "Apply approved fixes" runs
-     Stage 4 (apply) and Stage 5 (QA) with up to two automatic reapply rounds —
-     the loop the server also caps. MVP auto-approves the applicable proposals. */
+  /* ===== the rebuild =====
+     The report view exposes one build button: "Rebuild from scratch". It runs
+     the rebuild in client-driven passes (a spec, a shell, then one section per
+     call), and ends at a downloadable project. The older propose-fixes-then-
+     apply-them pipeline, and the whole-file transform that replaced it, were
+     both removed — two competing algorithms behind one report was the confusion
+     they cost. */
   var currentScanId = null;
-  var currentApplicable = 0; /* how many proposals are auto-applicable — sizes the apply split */
-  var transformTotal = 0;    /* number of files the redesign pass walks through */
 
-  var P = he ? {
-    propose: "שדרג ועצב מחדש", proposing: "משדרג ומעצב את האתר מחדש…",
-    transformDone: "העיצוב מחדש הושלם — אפשר להוריד ולראות את התוצאה.",
+  var P = he ? { proposing: "משדרג ומעצב את האתר מחדש…",
     rebuildSpec: "לומד את האתר — מה יש בו בדיוק…",
     rebuildShell: "בונה את שפת העיצוב (צבעים, פונטים, מבנה)…",
     rebuildSection: function (d, t) { return "בונה מאפס — סקשן " + d + " מתוך " + t + "…"; },
@@ -957,36 +1033,43 @@
     scoreSame: "אין שינוי מדיד בציון.",
     scoreWorse: function (d) { return "עלייה של " + d + " נקודות — כדאי לבדוק."; },
     designTitle: "כיוון עיצובי", proposalsTitle: function (n) { return "הצעות תיקון (" + n + ")"; },
-    apply: "החל תיקונים מאושרים", applying: "מחיל תיקונים…", qaRunning: "בקרת איכות…",
-    qaPass: "עבר בקרת איכות", qaFail: "בקרת האיכות מצאה בעיות — מריץ סבב תיקון…",
-    needsHuman: "חלק מהתיקונים דורשים בדיקה ידנית.",
+    apply: "החל תיקונים מאושרים", applying: "מחיל תיקונים…", qaRunning: "בקרת איכות…", qaFail: "בקרת האיכות מצאה בעיות — מריץ סבב תיקון…",
     qaSkipped: "בקרת האיכות לא הושלמה — אבל התיקונים כבר הוחלו. אפשר להוריד ולבדוק.",
-    applied: function (a, t) { return "הוחלו " + a + " מתוך " + t + " תיקונים"; },
     detectPass: function (d, t) {
       return d === 0 ? "הסריקה ארוכה מהצפוי — מפצל לחלקים קטנים יותר..."
                      : "סורק — מעבר " + d + " מתוך " + t;
     },
-    designPass: function (d, t) { return "מגבש הצעות — מעבר " + d + " מתוך " + t; },
-    applyPass: function (d, t) { return "מחיל תיקונים — מעבר " + d + " מתוך " + t; },
-    transformPass: function (d, t) { return "משדרג ומעצב מחדש — שלב " + d + " מתוך " + t; },
     rehunting: "מחפש לעומק — עוד סימני AI...",
     gapPass: "משלים סימנים שלא נבדקו…",
     zipBuilding: "מכין את הקובץ...",
+    zipCarried: function (n) {
+      return n === 1
+        ? "קובץ הגדרות אחד שלא נשלח לסריקה הוחזר לקובץ כמו שהוא."
+        : n + " קבצי הגדרות שלא נשלחו לסריקה הוחזרו לקובץ כמו שהם.";
+    },
+    secretsNote: function (n) {
+      return (n === 1 ? "קובץ הגדרות אחד " : n + " קבצי הגדרות ") +
+        "(כמו env.) לא נשלחו אלינו בכלל ולא נראו על ידי המודל. הם שמורים בדפדפן הזה " +
+        "בלבד ויתווספו להורדה כמו שהם — לכן כדאי להוריד עכשיו, מהחלון הזה.";
+    },
     zipReady: function (n) { return "הורד. " + n + " קבצים שונו."; },
     prOpening: "פותח Pull Request...",
     prDone: "ה-Pull Request נפתח. פתחו אותו, קראו את השינויים, ורק אז מזגו.",
     prNoGithub: "הסריקה הזאת לא הגיעה מ-GitHub, אז אפשר רק להוריד ZIP.",
     prNoToken: "GitHub לא מחובר. התחברו עם GitHub כדי לפתוח Pull Request.",
-    prQaFailed: function (score) {
-      return "בדיקת האיכות לא עברה" + (score != null ? " (ציון " + score + " מתוך 100)" : "") +
-        ". אפשר לפתוח Pull Request בכל זאת — הוא ייפתח בענף נפרד ותוכלו לקרוא את השינויים לפני מיזוג. לפתוח?";
+    prWarnings: function (list) {
+      var kinds = {
+        content_loss: "התוצאה יצאה חסרה לעומת המקור",
+        design_thin: "התוצאה יצאה חיוורת מהמקור",
+        css_repaired: "ה-CSS חזר שבור ותוקן אוטומטית"
+      };
+      var what = (list || []).map(function (w) { return "· " + (kinds[w.kind] || w.kind); }).join("\n");
+      return "מצאנו את זה בתוצאה של הבנייה:\n" + what +
+        "\n\nאפשר לפתוח Pull Request בכל זאת — הוא ייפתח בענף נפרד ותוכלו לקרוא את השינויים לפני מיזוג. לפתוח?";
     },
-    noFixes: "אין תיקונים אוטומטיים ישימים בסריקה הזו.",
     err: "משהו השתבש בשלב התיקון. נסו שוב.", strategic: "לא יושם — לא נמצא עוגן מדויק בקוד",
     palette: "פלטה", typography: "טיפוגרפיה", layout: "עיקרון פריסה", personality: "אופי"
-  } : {
-    propose: "Redesign the site", proposing: "Redesigning the site…",
-    transformDone: "Redesign complete — download to see the result.",
+  } : { proposing: "Redesigning the site…",
     rebuildSpec: "Learning the site — exactly what it contains…",
     rebuildShell: "Building the design language (colors, fonts, layout)…",
     rebuildSection: function (d, t) { return "Rebuilding from scratch — section " + d + " of " + t + "…"; },
@@ -1015,31 +1098,41 @@
     scoreSame: "No measurable change in score.",
     scoreWorse: function (d) { return d + " points higher — worth a look."; },
     designTitle: "Design direction", proposalsTitle: function (n) { return "Fix proposals (" + n + ")"; },
-    apply: "Apply approved fixes", applying: "Applying fixes…", qaRunning: "Running QA…",
-    qaPass: "Passed QA", qaFail: "QA found issues — running a fix round…",
-    needsHuman: "Some fixes need manual review.",
+    apply: "Apply approved fixes", applying: "Applying fixes…", qaRunning: "Running QA…", qaFail: "QA found issues — running a fix round…",
     qaSkipped: "QA couldn't finish — but the fixes are already applied. You can download and inspect.",
-    applied: function (a, t) { return "Applied " + a + " of " + t + " fixes"; },
     detectPass: function (d, t) {
       return d === 0 ? "Taking longer than expected — splitting into smaller passes..."
                      : "Scanning — pass " + d + " of " + t;
     },
-    designPass: function (d, t) { return "Building proposals — pass " + d + " of " + t; },
-    applyPass: function (d, t) { return "Applying fixes — pass " + d + " of " + t; },
-    transformPass: function (d, t) { return "Redesigning — step " + d + " of " + t; },
     rehunting: "Digging deeper — more AI signals...",
     gapPass: "Filling in signals that were skipped…",
     zipBuilding: "Preparing the file...",
+    zipCarried: function (n) {
+      return n === 1
+        ? "One config file that was never sent for scanning was put back untouched."
+        : n + " config files that were never sent for scanning were put back untouched.";
+    },
+    secretsNote: function (n) {
+      return (n === 1 ? "One config file " : n + " config files ") +
+        "(such as .env) were never sent to us and were never seen by the model. " +
+        "They are held in this browser only and will be added to the download as they are — " +
+        "so download from this window, while it is open.";
+    },
     zipReady: function (n) { return "Downloaded. " + n + " files changed."; },
     prOpening: "Opening a pull request...",
     prDone: "Pull request opened. Open it, read the diff, and only then merge.",
     prNoGithub: "This scan didn't come from GitHub, so only the ZIP download applies.",
     prNoToken: "GitHub isn't connected. Sign in with GitHub to open a pull request.",
-    prQaFailed: function (score) {
-      return "QA did not pass" + (score != null ? " (score " + score + "/100)" : "") +
-        ". You can still open a pull request — it goes to a separate branch and you can read the diff before merging. Open it?";
+    prWarnings: function (list) {
+      var kinds = {
+        content_loss: "the result came back missing content the original had",
+        design_thin: "the result came back paler than the original",
+        css_repaired: "the CSS came back broken and was repaired automatically"
+      };
+      var what = (list || []).map(function (w) { return "- " + (kinds[w.kind] || w.kind); }).join("\n");
+      return "Here is what we found in the build:\n" + what +
+        "\n\nYou can still open a pull request — it goes to a separate branch and you can read the diff before merging. Open it?";
     },
-    noFixes: "No auto-applicable fixes in this scan.",
     err: "Something went wrong during the fix stage. Try again.", strategic: "Not applied — no exact anchor in the code",
     palette: "Palette", typography: "Typography", layout: "Layout principle", personality: "Personality"
   };
@@ -1053,18 +1146,11 @@
     if (!els["fix-pipeline"]) return;
     currentScanId = scan.id;
     els["design-direction"].hidden = true;
-    els["proposals"].hidden = true;
-    els["fix-actions"].hidden = true;
-    els["apply-result"].hidden = true;
-    els["qa-result"].hidden = true;
     // Opening another scan must not leave the previous one's delivery buttons
     // on screen — they act on currentScanId and would package the wrong run.
     if (els["deliver-actions"]) els["deliver-actions"].hidden = true;
     if (els["deliver-result"]) els["deliver-result"].hidden = true;
     els["fix-hint"].textContent = "";
-    els["propose-fixes"].hidden = false;
-    els["propose-fixes"].disabled = false;
-    els["propose-fixes"].textContent = P.propose;
     if (els["add-features"]) { els["add-features"].textContent = P.addFeatures; els["add-features"].disabled = false; els["add-features"].hidden = false; }
     if (els["features-result"]) els["features-result"].hidden = true;
     if (els["rb-progress"]) els["rb-progress"].hidden = true;
@@ -1079,10 +1165,9 @@
         { ai_fingerprint_score: scan.ai_fingerprint_score_after }
       );
     }
-    /* a scan opened from history may already carry a design direction (from a
-       redesign) and/or proposals (from the older patch flow) */
+    /* a scan opened from history may already carry the design direction its
+       rebuild settled on */
     if (scan.design_direction) renderDesign(scan.design_direction);
-    if (scan.proposals && scan.proposals.length) renderProposals(scan.proposals);
     restoreDelivery(scan);
   }
 
@@ -1101,21 +1186,10 @@
   function restoreDelivery(scan) {
     if (DELIVERABLE.indexOf(scan.pipeline_status) === -1) return;
 
-    var log = scan.change_log || [];
-    if (log.length) {
-      var applied = log.filter(function (c) { return c.applied; }).length;
-      renderApplyResult({ fixes_applied: applied, fixes_total: log.length });
-    }
-
-    var v = scan.qa_verdict;
-    if (v) {
-      var score = v.human_quality_score;
-      var suffix = (score != null ? " · " + esc(String(score)) + "/100" : "");
-      els["qa-result"].hidden = false;
-      els["qa-result"].innerHTML = v.pass
-        ? '<p class="qa-pass">' + esc(P.qaPass) + suffix + "</p>"
-        : '<p class="qa-human">' + esc(P.needsHuman) + suffix + "</p>";
-    }
+    /* Findings are stored with the run, so reopening it from the history shows
+       what the build found in itself — not only the session that produced it. */
+    var sc = scan.self_check;
+    renderBuildWarnings(sc && sc.warnings);
     showDeliver();
   }
 
@@ -1135,88 +1209,6 @@
     els["design-direction"].hidden = false;
   }
 
-  function renderProposals(list) {
-    var applicable = list.filter(function (p) { return p.applicable_edit; });
-    currentApplicable = applicable.length;
-    els["proposals"].innerHTML = "<h3>" + esc(P.proposalsTitle(list.length)) + "</h3>" +
-      '<ul class="prop-list">' + list.map(function (p) {
-        var strategic = !p.applicable_edit;
-        var head = "#" + esc(String(p.signal_id)) + " · " + esc(p.fix_type || "") + (p.risk ? " · " + esc(p.risk) : "");
-        var code = (p.old_code && p.sample_new_code)
-          ? '<div class="prop-diff" dir="ltr"><code class="old">' + esc(clip(String(p.old_code), 120)) +
-            '</code><code class="new">' + esc(clip(String(p.sample_new_code), 120)) + "</code></div>"
-          : "";
-        var tag = strategic ? '<span class="prop-strategic">' + esc(P.strategic) + "</span>" : "";
-        return '<li class="prop' + (strategic ? " is-strategic" : "") + '">' +
-          '<div class="prop-head" dir="ltr">' + head + "</div>" +
-          '<div class="prop-rationale">' + esc(p.rationale || "") + "</div>" + code + tag + "</li>";
-      }).join("") + "</ul>";
-    els["proposals"].hidden = false;
-    els["propose-fixes"].hidden = true;
-    if (applicable.length) {
-      els["apply-fixes"].textContent = P.apply;
-      els["fix-actions"].hidden = false;
-    } else {
-      els["fix-hint"].textContent = P.noFixes;
-    }
-  }
-
-  /* Bold "fix every present signal" proposals are output-heavy, and OUTPUT — not
-     input — is what races the function's 150s wall clock. So size the split to
-     the number of present signals (aim for ~5 per pass), and if a pass still
-     times out, double the split and start over. design resets its proposals on
-     part 1, so restarting is safe and never duplicates. */
-  function runDesign(parts) {
-    return designPass(1, parts).catch(function (e) {
-      var msg = (e && e.body && e.body.error) || "";
-      if (String(msg).indexOf("stage_timeout") === -1 || parts >= 12) throw e;
-      return runDesign(Math.min(12, parts * 2));
-    });
-  }
-
-  /* ===== TransformDesigner: whole-file redesign (the primary flow) =====
-     One server call per file (each a fresh 150s budget); the design direction is
-     locked on the first file and reused for the rest so the site stays coherent.
-     No proposals, no per-signal patches, no human step — the file is rewritten. */
-  function transformPass(n) {
-    var text = P.transformPass(n, transformTotal || n);
-    els["fix-hint"].textContent = text;
-    /* the file count only arrives with the first response */
-    if (transformTotal) prog.to(text, ((n - 1) / transformTotal) * 100);
-    else prog.estimate(text, 60000, 20);
-    return invokeFn("transform", { scan_id: currentScanId, part: n }).then(function (data) {
-      transformTotal = (data && data.parts) || transformTotal;
-      if (transformTotal) prog.to(null, (n / transformTotal) * 100);
-      if (data && data.done) return data;
-      return transformPass(n + 1);
-    });
-  }
-
-  function transformSite() {
-    if (!currentScanId) return;
-    els["propose-fixes"].disabled = true;
-    els["proposals"].hidden = true;
-    els["fix-actions"].hidden = true;
-    if (els["score-delta"]) els["score-delta"].hidden = true;
-    els["fix-hint"].textContent = P.proposing;
-    transformTotal = 0;
-    pipelineProgress(P.proposing);
-    transformPass(1).then(function (data) {
-      prog.done();
-      els["propose-fixes"].hidden = true;
-      renderDesign(data && data.design_direction);
-      showDeliver(); /* the redesigned bundle is saved — offer download / PR */
-      return runAfterScan(); /* same measured before/after the rebuild flow shows */
-    }).then(function () {
-      hideProgress();
-      els["fix-hint"].textContent = P.transformDone;
-    }).catch(function (e) {
-      hideProgress();
-      els["fix-hint"].textContent = P.err + " [transform]" + fmtReason(e);
-      els["propose-fixes"].disabled = false;
-    });
-  }
-
   /* Every wait inside the report view shares one bar, in #rb-progress. */
   function pipelineProgress(text) { prog.start(els["rb-progress"], text); }
   function hideProgress() { prog.hide(); }
@@ -1224,12 +1216,10 @@
   function reenableFixButtons() {
     if (els["rebuild-site"]) els["rebuild-site"].disabled = false;
     if (els["add-features"]) els["add-features"].disabled = false;
-    if (els["propose-fixes"]) els["propose-fixes"].disabled = false;
   }
   function busyFixButtons() {
     if (els["rebuild-site"]) els["rebuild-site"].disabled = true;
     if (els["add-features"]) els["add-features"].disabled = true;
-    if (els["propose-fixes"]) els["propose-fixes"].disabled = true;
   }
 
   /* ===== honest AI score: re-run the SAME audit on the rebuilt/updated site
@@ -1338,8 +1328,6 @@
   function rebuildSite() {
     if (!currentScanId) return;
     busyFixButtons();
-    els["proposals"].hidden = true;
-    els["fix-actions"].hidden = true;
     if (els["score-delta"]) els["score-delta"].hidden = true;
     rebuildTotal = 0;
     rbSectionNames = null;
@@ -1455,83 +1443,25 @@
     });
   }
 
-
-  function proposeFixes() {
-    if (!currentScanId) return;
-    els["propose-fixes"].disabled = true;
-    els["fix-hint"].textContent = P.proposing;
-    sb.from("scans").select("present_count").eq("id", currentScanId).single()
-      .then(function (r) {
-        var n = (r && r.data && r.data.present_count) || 0;
-        var parts = Math.min(12, Math.max(3, Math.ceil(n / 5)));
-        return runDesign(parts);
-      })
-      .then(function (data) {
-        els["fix-hint"].textContent = "";
-        renderDesign(data && data.design_direction);
-        /* design keeps its payload small (counts only); read the stored proposals */
-        return sb.from("scans").select("design_direction,proposals").eq("id", currentScanId).single();
-      }).then(function (r) {
-        if (r && r.data) { renderDesign(r.data.design_direction); renderProposals(r.data.proposals || []); }
-      }).catch(function (e) {
-        els["fix-hint"].textContent = P.err + " [design]" + fmtReason(e);
-        els["propose-fixes"].disabled = false;
-      });
-  }
-
   /* Apply is split into client-driven passes for the same reason detect/design
      are: each pass is a SEPARATE HTTP call with its own 150s budget, so bold
      whole-file rewrites can't blow one call. Each pass builds on the previous
-     one's edits (server-side), so dependent fixes still see earlier work. */
-  function applyPass(n, total) {
-    els["apply-result"].innerHTML = "<p>" + esc(P.applyPass(n, total)) + "</p>";
-    return invokeFn("apply", { scan_id: currentScanId, part: n, parts: total })
-      .then(function (data) {
-        if (data && data.done) return data;
-        return applyPass(n + 1, total);
-      });
-  }
-
-  function runApply(total) {
-    return applyPass(1, total).catch(function (e) {
-      var msg = (e && e.body && e.body.error) || "";
-      if (String(msg).indexOf("stage_timeout") === -1 || total >= 12) throw e;
-      return runApply(Math.min(12, total * 2));
-    });
-  }
-
-  function applyFixes() {
-    if (!currentScanId) return;
-    els["fix-actions"].hidden = true;
-    els["apply-result"].hidden = false;
-    els["apply-result"].innerHTML = "<p>" + esc(P.applying) + "</p>";
-    /* Count applicable fixes from the server (robust after a reload), then split
-       ~4 per pass so each call stays well under the limit even for bold edits. */
-    sb.from("scans").select("proposals").eq("id", currentScanId).single()
-      .then(function (r) {
-        var props = (r && r.data && r.data.proposals) || [];
-        var applicable = props.filter(function (p) { return p.applicable_edit; }).length ||
-          currentApplicable || 1;
-        var total = Math.min(12, Math.max(1, Math.ceil(applicable / 4)));
-        return runApply(total);
-      })
-      .then(function (data) {
-        renderApplyResult(data);
-        return runQa();
-      }).catch(function (e) {
-        els["apply-result"].innerHTML = "<p>" + esc(P.err + " [apply]" + fmtReason(e)) + "</p>";
-      });
-  }
-
-  function renderApplyResult(data) {
-    els["apply-result"].hidden = false;
-    els["apply-result"].innerHTML = "<p>" +
-      esc(P.applied(data.fixes_applied, data.fixes_total)) + "</p>";
-  }
 
   /* ===== stage 6: hand the result back to the user ===== */
   function showDeliver() {
     if (els["deliver-actions"]) els["deliver-actions"].hidden = false;
+    renderSecretsNote();
+  }
+
+  /* Says what happened to the files we deliberately never received. Shown only
+     when this browser is actually holding some: on a scan opened from the
+     history it is holding none, and promising otherwise would be a lie. */
+  function renderSecretsNote() {
+    var el = els["secrets-note"];
+    if (!el) return;
+    if (!carryThrough.length) { el.hidden = true; el.textContent = ""; return; }
+    el.hidden = false;
+    el.textContent = P.secretsNote(carryThrough.length);
   }
 
   /* Findings from the two floors, shown NEXT TO the download rather than instead
@@ -1545,7 +1475,11 @@
     var el = els["build-warnings"];
     if (!el) return;
     if (!warnings || !warnings.length) { el.hidden = true; el.innerHTML = ""; return; }
-    var text = { content_loss: T.warnContentLoss, design_thin: T.warnDesignThin };
+    var text = {
+      content_loss: T.warnContentLoss,
+      design_thin: T.warnDesignThin,
+      css_repaired: T.warnCssRepaired
+    };
     el.hidden = false;
     el.innerHTML =
       '<h3 class="build-warnings-title">' + esc(T.warnHeading) + "</h3>" +
@@ -1575,7 +1509,25 @@
     ]).then(function (r) {
       var data = r[0], JSZip = r[1].default || r[1];
       var zip = new JSZip();
-      data.files.forEach(function (f) { zip.file(f.path, f.content); });
+      var written = {};
+      data.files.forEach(function (f) {
+        var safe = safeRelPath(f.path);
+        if (!safe) return;   /* a path that escapes the folder never gets written */
+        written[safe] = true;
+        zip.file(safe, f.content);
+      });
+
+      /* The files we excluded from the scan go back in exactly as they came:
+         same bytes, same path, never opened, never sent anywhere. They are last
+         so they can never overwrite a file the pipeline actually produced. */
+      var restored = 0;
+      carryThrough.forEach(function (c) {
+        var safe = safeRelPath(c.path);
+        if (!safe || written[safe]) return;
+        written[safe] = true;
+        restored += 1;
+        zip.file(safe, c.data);
+      });
 
       /* A report beside the code, so the ZIP is self-explanatory later when
          the browser tab that produced it is long gone. */
@@ -1586,7 +1538,7 @@
         pipeline_status: data.pipeline_status,
         changed_files: data.changed_files,
         change_log: data.change_log,
-        qa_verdict: data.qa_verdict,
+        self_check: data.self_check,
         design_direction: data.design_direction
       }, null, 2));
 
@@ -1600,7 +1552,8 @@
         a.click();
         a.remove();
         URL.revokeObjectURL(url);
-        deliverSay(P.zipReady((data.changed_files || []).length));
+        deliverSay(P.zipReady((data.changed_files || []).length) +
+          (restored ? " " + P.zipCarried(restored) : ""));
       });
     }).catch(function (e) {
       deliverSay(P.err + fmtReason(e));
@@ -1612,7 +1565,7 @@
      call knowingly, not a checkbox they can miss. */
   function pushToGithub(ack) {
     deliverSay(P.prOpening);
-    invokeFn("push-github", { scan_id: currentScanId, acknowledge_qa_failed: !!ack })
+    invokeFn("push-github", { scan_id: currentScanId, acknowledge_warnings: !!ack })
       .then(function (data) {
         var el = els["deliver-result"];
         el.hidden = false;
@@ -1623,8 +1576,8 @@
       .catch(function (e) {
         var body = e && e.body;
         var code = body && body.error;
-        if (code === "qa_did_not_pass" && !ack) {
-          if (window.confirm(P.prQaFailed(body.human_quality_score))) pushToGithub(true);
+        if (code === "build_has_warnings" && !ack) {
+          if (window.confirm(P.prWarnings(body.warnings || []))) pushToGithub(true);
           else deliverSay("");
           return;
         }
@@ -1634,53 +1587,12 @@
       });
   }
 
-  function runQa() {
-    els["qa-result"].hidden = false;
-    els["qa-result"].innerHTML = "<p>" + esc(P.qaRunning) + "</p>";
-    return invokeFn("qa", { scan_id: currentScanId }).then(function (data) {
-      var score = (data.verdict && data.verdict.human_quality_score);
-      if (data.pass) {
-        els["qa-result"].innerHTML = '<p class="qa-pass">' + esc(P.qaPass) +
-          (score != null ? " · " + esc(String(score)) + "/100" : "") + "</p>";
-        showDeliver();
-        return;
-      }
-      if (data.can_reapply) {
-        els["qa-result"].innerHTML = "<p>" + esc(P.qaFail) + "</p>";
-        var ids = ((data.verdict && data.verdict.recommend_reapply) || [])
-          .map(function (x) { return x.signal_id; });
-        return invokeFn("apply", { scan_id: currentScanId, reapply_signal_ids: ids })
-          .then(function (again) {
-            /* A reapply round changes how many fixes survive. Without this the
-               panel keeps showing the FIRST apply's count — which is how a run
-               that ended with 4 fixes and a failing QA score reported "9 of 12"
-               and read as a success. */
-            renderApplyResult(again);
-            return runQa();
-          });
-      }
-      /* Terminal: QA rejected it and there are no rounds left. The delivery
-         buttons still appear — the user is entitled to inspect the output —
-         but the score is shown so the decision is an informed one. */
-      els["qa-result"].innerHTML = '<p class="qa-human">' + esc(P.needsHuman) +
-        (score != null ? " · " + esc(String(score)) + "/100" : "") + "</p>";
-      showDeliver();
-    }).catch(function (e) {
-      /* QA is a safety check, not a gate — the fixes are already applied
-         deterministically (exact string replacements). If QA can't finish
-         (e.g. a very large diff), don't block: surface it softly and still let
-         the user download and inspect the result. */
-      els["qa-result"].innerHTML = '<p class="qa-human">' + esc(P.qaSkipped + fmtReason(e)) + "</p>";
-      showDeliver();
-    });
-  }
-
   /* ===== recent audits (history) ===== */
   var historyRows = [];
   function loadHistory() {
     if (!sb || !user || !els.history) return;
     sb.from("scans")
-      .select("id,source_type,source_ref,ai_fingerprint_score,present_count,files_scanned,detection,design_direction,proposals,pipeline_status,change_log,qa_verdict,created_at")
+      .select("id,source_type,source_ref,ai_fingerprint_score,present_count,files_scanned,detection,design_direction,pipeline_status,change_log,self_check,created_at")
       .eq("user_id", user.id).eq("status", "done")
       .order("created_at", { ascending: false }).limit(20)
       .then(function (r) {
@@ -1951,8 +1863,6 @@
     // Primary flow is now the whole-file redesign (TransformDesigner). The old
     // propose→apply patch handlers stay defined but are no longer wired.
     if (els["rebuild-site"]) els["rebuild-site"].addEventListener("click", rebuildSite);
-    if (els["propose-fixes"]) els["propose-fixes"].addEventListener("click", transformSite);
-    if (els["apply-fixes"]) els["apply-fixes"].addEventListener("click", applyFixes);
     if (els["add-features"]) els["add-features"].addEventListener("click", proposeFeature);
     if (els["download-zip"]) els["download-zip"].addEventListener("click", downloadZip);
     if (els["push-github"]) els["push-github"].addEventListener("click", function () {

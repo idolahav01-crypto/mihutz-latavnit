@@ -564,7 +564,6 @@ code, .mono { font-family: var(--font-mono); }
 .fix-hint { color: var(--color-neutral-600); font-size: 0.9rem; }
 .fix-stage { margin-block-start: var(--s-3); }
 .fix-stage h3 { font-size: 1rem; margin-block-end: var(--s-2); }
-.fix-actions { margin-block-start: var(--s-3); }
 
 .dd-line { font-size: 0.9rem; margin-block: 4px; }
 .dd-rationale { color: var(--color-neutral-600); font-size: 0.88rem; margin-block-start: 6px; }
@@ -576,27 +575,6 @@ code, .mono { font-family: var(--font-mono); }
 }
 .tok i { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
 
-.prop-list { list-style: none; padding: 0; margin: 0; }
-.prop {
-  padding: var(--s-2) 0;
-  border-block-start: 1px solid var(--color-neutral-200);
-}
-.prop-head { font-weight: 600; font-size: 0.85rem; color: var(--color-neutral-600); }
-.prop-rationale { font-size: 0.9rem; margin-block-start: 3px; }
-.prop-diff { display: flex; flex-wrap: wrap; gap: 6px; margin-block-start: 6px; }
-.prop-diff code {
-  font-size: 0.78rem; padding: 3px 6px; border-radius: 4px;
-  white-space: pre-wrap; word-break: break-word;
-}
-.prop-diff .old { background: #fdecea; color: #8a1c10; text-decoration: line-through; }
-.prop-diff .new { background: #eaf6ec; color: #14612a; }
-.prop.is-strategic { opacity: 0.85; }
-.prop-strategic {
-  display: inline-block; margin-block-start: 4px;
-  font-size: 0.78rem; color: var(--color-neutral-600);
-}
-.qa-pass { color: #14612a; font-weight: 700; }
-.qa-human { color: #8a5a00; font-weight: 600; }
 
 /* the report view's bar sits inside the fix pipeline */
 .rb-progress { margin-block-start: var(--s-3); }

@@ -6,17 +6,24 @@
 //     branch off the default branch's head and opens a PR. The user's live site
 //     cannot change as a result of this call; merging stays a human decision
 //     made in GitHub's own review UI.
-//   - It refuses outright when QA did not pass, unless the caller explicitly
-//     sets acknowledge_qa_failed. The first real run ended at
-//     pipeline_status "needs_human" with a quality score of 42 and a currency
-//     regression that made Hebrew markup worse — pushing that silently is the
-//     exact outcome this guard exists to prevent.
+//   - It refuses outright when the run is not deliverable, or when the rebuild
+//     found a fault it could NOT repair, unless the caller explicitly sets
+//     acknowledge_warnings. The first real run ended at pipeline_status
+//     "needs_human" with a quality score of 42 and a currency regression that
+//     made Hebrew markup worse — pushing that silently is the exact outcome
+//     this guard exists to prevent. The adversarial QA stage that used to
+//     produce that verdict is gone; the two floors the rebuild runs on its own
+//     output — content preservation and design depth — took its place, and
+//     they are what is checked here now.
+//     A finding the rebuild already REPAIRED does not stop the push: what would
+//     be pushed no longer has the fault in it, so the stop would be about a
+//     condition that is not in the commit. It is reported, not enforced.
 //   - It sends only files whose content actually differs from the original, so
 //     the PR diff is reviewable rather than a whole-repo rewrite.
-//   - The PR body carries the QA verdict, so a reviewer sees what the pipeline
-//     itself thought of the work before merging it.
+//   - The PR body carries every finding — repaired ones included — so a reviewer
+//     sees what the pipeline thought of the work before merging it.
 //
-// Body: { scan_id, branch?, acknowledge_qa_failed? }
+// Body: { scan_id, branch?, acknowledge_warnings? }
 
 import { assembleFinalFiles, parseBundle } from "../_shared/pipeline.ts";
 import { adminClient, cors, json, requireUser } from "../_shared/http.ts";
@@ -66,7 +73,7 @@ Deno.serve(async (req) => {
   const user = await requireUser(admin, req);
   if (!user) return json({ error: "unauthorized" }, 401);
 
-  let body: { scan_id?: string; branch?: string; acknowledge_qa_failed?: boolean };
+  let body: { scan_id?: string; branch?: string; acknowledge_warnings?: boolean };
   try {
     body = await req.json();
   } catch {
@@ -77,7 +84,7 @@ Deno.serve(async (req) => {
 
   const { data: scan, error: scanErr } = await admin
     .from("scans")
-    .select("id, user_id, source_type, source_ref, qa_verdict, pipeline_status, change_log")
+    .select("id, user_id, source_type, source_ref, self_check, pipeline_status, change_log")
     .eq("id", scanId)
     .single();
   if (scanErr || !scan || scan.user_id !== user.id) {
@@ -87,15 +94,43 @@ Deno.serve(async (req) => {
     return json({ error: "not_a_github_scan", hint: "download the ZIP instead" }, 409);
   }
 
-  const verdict = (scan.qa_verdict ?? {}) as { pass?: boolean; human_quality_score?: number };
-  if (verdict.pass !== true && !body.acknowledge_qa_failed) {
-    // Deliberately a hard stop rather than a warning in the response. The
-    // caller has to say, in the request, that it knows QA rejected this.
+  // A run that never reached "applied" has no verified output to push.
+  if (scan.pipeline_status !== "applied") {
     return json({
-      error: "qa_did_not_pass",
+      error: "run_not_deliverable",
       pipeline_status: scan.pipeline_status,
-      human_quality_score: verdict.human_quality_score ?? null,
-      hint: "re-send with acknowledge_qa_failed: true to open the PR anyway",
+    }, 409);
+  }
+
+  const selfCheck = (scan.self_check ?? {}) as {
+    warnings?: Array<{ kind: string; detail: string }>;
+  };
+  const warnings = selfCheck.warnings ?? [];
+
+  // A finding that describes a fault ALREADY REPAIRED is not a reason to stop.
+  //
+  // content_loss and design_thin describe something wrong with the bytes about
+  // to be pushed; there is something to warn a reviewer away from. css_repaired
+  // describes a stylesheet that came back truncated and was closed before it
+  // shipped — the braces are balanced, the rules below survived, and what goes
+  // into the commit is valid CSS. Stopping on it would be warning about a
+  // condition that no longer exists in the output.
+  //
+  // It still travels: it is in the response, in the PR body, and in self_check.
+  // Worth a human's eye, not worth a hard stop.
+  const REPAIRED_KINDS = new Set(["css_repaired"]);
+  const blocking = warnings.filter((w) => !REPAIRED_KINDS.has(w.kind));
+
+  if (blocking.length && !body.acknowledge_warnings) {
+    // Deliberately a hard stop rather than a note in the response. The download
+    // is never withheld — the user paid for it and can read it — but a pull
+    // request writes into someone's repository, so the caller has to say, in
+    // the request, that it knows what the run found in its own output.
+    return json({
+      error: "build_has_warnings",
+      pipeline_status: scan.pipeline_status,
+      warnings: blocking,
+      hint: "re-send with acknowledge_warnings: true to open the PR anyway",
     }, 409);
   }
 
@@ -191,15 +226,16 @@ Deno.serve(async (req) => {
       ``,
       `- Fixes applied: **${applied}**`,
       `- Files changed: **${changed.length}**`,
-      `- QA verdict: **${verdict.pass === true ? "pass" : "did NOT pass"}**` +
-      (verdict.human_quality_score != null
-        ? ` (human-quality score ${verdict.human_quality_score}/100)`
-        : ""),
+      `- Findings on our own output: **${warnings.length ? warnings.length : "none"}**`,
       ``,
-      verdict.pass === true
-        ? `Review the diff before merging.`
-        : `> The pipeline's own QA stage rejected this output. It is opened as a ` +
-          `PR precisely so a human decides. Read the diff carefully.`,
+      ...(warnings.length
+        ? [
+          `> The rebuild's own checks flagged this result:`,
+          ...warnings.map((w) => `> - ${w.kind}: ${w.detail}`),
+          `>`,
+          `> It is opened as a PR precisely so a human decides. Read the diff carefully.`,
+        ]
+        : [`Review the diff before merging.`]),
     ].join("\n");
 
     const pr = await gh(o, "/pulls", {
@@ -220,7 +256,7 @@ Deno.serve(async (req) => {
       files_changed: changed.length,
       pull_request_url: pr.html_url,
       pull_request_number: pr.number,
-      qa_passed: verdict.pass === true,
+      warnings,
     });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);

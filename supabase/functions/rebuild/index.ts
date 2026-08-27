@@ -32,7 +32,8 @@ import {
   unreferencedAssets,
 } from "../_shared/pipeline.ts";
 import { checkPreservation, summarize } from "../_shared/preservation.ts";
-import { selfCheck } from "../_shared/selfcheck.ts";
+import { balanceCss, selfCheck } from "../_shared/selfcheck.ts";
+import { redressSecondaryPages } from "../_shared/redress.ts";
 import { checkRichness, collectCss, richnessTargets } from "../_shared/richness.ts";
 import { callClaude, cleanApiKey } from "../_shared/anthropic.ts";
 import { adminClient, cors, json, requireUser } from "../_shared/http.ts";
@@ -159,6 +160,8 @@ interface BuiltSection {
   index: number;
   html: string;
   css: string;
+  /** This section's CSS came back structurally broken and was repaired. */
+  cssRepaired?: boolean;
 }
 
 // ================= PROMPTS =================
@@ -726,6 +729,7 @@ Deno.serve(async (req) => {
 
     let sectionHtml: string;
     let sectionCss: string;
+    let cssRepaired = false;
 
     if (section.component_id && section.verbatim_html) {
       // Interactive section: carried verbatim so the script's DOM survives, its
@@ -779,20 +783,29 @@ Deno.serve(async (req) => {
       // instead. The page always ships whole — the guarantee never depends on the
       // model getting it right, and there is no failure branch.
       const lostFacts = modelHtml ? missingSectionFacts(modelHtml, section) : [];
+
+      // Close the braces before this section's CSS is concatenated with the
+      // others. A section that came back mid-rule does not break itself, it
+      // eats every rule below it in the assembled <style> — and it does that on
+      // the failure path too, because the floor renderer replaces the model's
+      // MARKUP and carries its CSS through unchanged.
+      const balanced = balanceCss(built.css ?? "");
+      cssRepaired = balanced.changed;
+
       if (modelHtml && sectionCoverage(modelHtml, section) >= 0.85 && !lostFacts.length) {
         sectionHtml = modelHtml;
-        sectionCss = built.css ?? "";
+        sectionCss = balanced.css;
       } else {
         const floor = renderContentSection(section);
         sectionHtml = floor.html;
-        sectionCss = built.css ? `${built.css}\n${floor.css}` : floor.css;
+        sectionCss = balanced.css ? `${balanced.css}\n${floor.css}` : floor.css;
       }
     }
 
     // Accumulate this section (merge-upload, keyed by index). Parts run strictly
     // one at a time per scan, so the copy read before the call is still current.
     const merged = built0.filter((s) => s.index !== sectionIndex);
-    merged.push({ index: sectionIndex, html: sectionHtml, css: sectionCss });
+    merged.push({ index: sectionIndex, html: sectionHtml, css: sectionCss, cssRepaired });
     await writeJson(admin, P.sections, merged);
 
     const done = part >= parts;
@@ -823,6 +836,21 @@ Deno.serve(async (req) => {
       const check = selfCheck(target, assembled, originals);
       const full = check.html;
       const editedMap = new Map<string, string>([[target, full]]);
+
+      // Carry the new design to the pages this run did not build.
+      //
+      // The audit scores the whole site, because the whole site is what ships:
+      // one rebuilt page overlaid on every original nobody touched. Measured on
+      // a real four-page run, that gap WAS most of the remaining score — 18 of
+      // the 34 signals still present were evidenced only on pages the rebuild
+      // had never opened, against 13 on the rebuilt page itself.
+      //
+      // This re-values their palette and type, gives them the new header and
+      // footer, and runs the same self-check over them. It is text work: no
+      // model call, no token, no added cost to a run. It is NOT a rebuild, and
+      // the signals living in a page's own content and structure survive it.
+      const redress = redressSecondaryPages(originals, shell, target);
+      for (const [path, content] of redress.files) editedMap.set(path, content);
 
       // The rebuilt page is self-contained: its CSS is inline and the original
       // <script> blocks are carried inside it. That leaves the old stylesheet
@@ -888,9 +916,33 @@ Deno.serve(async (req) => {
       // Nothing is hidden — the original failure was a lossy run passing
       // SILENTLY — and nothing is seized. The user reads what we found and
       // decides whether to ship it or build again.
+      //
+      // Broken CSS travels the same way, and for the same reason. The braces
+      // are already closed by the time this runs — on the page that ships, not
+      // only in a message — so the finding is not "we refused", it is "we
+      // repaired this, look at it". A structurally broken stylesheet is the one
+      // failure a user cannot see in a screenshot and can see instantly in a
+      // browser, so it is worth naming.
+      const repairedSections = merged
+        .filter((s) => s.cssRepaired)
+        .map((s) => s.index + 1)
+        .sort((a, b) => a - b);
+      const cssBroken = repairedSections.length > 0 || check.cssBalance.changed;
+
       const warnings: Array<{ kind: string; detail: string; items: unknown }> = [
         ...(guard.ok ? [] : [{ kind: "content_loss", detail: summarize(guard), items: guard.failures }]),
         ...(depth.ok ? [] : [{ kind: "design_thin", detail: depth.detail, items: depth.thinnest }]),
+        ...(cssBroken
+          ? [{
+            kind: "css_repaired",
+            // The user-facing sentence lives in the dashboard, keyed by kind,
+            // in both languages. This line is the evidence next to it.
+            detail: `sections repaired: ${repairedSections.join(", ") || "none"}; ` +
+              `page: +${check.cssBalance.added} closing, -${check.cssBalance.dropped} stray` +
+              (check.cssBalance.unbalanced ? "; STILL UNBALANCED" : ""),
+            items: { sections: repairedSections, page: check.cssBalance },
+          }]
+          : []),
       ];
       deliveryWarnings = warnings;
 
@@ -906,10 +958,21 @@ Deno.serve(async (req) => {
           warnings,
           content_ok: guard.ok,
           design_depth: { ratio: depth.ratio, before: depth.before.total, after: depth.after.total },
+          css_balance: { sections: repairedSections, page: check.cssBalance },
           restored_hooks: check.restoredHooks,
           repaired: check.repaired,
           unrepaired: check.unrepaired,
           still_present: check.stillPresent,
+          // What the free pass over the un-rebuilt pages actually did. On the
+          // record so the next run can tell a weak build apart from a build
+          // that was only ever allowed to touch a quarter of the site.
+          redress: {
+            pages: redress.pages,
+            stylesheets: redress.stylesheets,
+            colour_moves: redress.moves.length,
+            repaired: redress.repaired,
+            skipped: redress.skipped,
+          },
         },
         // Only a run that reached here is deliverable, so clear whatever a
         // previous failed attempt left behind. Without this a scan can sit as

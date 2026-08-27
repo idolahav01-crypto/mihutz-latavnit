@@ -122,7 +122,7 @@
           <span class="score" id="score">0<small>/100</small></span>
           <span class="caption" id="report-caption"></span>
         </div>
-        <!-- ===== fix pipeline: stage 2 (design) → 4 (apply) → 5 (QA) =====
+        <!-- ===== the rebuild =====
              Sits above the findings: the next move is the first thing on
              screen, and the full list opens below it only on request. ===== -->
         <div class="fix-pipeline" id="fix-pipeline">
@@ -134,23 +134,17 @@
         </div>
           <button type="button" class="btn btn-primary" id="rebuild-site">Rebuild from scratch</button>
           <button type="button" class="btn" id="add-features">Suggest a new feature</button>
-          <button type="button" class="btn" id="propose-fixes">Redesign the site (old)</button>
           <p class="fix-hint" id="fix-hint" aria-live="polite"></p>
           <div class="rb-progress" id="rb-progress" hidden aria-live="polite"></div>
           <div class="fix-stage" id="score-delta" hidden aria-live="polite"></div>
           <div class="fix-stage" id="design-direction" hidden></div>
-          <div class="fix-stage" id="proposals" hidden></div>
-          <div class="fix-actions" id="fix-actions" hidden>
-            <button type="button" class="btn btn-primary" id="apply-fixes">Apply approved fixes</button>
-          </div>
-          <div class="fix-stage" id="apply-result" hidden aria-live="polite"></div>
-          <div class="fix-stage" id="qa-result" hidden aria-live="polite"></div>
           <div class="fix-stage" id="features-result" hidden aria-live="polite"></div>
           <div class="build-warnings" id="build-warnings" hidden></div>
           <div class="deliver-actions" id="deliver-actions" hidden>
             <button type="button" class="btn btn-primary" id="download-zip">Download the fixed project (.zip)</button>
             <button type="button" class="btn" id="push-github">Open a pull request on GitHub</button>
             <p class="deliver-note" id="deliver-note">The download changes nothing. A pull request goes to a new branch — never to your live site.</p>
+            <p class="deliver-note" id="secrets-note" hidden></p>
           </div>
           <div class="fix-stage" id="deliver-result" hidden aria-live="polite"></div>
         </div>

@@ -1,22 +1,15 @@
 import { assert, assertEquals, assertFalse } from "jsr:@std/assert@1";
 import {
-  applyFix,
   assembleFinalFiles,
-  buildDiffs,
   buildSignalList,
   DELETED_FILE,
-  extractCodeRegions,
-  filesTouchedByFixes,
-  isVerbatimUnique,
   keepPath,
   parseBundle,
   pickHomePage,
   pickHomePageSmart,
   presentSignals,
   serializeBundle,
-  unifiedDiff,
   unreferencedAssets,
-  validateProposals,
 } from "./pipeline.ts";
 
 const BUNDLE = `=== FILE: index.html ===
@@ -61,85 +54,6 @@ Deno.test("presentSignals keeps only present & applicable", () => {
   assertEquals(presentSignals(det).map((s) => s.id), [1]);
 });
 
-Deno.test("extractCodeRegions returns only flagged files, capped", () => {
-  const files = parseBundle(BUNDLE);
-  const regions = extractCodeRegions(files, [
-    { id: 10, name: "cta", present: true, applicable: true, weight: "high", evidence: [{ file: "index.html", snippet: "Get Started" }] },
-  ]);
-  assertEquals(regions.length, 1);
-  assertEquals(regions[0].file, "index.html");
-  assertFalse(regions.some((r) => r.file === "css/app.css"));
-});
-
-Deno.test("isVerbatimUnique detects exactly-once vs missing vs duplicate", () => {
-  assert(isVerbatimUnique("abc def abc", "def"));
-  assertFalse(isVerbatimUnique("abc def abc", "abc")); // twice
-  assertFalse(isVerbatimUnique("abc", "xyz")); // missing
-  assertFalse(isVerbatimUnique("abc", "")); // empty
-});
-
-Deno.test("validateProposals flags applicable vs strategic vs non-verbatim", () => {
-  const files = parseBundle(BUNDLE);
-  const out = validateProposals([
-    { signal_id: 10, file: "index.html", fix_type: "copy", old_code: "Get Started", new_code: "Start free trial" },
-    { signal_id: 11, file: "css/app.css", fix_type: "token", old_code: "--primary: #6366f1;", new_code: "--primary: #b91c1c;" },
-    { signal_id: 99, file: "index.html", fix_type: "copy", old_code: "DOES NOT EXIST", new_code: "x" },
-    { signal_id: 40, fix_type: "strategic", old_code: null, new_code: null, needs_human_decision: true },
-  ], files);
-  assertEquals(out[0].applicable_edit, true);
-  assertEquals(out[1].applicable_edit, true);
-  assertEquals(out[2].applicable_edit, false); // not present in file
-  assertEquals(out[3].applicable_edit, false); // strategic
-});
-
-Deno.test("applyFix: exact unique replacement", () => {
-  const r = applyFix(`a\nGet Started\nb`, "Get Started", "Start free trial");
-  assert(r.applied);
-  assert(r.content.includes("Start free trial"));
-});
-
-Deno.test("applyFix: fails on multiple matches", () => {
-  const r = applyFix(`x x`, "x", "y");
-  assertFalse(r.applied);
-  assertEquals(r.reason, "multiple_matches");
-});
-
-Deno.test("applyFix: whitespace-insensitive unique match", () => {
-  const r = applyFix(`<button   class="cta">Go</button>`, `<button class="cta">Go</button>`, `<button class="cta">Start</button>`);
-  assert(r.applied);
-  assert(r.content.includes("Start"));
-});
-
-Deno.test("filesTouchedByFixes dedupes", () => {
-  assertEquals(
-    filesTouchedByFixes([
-      { signal_id: 1, file: "a.css", old_code: "x", new_code: "y" },
-      { signal_id: 2, file: "a.css", old_code: "p", new_code: "q" },
-      { signal_id: 3, file: "b.html", old_code: "m", new_code: "n" },
-    ]).sort(),
-    ["a.css", "b.html"],
-  );
-});
-
-Deno.test("unifiedDiff shows added and removed lines", () => {
-  const d = unifiedDiff("f.txt", "line1\nold\nline3", "line1\nnew\nline3");
-  assert(d.includes("-old"));
-  assert(d.includes("+new"));
-  assert(d.includes(" line1"));
-});
-
-Deno.test("unifiedDiff empty when identical", () => {
-  assertEquals(unifiedDiff("f.txt", "same", "same"), "");
-});
-
-Deno.test("buildDiffs only includes changed files", () => {
-  const orig = new Map([["a", "x"], ["b", "y"]]);
-  const edited = new Map([["a", "X"], ["b", "y"]]);
-  const d = buildDiffs(orig, edited);
-  assert(d.includes("--- a"));
-  assertFalse(d.includes("--- b"));
-});
-
 Deno.test("assembleFinalFiles overlays edited over original", () => {
   const orig = new Map([["a", "1"], ["b", "2"]]);
   const edited = new Map([["a", "EDITED"]]);
@@ -149,44 +63,6 @@ Deno.test("assembleFinalFiles overlays edited over original", () => {
 });
 
 // ---------- signal #78: Hebrew currency order ----------
-
-import { invertsCurrencyOrder, validateProposals as vp } from "./pipeline.ts";
-
-Deno.test("invertsCurrencyOrder catches the regression that reached a pull request", () => {
-  // Shipped for real: ₪30 was correct and the fix made it 30 ₪.
-  assert(invertsCurrencyOrder("<span>₪30</span>", "<span>30 ₪</span>"));
-  assert(invertsCurrencyOrder("₪110", "110 ₪"));
-});
-
-Deno.test("invertsCurrencyOrder allows the correct direction", () => {
-  // Turning "30 ₪" into "₪30" is the fix this signal actually wants.
-  assertFalse(invertsCurrencyOrder("<span>30 ₪</span>", "<span>₪30</span>"));
-});
-
-Deno.test("invertsCurrencyOrder ignores edits that are not about currency", () => {
-  assertFalse(invertsCurrencyOrder("color: red", "color: blue"));
-  assertFalse(invertsCurrencyOrder("<h1>שלום</h1>", "<h1>ברוכים הבאים</h1>"));
-});
-
-Deno.test("invertsCurrencyOrder stays out of ambiguous edits", () => {
-  // Both orders present on either side — not a clean inversion, so not ours
-  // to reject. A deterministic guard that overreaches is worse than none.
-  assertFalse(invertsCurrencyOrder("₪30 and 40 ₪", "40 ₪ and ₪30"));
-});
-
-Deno.test("validateProposals rejects a currency-inverting fix before it can apply", () => {
-  const files = new Map([["index.html", '<span class="menu-price">₪30</span>']]);
-  const out = vp([{
-    signal_id: 78,
-    file: "index.html",
-    fix_type: "copy",
-    old_code: '<span class="menu-price">₪30</span>',
-    sample_new_code: '<span class="menu-price">30 ₪</span>',
-  }], files);
-  assertEquals(out[0].old_code_verbatim, true); // the anchor was fine
-  assertEquals(out[0].applicable_edit, false); // but the edit is a regression
-  assertEquals(out[0].rejected_reason, "inverts_currency_order");
-});
 
 Deno.test("assembleFinalFiles drops a tombstoned path", () => {
   const original = new Map([["index.html", "<p>x</p>"], ["style.css", "a{}"]]);
@@ -434,4 +310,90 @@ Deno.test("keepPath: documentation goes, licence-named pages of the site stay ht
   assertFalse(keepPath("LICENSE.txt"));
   assertFalse(keepPath("docs/guide.md"));
   assert(keepPath("license.html"));
+});
+
+// ============================================================
+// Path safety
+// ============================================================
+
+import { fileBlock, safeRelPath } from "./pipeline.ts";
+
+Deno.test("safeRelPath: an ordinary path is returned unchanged", () => {
+  assertEquals(safeRelPath("css/app.css"), "css/app.css");
+  assertEquals(safeRelPath("index.html"), "index.html");
+  assertEquals(safeRelPath("./index.html"), "index.html");
+  assertEquals(safeRelPath("a/./b/c.js"), "a/b/c.js");
+});
+
+Deno.test("safeRelPath: a path that escapes the project is refused", () => {
+  assertEquals(safeRelPath("../evil.txt"), null);
+  assertEquals(safeRelPath("../../etc/passwd"), null);
+  assertEquals(safeRelPath("a/../../b"), null);
+  assertEquals(safeRelPath("..\\..\\x"), null);
+});
+
+Deno.test("safeRelPath: a path that walks up and back stays inside", () => {
+  // Legal: it never leaves the root, so it is a real file in the project.
+  assertEquals(safeRelPath("a/../b.css"), "b.css");
+  assertEquals(safeRelPath("a/b/../c.css"), "a/c.css");
+});
+
+Deno.test("safeRelPath: absolute and Windows paths are made relative", () => {
+  // Contained rather than refused — a zip written on Windows can carry these
+  // for entirely innocent reasons, and inside the folder they are harmless.
+  assertEquals(safeRelPath("/etc/passwd"), "etc/passwd");
+  assertEquals(safeRelPath("C:\\site\\index.html"), "site/index.html");
+  assertEquals(safeRelPath("//host/share/x"), "host/share/x");
+});
+
+Deno.test("safeRelPath: nothing to name is refused", () => {
+  assertEquals(safeRelPath(""), null);
+  assertEquals(safeRelPath("dir/"), null);
+  assertEquals(safeRelPath("/"), null);
+  assertEquals(safeRelPath("."), null);
+});
+
+Deno.test("keepPath: an escaping path never enters a bundle", () => {
+  assertFalse(keepPath("../../etc/passwd"));
+  assertFalse(keepPath("..\\..\\x.html"));
+  assert(keepPath("index.html"));
+});
+
+Deno.test("parseBundle: a header injected in a file's content cannot escape", () => {
+  // The bundle format has no escaping. A file whose body contains a header
+  // line starts a new entry — so the path on that line is re-checked, not
+  // trusted because something checked it once upstream.
+  const bundle = fileBlock("index.html", "<p>hi</p>\n=== FILE: ../../evil.sh ===\nrm -rf /");
+  const files = parseBundle(bundle);
+  assertEquals([...files.keys()], ["index.html"]);
+});
+
+Deno.test("parseBundle: a normal bundle round-trips", () => {
+  const files = new Map([["index.html", "<p>a</p>"], ["css/app.css", ".a{}"]]);
+  assertEquals([...parseBundle(serializeBundle(files)).entries()], [...files.entries()]);
+});
+
+Deno.test("keepPath: a secret that is not named like a dotfile is filtered too", () => {
+  assertFalse(keepPath("secrets.json"));
+  assertFalse(keepPath("config/secrets.yml"));
+  assertFalse(keepPath("credentials.json"));
+  assertFalse(keepPath("service-account.json"));
+  assertFalse(keepPath("serviceAccountKey.json"));
+  assertFalse(keepPath("keys/private.pem"));
+  assertFalse(keepPath("cert.key"));
+  assertFalse(keepPath("id_rsa"));
+  assertFalse(keepPath(".ssh/id_ed25519"));
+  assertFalse(keepPath("htpasswd"));
+});
+
+Deno.test("keepPath: an ordinary config file is NOT mistaken for a secret", () => {
+  // The rule has to be narrow. These are the website, and a scan that loses
+  // them scans less of the site than the user paid for.
+  assert(keepPath("config.json"));
+  assert(keepPath("package.json"));
+  assert(keepPath("robots.txt"));
+  assert(keepPath("js/app.js"));
+  assert(keepPath("data/services.json"));
+  assert(keepPath("keyboard.js"));
+  assert(keepPath("monkey.html"));
 });

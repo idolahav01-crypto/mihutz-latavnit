@@ -140,17 +140,6 @@ Deno.test("sanitizeSchema carries sibling keywords onto the non-null branch", ()
   assertEquals(out.anyOf, [{ type: "string", enum: ["a", "b"] }, { type: "null" }]);
 });
 
-Deno.test("the real pipeline schemas contain no union types after sanitizing", async () => {
-  const { DESIGN_SCHEMA, APPLY_SCHEMA, QA_SCHEMA } = await import("./stages.ts");
-  for (const schema of [DESIGN_SCHEMA, APPLY_SCHEMA, QA_SCHEMA]) {
-    const json = JSON.stringify(sanitizeSchema(schema));
-    // `"type":[` is the only shape structured outputs rejects here.
-    assertFalse(json.includes('"type":['));
-    // ...and the originals really did have some, so this test can fail.
-    assert(JSON.stringify(schema).includes('"type":['));
-  }
-});
-
 Deno.test("requests above the streaming threshold set stream:true", () => {
   assertFalse(shouldStream({ maxTokens: 16000 }));
   assert(shouldStream({ maxTokens: 32000 }));

@@ -28,10 +28,12 @@ const GOOD = `<!doctype html><html lang="he" dir="rtl"><head>
 <meta property="og:url" content="https://juice.example">
 <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Heebo">
 <link rel="stylesheet" href="/css/styles.abc12345.css">
+<link rel="canonical" href="https://juice.example/">
 <script type="application/ld+json">{"@context":"https://schema.org"}</script>
 </head><body>
 <a class="skip-link" href="#main">דלג לתוכן העמוד</a>
-<main id="main"><h1>מיץ טרי</h1></main>
+<main id="main"><h1>מיץ טרי</h1><p>כוס בגודל 500 מ"ל במחיר ₪12</p></main>
+<script>window.dataLayer=window.dataLayer||[];</script>
 </body></html>`;
 
 const GOOD_CSS = `.card{margin-inline-start:12px;animation:fade 1s;letter-spacing:.01em}
@@ -43,7 +45,10 @@ Deno.test("a bare page trips every mechanical check", () => {
   const files = { "index.html": BARE, "css/styles.css": BARE_CSS };
   // #98 is deliberately not here: a page with no og:image at all is #31's
   // business, and counting the same absence twice would inflate every score.
-  for (const id of [1, 27, 30, 31, 40, 41, 45, 64, 94, 109]) {
+  // #56 and #78 are absences of a FAULT, not of a feature: a page with no
+  // focus rule and no prices has nothing wrong with either, so a bare page is
+  // not expected to trip them.
+  for (const id of [1, 27, 30, 31, 40, 41, 45, 61, 64, 94, 99, 109]) {
     assertEquals(verdict(files, id).present, true, `#${id} should be present`);
   }
 });
@@ -170,4 +175,174 @@ Deno.test("#2: the family is named in the explanation, both directions", () => {
   assert(String(hit.explanation).includes("Montserrat"), String(hit.explanation));
   const miss = verdict({ "style.css": "body{font-family:Heebo,sans-serif}" }, 2);
   assert(String(miss.explanation).includes("Roboto"), "the clean verdict should still name the list");
+});
+
+// ---------- #56 focus outline ----------
+
+const RTL_HEAD = `<!doctype html><html lang="he" dir="rtl"><head><title>דף</title>`;
+
+Deno.test("#56 present: focus outline killed with nothing in its place", () => {
+  const v = verdict({
+    "index.html": `${RTL_HEAD}</head><body><p>שלום עולם וברוך הבא</p></body></html>`,
+    "style.css": `.f input:focus{outline:none}`,
+  }, 56);
+  assertEquals(v.present, true);
+  assertEquals(v.applicable, true);
+});
+
+Deno.test("#56 absent: a :focus-visible rule elsewhere draws the ring", () => {
+  const v = verdict({
+    "index.html": `${RTL_HEAD}</head><body><p>שלום עולם וברוך הבא</p></body></html>`,
+    "style.css": `a:focus{outline:none}
+a:focus-visible{outline:2px solid #333;outline-offset:2px}`,
+  }, 56);
+  assertEquals(v.present, false);
+});
+
+Deno.test("#56 absent: the same block restyles border and background", () => {
+  // The written rule says "without a styled alternative". A model called this
+  // present anyway; the border and the fill ARE the alternative.
+  const v = verdict({
+    "index.html": `${RTL_HEAD}</head><body><p>שלום עולם וברוך הבא</p></body></html>`,
+    "style.css": `.field input:focus{outline:none;border-color:#0aa;background:#fff}`,
+  }, 56);
+  assertEquals(v.present, false);
+});
+
+Deno.test("#56 absent: no rule switches the outline off at all", () => {
+  const v = verdict({
+    "index.html": `${RTL_HEAD}</head><body><p>שלום עולם וברוך הבא</p></body></html>`,
+    "style.css": `.card{color:#111}`,
+  }, 56);
+  assertEquals(v.present, false);
+});
+
+// ---------- #61 dataLayer ----------
+
+Deno.test("#61 present: no dataLayer in any script", () => {
+  const v = verdict({
+    "index.html": `${RTL_HEAD}</head><body><script src="app.js"></script></body></html>`,
+    "app.js": `document.querySelector("#nav");`,
+  }, 61);
+  assertEquals(v.present, true);
+});
+
+Deno.test("#61 absent: an inline script initialises dataLayer", () => {
+  const v = verdict({
+    "index.html":
+      `${RTL_HEAD}</head><body><script>window.dataLayer=window.dataLayer||[];</script></body></html>`,
+  }, 61);
+  assertEquals(v.present, false);
+});
+
+Deno.test("#61 absent: dataLayer lives in an external js file", () => {
+  const v = verdict({
+    "index.html": `${RTL_HEAD}</head><body><script src="app.js"></script></body></html>`,
+    "app.js": `window.dataLayer = [];`,
+  }, 61);
+  assertEquals(v.present, false);
+});
+
+// ---------- #78 number and currency direction ----------
+
+Deno.test("#78 absent: symbol-first prices are the CORRECT Hebrew order", () => {
+  // Two live runs reported this signal present and quoted ₪180 as the proof.
+  // ₪180 is right. The whole point of moving the signal here is that it stops
+  // being reported as wrong.
+  const v = verdict({
+    "index.html":
+      `${RTL_HEAD}</head><body><p>מחיר השולחן הוא <span>₪180</span> וגם <span>₪260</span> לכיסא</p></body></html>`,
+  }, 78);
+  assertEquals(v.present, false);
+  assertEquals(v.applicable, true);
+});
+
+Deno.test("#78 present: the symbol trails the number", () => {
+  const v = verdict({
+    "index.html": `${RTL_HEAD}</head><body><p>מחיר השולחן הוא 180 ₪ בלבד</p></body></html>`,
+  }, 78);
+  assertEquals(v.present, true);
+});
+
+Deno.test("#78 present: a number fused to the Hebrew word after it", () => {
+  // "₪ 24,900לפרטים" shipped in a real build.
+  const v = verdict({
+    "index.html": `${RTL_HEAD}</head><body><p>שולחן אלון מלא ₪ 24,900לפרטים</p></body></html>`,
+  }, 78);
+  assertEquals(v.present, true);
+});
+
+Deno.test("#78 absent: a one-letter Hebrew prefix on a year is正 legitimate", () => {
+  // "ב2024" is how the language is written; flagging it would be a false alarm.
+  const v = verdict({
+    "index.html": `${RTL_HEAD}</head><body><p>החברה הוקמה ב2024 והיא ממשיכה לצמוח</p></body></html>`,
+  }, 78);
+  assertEquals(v.present, false);
+});
+
+Deno.test("#78 not applicable: a left-to-right site", () => {
+  const v = verdict({
+    "index.html": `<!doctype html><html lang="en"><head><title>Shop</title></head>
+<body><p>The price is 180 $ only</p></body></html>`,
+  }, 78);
+  assertEquals(v.applicable, false);
+});
+
+Deno.test("#78 absent: markup boundaries do not count as fused text", () => {
+  // Tags become a space, so </span> followed by a word is not adjacency.
+  const v = verdict({
+    "index.html":
+      `${RTL_HEAD}</head><body><p><span>1200</span></p><p>מוצרים במלאי כרגע</p></body></html>`,
+  }, 78);
+  assertEquals(v.present, false);
+});
+
+// ---------- #99 canonical ----------
+
+Deno.test("#99 present: no canonical on any page", () => {
+  const v = verdict({
+    "index.html": `${RTL_HEAD}</head><body><p>שלום עולם וברוך הבא</p></body></html>`,
+  }, 99);
+  assertEquals(v.present, true);
+});
+
+Deno.test("#99 absent: every page carries its own canonical", () => {
+  const v = verdict({
+    "index.html":
+      `${RTL_HEAD}<link rel="canonical" href="https://x.co/"></head><body><p>שלום עולם</p></body></html>`,
+    "about.html":
+      `${RTL_HEAD}<link rel="canonical" href="https://x.co/about"></head><body><p>עלינו</p></body></html>`,
+  }, 99);
+  assertEquals(v.present, false);
+});
+
+Deno.test("#99 present: two pages share one canonical instead of self-referencing", () => {
+  const v = verdict({
+    "index.html":
+      `${RTL_HEAD}<link rel="canonical" href="https://x.co/"></head><body><p>שלום עולם</p></body></html>`,
+    "about.html":
+      `${RTL_HEAD}<link rel="canonical" href="https://x.co/"></head><body><p>עלינו</p></body></html>`,
+  }, 99);
+  assertEquals(v.present, true);
+});
+
+Deno.test("#99 present: one page of three is missing the tag", () => {
+  const page = (h: string) => `${RTL_HEAD}${h}</head><body><p>שלום עולם</p></body></html>`;
+  const v = verdict({
+    "index.html": page(`<link rel="canonical" href="https://x.co/">`),
+    "about.html": page(`<link rel="canonical" href="https://x.co/about">`),
+    "contact.html": page(""),
+  }, 99);
+  assertEquals(v.present, true);
+  assertEquals(v.total_occurrences, 1);
+});
+
+Deno.test("#78 absent: a number and a symbol on different lines are not a pair", () => {
+  // Matching across a line break paired the last number of one sentence with
+  // the currency opening the next, and reported a fault that is not there.
+  const v = verdict({
+    "index.html": `${RTL_HEAD}</head><body><p>המשלוח מגיע תוך 3
+₪45 דמי טיפול לכל הזמנה</p></body></html>`,
+  }, 78);
+  assertEquals(v.present, false);
 });
