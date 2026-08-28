@@ -38,8 +38,8 @@ const META = new Map<number, SignalMeta>(
 
 /** The ids this module owns. The model is never asked about them. */
 export const MECHANICAL_IDS: number[] = [
-  1, 2, 8, 13, 27, 28, 29, 30, 31, 35, 36, 40, 41, 45, 55, 56, 61, 64, 78, 94,
-  97, 98, 99, 109,
+  1, 2, 8, 13, 27, 28, 29, 30, 31, 35, 40, 41, 45, 55, 56, 61, 64, 78, 94, 97,
+  98, 99, 109,
 ];
 
 interface Verdict {
@@ -111,12 +111,6 @@ function allCss(files: Map<string, string>): Array<[string, string]> {
     }
   }
   return out;
-}
-
-/** One attribute off a single tag. */
-function attr(tag: string, name: string): string | null {
-  const m = tag.match(new RegExp(`\\b${name}\\s*=\\s*("([^"]*)"|'([^']*)'|([^\\s"'>]+))`, "i"));
-  return m ? (m[2] ?? m[3] ?? m[4] ?? "") : null;
 }
 
 function htmlFiles(files: Map<string, string>): Array<[string, string]> {
@@ -950,51 +944,6 @@ function checkImageDimensions(files: Map<string, string>): Verdict {
   };
 }
 
-/**
- * #36 — raster images still served as JPG/PNG.
- *
- * The binaries never reach the bundle (keepPath drops them), so this reads the
- * REFERENCES, which is what the written rule points at: "src מכיל .jpg/.png".
- *
- * Only places that actually PAINT an image count — img/source src and srcset,
- * and CSS url(). A first pass swept every .jpg-looking string in the markup
- * and flagged an og:image, which is a social-card preview nobody downloads
- * while the page renders. That is the wrong fault at the wrong weight.
- */
-function checkImageFormat(files: Map<string, string>): Verdict {
-  const old: Array<{ file: string; snippet: string }> = [];
-  let refs = 0;
-
-  const note = (file: string, url: string) => {
-    if (!/\.(jpe?g|png|webp|avif)(\?[^\s]*)?$/i.test(url)) return;
-    refs += 1;
-    if (/\.(jpe?g|png)(\?[^\s]*)?$/i.test(url)) old.push({ file, snippet: clip(url, 80) });
-  };
-
-  for (const [file, content] of htmlFiles(files)) {
-    for (const m of visibleMarkup(content).matchAll(/<(img|source)\b[^>]*>/gi)) {
-      const src = attr(m[0], "src");
-      if (src) note(file, src);
-      const set = attr(m[0], "srcset");
-      if (set) {
-        for (const cand of set.split(",")) note(file, cand.trim().split(/\s+/)[0]);
-      }
-    }
-  }
-  for (const [file, css] of allCss(files)) {
-    for (const m of css.matchAll(/url\(\s*["']?([^"')]+)["']?\s*\)/gi)) note(file, m[1].trim());
-  }
-
-  if (!refs) return { present: false, applicable: false, why: "אין תמונות רסטר שהעמוד מציג." };
-  if (!old.length) return { present: false, why: "כל התמונות מוגשות ב-WebP או AVIF." };
-  return {
-    present: true,
-    why: "תמונות מוגשות ב-JPG/PNG ולא ב-WebP/AVIF.",
-    evidence: old.slice(0, 5),
-    occurrences: old.length,
-  };
-}
-
 /** #55 — a div or span wired as a button without the keyboard half. */
 function checkClickableDiv(files: Map<string, string>): Verdict {
   const bad: Array<{ file: string; snippet: string }> = [];
@@ -1035,7 +984,6 @@ const CHECKS: Record<number, (f: Map<string, string>) => Verdict> = {
   30: checkMetaDescription,
   31: checkOpenGraph,
   35: checkImageDimensions,
-  36: checkImageFormat,
   40: checkFontPreload,
   41: checkAssetVersioning,
   45: checkReducedMotion,

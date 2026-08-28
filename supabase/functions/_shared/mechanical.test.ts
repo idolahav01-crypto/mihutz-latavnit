@@ -468,7 +468,7 @@ Deno.test("#13 ignores a black FOOTER on a light site", () => {
   assertEquals(s.present, false);
 });
 
-// ---------- #35 / #36 images ----------
+// ---------- #35 image dimensions ----------
 
 Deno.test("#35 present: an img with neither dimension", () => {
   const html = `<html><body><img src="/a.webp" alt="דוכן"></body></html>`;
@@ -483,22 +483,6 @@ Deno.test("#35 present: width without height still causes CLS", () => {
 Deno.test("#35 absent: both dimensions given", () => {
   const html = `<html><body><img src="/a.webp" width="400" height="300" alt="דוכן"></body></html>`;
   assertEquals(verdict({ "index.html": html }, 35).present, false);
-});
-
-Deno.test("#36 present: a PNG in a CSS background", () => {
-  const s = verdict({ "index.html": "<html><body></body></html>", "s.css": ".hero{background:url('/img/hero.png')}" }, 36);
-  assertEquals(s.present, true);
-});
-
-Deno.test("#36 absent: an og:image is not an image the page paints", () => {
-  const html = `<html><head><meta property="og:image" content="https://x.example/card.jpg"></head>
-<body><img src="/a.webp" width="1" height="1" alt="a"></body></html>`;
-  assertEquals(verdict({ "index.html": html }, 36).present, false);
-});
-
-Deno.test("#36 reads every candidate in a srcset", () => {
-  const html = `<html><body><img src="/a.webp" srcset="/a.webp 1x, /a@2x.png 2x" alt="a"></body></html>`;
-  assertEquals(verdict({ "index.html": html }, 36).present, true);
 });
 
 // ---------- #55 clickable div ----------
