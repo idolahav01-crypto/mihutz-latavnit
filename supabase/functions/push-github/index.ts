@@ -27,6 +27,7 @@
 
 import { assembleFinalFiles, parseBundle } from "../_shared/pipeline.ts";
 import { adminClient, cors, json, requireUser } from "../_shared/http.ts";
+import { branchName, githubFailure, sanitiseBranch, suffixed } from "../_shared/delivery.ts";
 
 const GH = "https://api.github.com";
 
@@ -34,6 +35,14 @@ interface GhOpts {
   token: string;
   owner: string;
   repo: string;
+}
+
+/** A GitHub failure that still carries its status, so callers can branch on it
+ *  instead of pattern-matching an error string. */
+class GhError extends Error {
+  constructor(readonly status: number, readonly path: string, readonly detail: string) {
+    super(`github ${status} ${path}: ${detail}`);
+  }
 }
 
 async function gh(
@@ -53,7 +62,7 @@ async function gh(
     body: init?.body ? JSON.stringify(init.body) : undefined,
   });
   const text = await res.text();
-  if (!res.ok) throw new Error(`github ${res.status} ${path}: ${text.slice(0, 300)}`);
+  if (!res.ok) throw new GhError(res.status, path, text.slice(0, 300));
   return text ? JSON.parse(text) : {};
 }
 
@@ -176,14 +185,29 @@ Deno.serve(async (req) => {
       tree: { sha: string };
     };
 
-    const branch = (body.branch ?? `mihutz-latavnit/scan-${scanId.slice(0, 8)}`)
-      .replace(/[^A-Za-z0-9._\/-]/g, "-");
-    if (branch === baseBranch) return json({ error: "refuses_to_target_default_branch" }, 400);
+    // A branch name derived from the scan id alone is the same name every time
+    // that scan is pushed, so a second attempt — after a rejected PR, or a
+    // build run again — collided with the first and GitHub answered 422. The
+    // date makes the usual case unique and readable; the numbered retry below
+    // covers two pushes in the same minute and a name a human already took.
+    const wanted = body.branch ? sanitiseBranch(body.branch) : branchName(scanId);
+    if (wanted === baseBranch) return json({ error: "refuses_to_target_default_branch" }, 400);
 
-    await gh(o, "/git/refs", {
-      method: "POST",
-      body: { ref: `refs/heads/${branch}`, sha: baseSha },
-    });
+    let branch = wanted;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        await gh(o, "/git/refs", {
+          method: "POST",
+          body: { ref: `refs/heads/${branch}`, sha: baseSha },
+        });
+        break;
+      } catch (e) {
+        // 422 from this endpoint means the ref exists. Anything else — no
+        // permission, repo gone — is not something another name would fix.
+        if (!(e instanceof GhError) || e.status !== 422 || attempt >= 5) throw e;
+        branch = suffixed(wanted, attempt);
+      }
+    }
 
     const tree = [];
     for (const [path, content] of changed) {
@@ -260,6 +284,19 @@ Deno.serve(async (req) => {
     });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
-    return json({ error: message }, 500);
+    // Name the failures the client can act on. Every one of them means the
+    // same thing to the user — the pull request is not happening — and the
+    // client turns that into a ZIP rather than a dead end, so the code matters
+    // more than the prose.
+    if (e instanceof GhError) {
+      const { code, fallback } = githubFailure(e.status);
+      return json({
+        error: code,
+        status: e.status,
+        detail: e.detail,
+        ...(fallback ? { fallback: "zip" } : {}),
+      }, 502);
+    }
+    return json({ error: message, fallback: "zip" }, 500);
   }
 });

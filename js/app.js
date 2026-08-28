@@ -1256,6 +1256,14 @@
     prDone: "ה-Pull Request נפתח. פתחו אותו, קראו את השינויים, ורק אז מזגו.",
     prNoGithub: "הסריקה הזאת לא הגיעה מ-GitHub, אז אפשר רק להוריד ZIP.",
     prNoToken: "GitHub לא מחובר. התחברו עם GitHub כדי לפתוח Pull Request.",
+    prFellBack: {
+      github_access_denied: "אין לנו יותר הרשאה ל-repository הזה. במקום זה הורדנו את הפרויקט כקובץ ZIP.",
+      github_repo_unavailable: "ה-repository לא נמצא — ייתכן שנמחק, שונה שמו או הועברה בעלותו. במקום זה הורדנו את הפרויקט כקובץ ZIP.",
+      github_rejected: "GitHub דחה את הבקשה. במקום זה הורדנו את הפרויקט כקובץ ZIP.",
+      github_failed: "פתיחת ה-Pull Request נכשלה. במקום זה הורדנו את הפרויקט כקובץ ZIP."
+    },
+    zipBroken: "הקובץ שנוצר יצא פגום. מנסה שוב…",
+    zipFailed: "לא הצלחנו להכין קובץ תקין להורדה. שום דבר לא נגבה — נסו שוב, ואם זה חוזר זה אצלנו.",
     prWarnings: function (list) {
       var kinds = {
         content_loss: "התוצאה יצאה חסרה לעומת המקור",
@@ -1351,6 +1359,14 @@
     prDone: "Pull request opened. Open it, read the diff, and only then merge.",
     prNoGithub: "This scan didn't come from GitHub, so only the ZIP download applies.",
     prNoToken: "GitHub isn't connected. Sign in with GitHub to open a pull request.",
+    prFellBack: {
+      github_access_denied: "We no longer have permission for that repository. We've downloaded the project as a ZIP instead.",
+      github_repo_unavailable: "The repository could not be found — it may have been deleted, renamed, or transferred. We've downloaded the project as a ZIP instead.",
+      github_rejected: "GitHub rejected the request. We've downloaded the project as a ZIP instead.",
+      github_failed: "Opening the pull request failed. We've downloaded the project as a ZIP instead."
+    },
+    zipBroken: "The file came out corrupt. Trying again…",
+    zipFailed: "We could not produce a valid file to download. Nothing was charged — try again, and if it repeats it's on us.",
     prWarnings: function (list) {
       var kinds = {
         content_loss: "the result came back missing content the original had",
@@ -1398,6 +1414,17 @@
     if (scan.design_direction) renderDesign(scan.design_direction);
     hideDesignGate();
     resetRebuildLabel();
+    /* A direction proposed but never approved outlives the tab it was proposed
+       in: it is on disk in spec.json and cost real money. Reopening the scan
+       used to show it with no way to accept it, so the only way forward was to
+       pay for another proposal. Offer the gate again instead — approving
+       resumes at part 2 and recomputes nothing. The same is true of a build
+       that died half-way: it is still "applying", and the parts it finished
+       are still stored, so resuming is the right offer there too. */
+    if (scan.pipeline_status === "applying" && scan.design_direction) {
+      proposalNo = 1;
+      showDesignGate();
+    }
     renderCleanNote(scan);
     renderLangNote(scan);
     restoreDelivery(scan);
@@ -1886,8 +1913,48 @@
   /* Builds the ZIP in the browser from the assembled project the `package`
      function returns. Nothing is written anywhere on the way — the user gets a
      file and decides what to do with it. */
-  function downloadZip() {
-    deliverSay(P.zipBuilding);
+  /* A ZIP that came out wrong must never reach the user's disk: they unpack it,
+     it fails, and the run looks like it lost their site. So the archive is
+     checked before it is offered — it has to start with a real ZIP signature,
+     it has to be big enough to hold what we put in it, and re-reading it has to
+     produce every file we wrote. Only then is a download triggered. */
+  /* A copy of zipVerdict() in _shared/delivery.ts, for the same reason as
+     keepPath: the browser builds the archive and cannot import from there. The
+     tests live with that copy. Change one, change both. */
+  var ZIP_MIN_BYTES = 200;
+
+  function hasZipSignature(b) {
+    if (b.length < 4 || b[0] !== 0x50 || b[1] !== 0x4b) return false;
+    return (b[2] === 0x03 && b[3] === 0x04) || (b[2] === 0x05 && b[3] === 0x06);
+  }
+
+  function zipVerdict(size, head, filesRead, expected) {
+    if (!size || size < ZIP_MIN_BYTES) return "too_small";
+    if (!hasZipSignature(head)) return "not_an_archive";
+    if (filesRead === null) return "unreadable";
+    if (filesRead < expected) return "incomplete";
+    return "ok";
+  }
+
+  function verifyZipBlob(blob, JSZip, expectedFiles) {
+    if (!blob) return Promise.resolve("too_small");
+    return blob.slice(0, 4).arrayBuffer().then(function (buf) {
+      var head = new Uint8Array(buf);
+      /* Read it back the way the user's unzipper will: a truncated central
+         directory passes the signature test and fails here. */
+      return JSZip.loadAsync(blob).then(function (z) {
+        return Object.keys(z.files).filter(function (n) { return !z.files[n].dir; }).length;
+      }).catch(function () { return null; })
+        .then(function (n) { return zipVerdict(blob.size, head, n, expectedFiles); });
+    }).catch(function () { return "unreadable"; });
+  }
+
+  /* `note` is carried through so a ZIP produced as a fallback keeps saying WHY
+     it is a ZIP — otherwise the "preparing…" line overwrites the explanation
+     and the user is left with a download they did not ask for. */
+  function downloadZip(attempt, note) {
+    attempt = attempt || 1;
+    deliverSay(join(note, attempt === 1 ? P.zipBuilding : P.zipBroken));
     Promise.all([
       invokeFn("package", { scan_id: currentScanId }),
       import(JSZIP_CDN)
@@ -1927,23 +1994,37 @@
         design_direction: data.design_direction
       }, null, 2));
 
+      var expected = Object.keys(written).length + 1; /* +1 for the report */
       return zip.generateAsync({ type: "blob" }).then(function (blob) {
-        var name = String(data.source_ref || "project").replace(/[^\w.-]+/g, "-");
-        var url = URL.createObjectURL(blob);
-        var a = document.createElement("a");
-        a.href = url;
-        a.download = name + "-fixed.zip";
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        URL.revokeObjectURL(url);
-        deliverSay(P.zipReady((data.changed_files || []).length) +
-          (restored ? " " + P.zipCarried(restored) : ""));
+        return verifyZipBlob(blob, JSZip, expected).then(function (verdict) {
+          if (verdict !== "ok") {
+            /* Once. A second identical failure is not a bad draw, and
+               retrying it forever just makes the user watch. */
+            if (attempt < 2) return downloadZip(attempt + 1, note);
+            deliverSay(join(note, P.zipFailed));
+            return;
+          }
+          var name = String(data.source_ref || "project").replace(/[^\w.-]+/g, "-");
+          var url = URL.createObjectURL(blob);
+          var a = document.createElement("a");
+          a.href = url;
+          a.download = name + "-fixed.zip";
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          URL.revokeObjectURL(url);
+          deliverSay(join(note, P.zipReady((data.changed_files || []).length) +
+            (restored ? " " + P.zipCarried(restored) : "")));
+        });
       });
     }).catch(function (e) {
-      deliverSay(P.err + fmtReason(e));
+      deliverSay(join(note, P.err + fmtReason(e)));
     });
   }
+
+  /* Two lines where there are two things to say: why this is a ZIP, and how
+     the ZIP went. Either may be empty. */
+  function join(a, b) { return a ? a + " " + b : b; }
 
   /* Opens a PR on a NEW branch. The server refuses outright when QA failed
      unless we say we know — so the confirm() below is the user making that
@@ -1968,6 +2049,16 @@
         }
         if (code === "not_a_github_scan") return deliverSay(P.prNoGithub);
         if (code === "github_not_connected") return deliverSay(P.prNoToken);
+        /* Everything else means the pull request is not happening — access
+           revoked, repo gone or renamed, GitHub refusing. None of it is
+           anything the user can fix from here, and all of it leaves them with
+           a finished rebuild and no way to hold it. So we hand them the file:
+           the work is done either way, and the delivery method is ours to
+           change, not theirs to lose. */
+        if (body && body.fallback === "zip") {
+          downloadZip(1, P.prFellBack[code] || P.prFellBack.github_failed);
+          return;
+        }
         deliverSay(P.err + fmtReason(e));
       });
   }
