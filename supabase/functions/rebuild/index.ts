@@ -37,6 +37,7 @@ import { redressSecondaryPages } from "../_shared/redress.ts";
 import { checkRichness, collectCss, richnessTargets } from "../_shared/richness.ts";
 import { callClaude, cleanApiKey } from "../_shared/anthropic.ts";
 import { adminClient, cors, json, requireUser } from "../_shared/http.ts";
+import { constraintsBlock, designSchema } from "../_shared/design_brief.ts";
 import { buildEntry, recordStageUsage } from "../_shared/usage.ts";
 import { buildLedger } from "../_shared/ledger.ts";
 import {
@@ -173,7 +174,9 @@ const DESIGN_SYSTEM =
   `You are RebuildDesigner's art director. You are shown a website's existing look and a short outline of its content. Propose ONE design_direction that turns it into a genuinely DIFFERENT, hand-built website for the same business, plus three short descriptors of the site. You are NOT writing content and NOT writing markup.
 
 design_direction — the one creative decision:
-- DEPART from the original. Treat <original_look>'s palette, fonts and design language as exactly what to move AWAY from: choose a palette from a DIFFERENT colour family, a DIFFERENT typographic pairing, and a DIFFERENT layout paradigm. Same BUSINESS, unmistakably different WEBSITE — never a recolour of the old one.
+- DEPART from the original. Treat <original_look>'s palette, fonts and design language as exactly what to move AWAY from: a DIFFERENT typographic pairing and a DIFFERENT layout paradigm, and a different colour family too UNLESS <constraints> tells you to keep the brand colour. Same BUSINESS, unmistakably different WEBSITE — never a recolour of the old one.
+- <constraints> OVERRIDES the instruction above wherever the two disagree. It carries facts about this specific business — a brand colour someone actually chose, the industry it must stay credible to, and the visual assets it does or does not own. A direction that ignores them is wrong however fresh it looks: keeping a real brand colour is not a failure to depart, and a photography-led direction for a business with no photographs is unbuildable.
+- typography.heading and typography.body must be chosen from the enum in the schema. It is already filtered for this site's script; nothing outside it is available.
 - AVOID every AI fingerprint in <avoid_ai_patterns>: the direction must not reintroduce a pattern the original was flagged for, nor reach for a different cliché in its place.
 - Look hand-built by a real studio. layout_principle must be SPECIFIC and opinionated (e.g. "editorial split-screen with off-grid imagery over a strong baseline grid"), never generic ("clean and modern"). personality must be concrete adjectives a human designer would say.
 - FORBIDDEN AI tells: default Inter, purple/indigo gradients, the dark-navy+gold cliché, Playfair-as-elegance, centre-everything symmetry, three identical cards as the only rhythm, and any emoji.
@@ -261,51 +264,6 @@ Hard rules:
 Return ONLY valid JSON { "html": "...", "css": "..." } for this one section. No prose.`;
 
 // ================= SCHEMAS =================
-const DIRECTION_SCHEMA = {
-  type: "object",
-  additionalProperties: false,
-  properties: {
-    brand_palette: {
-      type: "array",
-      items: {
-        type: "object",
-        additionalProperties: false,
-        properties: { token: { type: "string" }, hex: { type: "string" }, role: { type: "string" } },
-        required: ["token", "hex", "role"],
-      },
-    },
-    typography: {
-      type: "object",
-      additionalProperties: false,
-      properties: { heading: { type: "string" }, body: { type: "string" } },
-      required: ["heading", "body"],
-    },
-    layout_principle: { type: "string" },
-    personality: { type: "array", items: { type: "string" } },
-    rationale: { type: "string" },
-  },
-  required: ["brand_palette", "typography", "layout_principle", "personality", "rationale"],
-};
-
-const DESIGN_SCHEMA = {
-  type: "object",
-  additionalProperties: false,
-  properties: {
-    design_direction: DIRECTION_SCHEMA,
-    meta: {
-      type: "object",
-      additionalProperties: false,
-      properties: {
-        purpose: { type: "string" },
-        audience: { type: "string" },
-        tone: { type: "string" },
-      },
-      required: ["purpose", "audience", "tone"],
-    },
-  },
-  required: ["design_direction", "meta"],
-};
-
 const SHELL_SCHEMA = {
   type: "object",
   additionalProperties: false,
@@ -520,7 +478,7 @@ Deno.serve(async (req) => {
   const user = await requireUser(admin, req);
   if (!user) return json({ error: "unauthorized" }, 401);
 
-  let body: { scan_id?: string; part?: number; site_url?: string };
+  let body: { scan_id?: string; part?: number; site_url?: string; proposal?: number };
   try {
     body = await req.json();
   } catch {
@@ -529,6 +487,12 @@ Deno.serve(async (req) => {
   const scanId = body.scan_id;
   if (!scanId) return json({ error: "scan_id required" }, 400);
   let part = Number.isInteger(body.part) && (body.part as number) >= 1 ? (body.part as number) : 1;
+  // Which design proposal this is. 1 is the one every run gets; anything
+  // higher is a direction the user asked for after turning down the last one.
+  // Uncapped by decision — it costs what it costs and the user is choosing.
+  const proposalNo = Number.isInteger(body.proposal) && (body.proposal as number) >= 1
+    ? (body.proposal as number)
+    : 1;
 
   const { data: scan, error: scanErr } = await admin
     .from("scans")
@@ -555,6 +519,10 @@ Deno.serve(async (req) => {
     const avoidBlock = buildAvoidBlock(present);
     // The ORIGINAL site's look, to push every design stage AWAY from it.
     const originalLook = originalLookBlock(scan.site_profile);
+    const constraints = constraintsBlock(scan.site_profile);
+    // Which alphabet the copy is in decides which fonts are on the menu.
+    const measured = (scan.site_profile ?? {}) as { measured_language?: { rtl?: boolean } };
+    const rtlSite = measured.measured_language?.rtl === true;
 
     // ---------- PART 1: content spec + design direction ----------
     if (part === 1) {
@@ -605,6 +573,9 @@ Deno.serve(async (req) => {
         (originalLook
           ? `<original_look note="This is the OLD design that is being REPLACED. Do NOT reuse its colours, fonts, or design language — the design_direction must clearly DEPART from everything here.">\n${originalLook}\n</original_look>\n\n`
           : "") +
+        (constraints
+          ? `<constraints note="Facts about this business that the direction must respect. These OVERRIDE the instruction to depart from the original wherever the two disagree.">\n${constraints}\n</constraints>\n\n`
+          : "") +
         (avoidList
           ? `<avoid_ai_patterns note="AI fingerprints detected on the ORIGINAL site. The new design_direction must avoid every one of these.">\n${avoidList}\n</avoid_ai_patterns>\n\n`
           : "") +
@@ -616,9 +587,20 @@ Deno.serve(async (req) => {
       // ample for the direction JSON.
       const res = await callClaude({
         apiKey, model: MODEL, effort: "medium", maxTokens: 4000, stream: true,
-        system: DESIGN_SYSTEM, schema: DESIGN_SCHEMA, userContent, timeoutMs: 135_000,
+        system: DESIGN_SYSTEM, schema: designSchema(rtlSite), userContent, timeoutMs: 135_000,
       });
-      await recordStageUsage(admin, scanId, buildEntry("rebuild_design", MODEL, res.usage, Date.now() - startedAt, "medium"));
+      // Every proposal after the first is a re-proposal the user asked for, and
+      // is named as one so its cost is attributable rather than buried in the
+      // first attempt's line. There is no cap: the user decides how many
+      // directions are worth paying for.
+      await recordStageUsage(
+        admin,
+        scanId,
+        buildEntry(
+          proposalNo > 1 ? `rebuild_design_reproposal_${proposalNo}` : "rebuild_design",
+          MODEL, res.usage, Date.now() - startedAt, "medium",
+        ),
+      );
 
       const out = (res.json ?? {}) as {
         design_direction?: Direction;

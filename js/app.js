@@ -338,6 +338,7 @@
      "fix-pipeline", "rebuild-site", "fix-hint", "design-direction",
      "build-warnings",
      "deliver-actions", "download-zip", "push-github", "deliver-result", "secrets-note",
+     "design-gate", "clean-note", "lang-note",
      "add-features", "features-result", "rb-progress", "score-delta",
      "scan-progress", "site-url"
     ].forEach(function (id) { els[id] = $(id); });
@@ -919,7 +920,14 @@
   function runDetect(scanId) {
     setStage(3);
 
-    function pass(n, total) {
+    /* A pass that comes back malformed is a bad draw, not a dead end: the same
+       bytes and the same prompt usually parse on the next attempt. Retried
+       ONCE — a second identical failure means the input is the problem and
+       another call is just money. Timeouts are handled separately below,
+       because the fix for those is finer slicing rather than repetition. */
+    var RETRYABLE = /model_returned_malformed_json|no_text_block_in_response|max_tokens_truncated|model_refused/;
+
+    function pass(n, total, retried) {
       return invokeFn("detect", { scan_id: scanId, part: n, parts: total })
         .then(function (data) {
           if (data && data.done) return data;
@@ -929,6 +937,12 @@
           if (data && data.gap) return gapPass(data.gap_attempt, n, total);
           setDetectProgress(n, total);
           return pass(n + 1, total);
+        })
+        .catch(function (e) {
+          var why = (e && e.body && e.body.error) || (e && e.message) || "";
+          if (retried || !RETRYABLE.test(String(why))) throw e;
+          prog.say(P.retrying);
+          return pass(n, total, true);
         });
     }
 
@@ -1168,6 +1182,7 @@
     rebuildDone: "האתר נבנה מחדש מאפס — אפשר להוריד ולראות את התוצאה.",
     /* propose one → approve → build */
     addFeatures: "הצע פיצ'ר חדש",
+    rebuildLabel: "בנה מחדש מאפס",
     featuresProposing: "קורא ומבין את האתר — חושב על פיצ'ר…",
     featureBuilding: "בונה את הפיצ'ר…",
     featureProposalTitle: "הפיצ'ר המוצע",
@@ -1198,6 +1213,33 @@
     },
     rehunting: "מחפש לעומק — עוד סימני AI...",
     gapPass: "משלים סימנים שלא נבדקו…",
+    retrying: "התשובה חזרה לא תקינה — מנסה שוב…",
+    /* ---- design approval gate ---- */
+    designProposeStep: "מגבש כיוון עיצובי…",
+    designAsk: "זה הכיוון המוצע. הבנייה עוד לא התחילה — אפשר לאשר, או לבקש כיוון אחר.",
+    designApprove: "אשרו ובנו",
+    designAnother: "הצעה אחרת",
+    designSample: "כך ייראה טקסט באתר",
+    proposalNo: function (n) { return "הצעה " + n; },
+    anotherCosts: "כל הצעה נוספת היא קריאה נוספת למודל ונרשמת בעלות הריצה.",
+    designThinking: "מגבש כיוון אחר…",
+    /* ---- a site that is already in good shape ---- */
+    cleanTitle: "האתר שלכם במצב טוב",
+    cleanBody: function (n) {
+      return "מצאנו רק " + n + (n === 1 ? " סימן" : " סימנים") +
+        ". זה ציון נמוך — האתר לא נראה תבניתי. שיפוץ מלא כנראה מיותר כאן; " +
+        "כדאי להסתכל על הסימנים הבודדים שנמצאו ולתקן רק אותם.";
+    },
+    cleanAnyway: "בכל זאת לבנות מחדש",
+    /* ---- language the product was not measured on ---- */
+    langWarn: function (name) {
+      return "האתר כתוב ב" + name + ". המוצר מותאם ונבדק בעיקר על אתרים בעברית ובאנגלית, " +
+        "ואיכות התוצאה בשפות אחרות עשויה להיות פחות מדויקת. הסריקה והבנייה ימשיכו כרגיל.";
+    },
+    langNames: { ar: "ערבית", ru: "רוסית", am: "אמהרית", unknown: "שפה שלא זוהתה" },
+    /* ---- a scan we are not willing to call clean ---- */
+    sanityWarn: "הסריקה החזירה מעט מאוד סימנים, אבל הבדיקות האוטומטיות דווקא מצאו תקלות. " +
+      "ייתכן שהאבחון לא קרא את האתר כמו שצריך — כדאי להריץ שוב לפני שמסיקים שהאתר נקי.",
     zipBuilding: "מכין את הקובץ...",
     zipCarried: function (n) {
       return n === 1
@@ -1233,6 +1275,7 @@
     rebuildDone: "The site was rebuilt from scratch — download to see the result.",
     /* propose one → approve → build */
     addFeatures: "Suggest a new feature",
+    rebuildLabel: "Rebuild from scratch",
     featuresProposing: "Reading & understanding the site — thinking of a feature…",
     featureBuilding: "Building the feature…",
     featureProposalTitle: "The proposed feature",
@@ -1263,6 +1306,34 @@
     },
     rehunting: "Digging deeper — more AI signals...",
     gapPass: "Filling in signals that were skipped…",
+    retrying: "The response came back malformed — trying again…",
+    /* ---- design approval gate ---- */
+    designProposeStep: "Working out a design direction…",
+    designAsk: "This is the proposed direction. Nothing has been built yet — approve it, or ask for a different one.",
+    designApprove: "Approve and build",
+    designAnother: "Another direction",
+    designSample: "How text will look on the site",
+    proposalNo: function (n) { return "Proposal " + n; },
+    anotherCosts: "Each further proposal is another model call and is recorded in the run's cost.",
+    designThinking: "Working out a different direction…",
+    /* ---- a site that is already in good shape ---- */
+    cleanTitle: "Your site is in good shape",
+    cleanBody: function (n) {
+      return "We found only " + n + (n === 1 ? " signal" : " signals") +
+        ". That is a low score — the site does not read as template output. A full rebuild is " +
+        "probably unnecessary here; the few signals we did find are worth a look on their own.";
+    },
+    cleanAnyway: "Rebuild anyway",
+    /* ---- language the product was not measured on ---- */
+    langWarn: function (name) {
+      return "This site is written in " + name + ". The product is built and tested mainly on " +
+        "Hebrew and English sites, so results in other languages may be less accurate. " +
+        "The scan and the rebuild carry on as normal.";
+    },
+    langNames: { ar: "Arabic", ru: "Russian", am: "Amharic", unknown: "an unrecognised language" },
+    /* ---- a scan we are not willing to call clean ---- */
+    sanityWarn: "The audit returned very few signals, but the automated checks did find faults. " +
+      "The diagnosis may not have read the site properly — worth running again before concluding it is clean.",
     zipBuilding: "Preparing the file...",
     zipCarried: function (n) {
       return n === 1
@@ -1325,6 +1396,10 @@
     /* a scan opened from history may already carry the design direction its
        rebuild settled on */
     if (scan.design_direction) renderDesign(scan.design_direction);
+    hideDesignGate();
+    resetRebuildLabel();
+    renderCleanNote(scan);
+    renderLangNote(scan);
     restoreDelivery(scan);
   }
 
@@ -1350,20 +1425,108 @@
     showDeliver();
   }
 
+  /* ===== a site that is already in good shape =====
+     0 is fully human and 100 is obvious AI, so a LOW score is the good end.
+     Below the floor a full rebuild is the wrong offer: it costs real money to
+     replace a site that was not the problem. The button stays — this is advice,
+     not a lock — but it stops being the obvious next step. */
+  var CLEAN_FLOOR = 15;
+
+  function renderCleanNote(scan) {
+    var el = els["clean-note"];
+    if (!el) return;
+    el.hidden = true;
+    var score = scan.ai_fingerprint_score;
+    if (score == null) return;
+
+    /* A near-empty result the audit itself could not corroborate is the one
+       case we refuse to dress up. The text searches found faults the model did
+       not, so the honest thing to say is that the reading looks wrong — not
+       that the site is clean. This takes priority over the good-shape note. */
+    if (scan.detection && scan.detection.sanity_ok === false) {
+      el.innerHTML = "<p>" + esc(P.sanityWarn) + "</p>";
+      el.hidden = false;
+      return;
+    }
+
+    if (score >= CLEAN_FLOOR) return;
+    el.innerHTML = "<h3>" + esc(P.cleanTitle) + "</h3>" +
+      "<p>" + esc(P.cleanBody(scan.present_count || 0)) + "</p>";
+    el.hidden = false;
+    if (els["rebuild-site"]) els["rebuild-site"].textContent = P.cleanAnyway;
+  }
+
+  /* Opening a second scan must not inherit the first one's framing: the button
+     says "rebuild anyway" only while the note explaining "anyway" is on screen. */
+  function resetRebuildLabel() {
+    if (els["rebuild-site"]) els["rebuild-site"].textContent = P.rebuildLabel;
+  }
+
+  /* The product was built and measured on Hebrew and English. Anything else
+     still scans and still builds — the user is simply told so, once, plainly. */
+  function renderLangNote(scan) {
+    var el = els["lang-note"];
+    if (!el) return;
+    el.hidden = true;
+    var prof = scan.site_profile;
+    var lang = prof && prof.measured_language;
+    if (!lang || lang.supported !== false) return;
+    var name = (P.langNames && P.langNames[lang.code]) || lang.code;
+    el.innerHTML = "<p>" + esc(P.langWarn(name)) + "</p>";
+    el.hidden = false;
+  }
+
   function renderDesign(dd) {
     if (!dd) return;
     var pal = (dd.brand_palette || []).map(function (c) {
       return '<span class="tok" dir="ltr"><i style="background:' + esc(c.hex) + '"></i>' +
         esc((c.token || c.role || "") + " " + (c.hex || "")) + "</span>";
     }).join("");
-    var typ = dd.typography ? esc((dd.typography.heading || "") + " / " + (dd.typography.body || "")) : "";
+    var head = (dd.typography && dd.typography.heading) || "";
+    var bodyF = (dd.typography && dd.typography.body) || "";
+    var typ = esc(head + " / " + bodyF);
+    /* The colours were always shown as real swatches; the fonts were shown as
+       names, which tells you nothing about what you are approving. Load the two
+       families and set a line in each — the point of a preview is to be the
+       thing, not to describe it. */
+    if (head || bodyF) loadPreviewFonts([head, bodyF]);
+    var sample = (head || bodyF)
+      ? '<div class="dd-sample">' +
+          '<p class="dd-sample-h" style="font-family:' + cssFont(head) + '">' + esc(P.designSample) + "</p>" +
+          '<p class="dd-sample-b" style="font-family:' + cssFont(bodyF) + '">' + esc(P.designSample) + "</p>" +
+        "</div>"
+      : "";
     els["design-direction"].innerHTML = "<h3>" + esc(P.designTitle) + "</h3>" +
       '<p class="dd-line"><b>' + esc(P.palette) + ":</b> " + pal + "</p>" +
       '<p class="dd-line"><b>' + esc(P.typography) + ":</b> " + typ + "</p>" +
       '<p class="dd-line"><b>' + esc(P.layout) + ":</b> " + esc(dd.layout_principle || "") + "</p>" +
       '<p class="dd-line"><b>' + esc(P.personality) + ":</b> " + esc((dd.personality || []).join(", ")) + "</p>" +
+      sample +
       (dd.rationale ? '<p class="dd-rationale">' + esc(dd.rationale) + "</p>" : "");
     els["design-direction"].hidden = false;
+  }
+
+  /* A family name is going straight into a style attribute, so it is quoted and
+     stripped of anything that could close the declaration. */
+  function cssFont(name) {
+    var clean = String(name || "").replace(/[^\w \-]/g, "");
+    return clean ? '"' + clean + '", system-ui, sans-serif' : "system-ui, sans-serif";
+  }
+
+  /* Pull the proposed families from Google Fonts, once each, so the preview is
+     rendered in the actual typeface rather than a fallback pretending to be it. */
+  var previewFontsLoaded = {};
+  function loadPreviewFonts(names) {
+    names.filter(Boolean).forEach(function (n) {
+      var fam = String(n).replace(/[^\w \-]/g, "").trim();
+      if (!fam || previewFontsLoaded[fam]) return;
+      previewFontsLoaded[fam] = true;
+      var l = document.createElement("link");
+      l.rel = "stylesheet";
+      l.href = "https://fonts.googleapis.com/css2?family=" +
+        encodeURIComponent(fam).replace(/%20/g, "+") + ":wght@400;700&display=swap";
+      document.head.appendChild(l);
+    });
   }
 
   /* Every wait inside the report view shares one bar, in #rb-progress. */
@@ -1444,8 +1607,9 @@
     }
     return labels;
   }
-  function rebuildPass(n, attempt) {
+  function rebuildPass(n, attempt, opts) {
     attempt = attempt || 1;
+    opts = opts || {};
     /* Step n names itself: the spec pass first, then the shell, then one per
        section using the section's own heading once the spec has told us them. */
     var labels = rbLabels();
@@ -1461,6 +1625,7 @@
        every later part reads it back from the scan row. */
     var payload = { scan_id: currentScanId, part: n };
     if (n === 1) payload.site_url = siteUrlValue();
+    if (n === 1 && opts.proposal) payload.proposal = opts.proposal;
     return invokeFn("rebuild", payload).then(function (data) {
       rebuildTotal = (data && data.parts) || rebuildTotal;
       if (n === 1 && data && data.spec_summary && data.spec_summary.sections) {
@@ -1468,6 +1633,10 @@
       }
       if (rebuildTotal) prog.to(null, (n / rebuildTotal) * 100);
       if (data && data.done) return data;
+      /* The gate: part 1 hands back a proposal and goes no further until the
+         user approves it. Everything it produced is already on disk, so the
+         build resumes at part 2 with nothing recomputed. */
+      if (opts.stopAfter && n >= opts.stopAfter) return data;
       return rebuildPass(n + 1);
     }).catch(function (e) {
       /* Every finished part is persisted server-side (spec.json, shell.json,
@@ -1478,20 +1647,79 @@
          stuck part can't loop forever and burn money. */
       var msg = (e && e.body && e.body.error) || "";
       if (String(msg).indexOf("stage_timeout") === -1 || attempt >= 4) throw e;
-      return rebuildPass(n, attempt + 1);
+      return rebuildPass(n, attempt + 1, opts);
     });
   }
 
+  /* ===== the design gate =====
+     The direction used to be shown as a report, after the whole site had
+     already been built around it. It is a proposal, so it is now presented as
+     one: part 1 stops, the user looks, and nothing else runs until they say so.
+
+     This costs nothing extra. Part 1 already returned design_direction, and
+     already persisted its work in spec.json — pausing here re-runs nothing and
+     the build resumes from exactly where it stopped, even a day later.
+     Measured against five real builds, the design is 4-8% of a build's cost
+     and everything after it is 92-96%, so a direction turned down here saves
+     roughly $1.48 of work nobody wanted. */
+  var proposalNo = 0;
+
   function rebuildSite() {
     if (!currentScanId) return;
+    proposalNo = 0;
+    proposeDesign();
+  }
+
+  function proposeDesign() {
     busyFixButtons();
+    hideDesignGate();
     if (els["score-delta"]) els["score-delta"].hidden = true;
     rebuildTotal = 0;
     rbSectionNames = null;
-    pipelineProgress(P.rbStepUnderstand);
-    rebuildPass(1).then(function (data) {
+    proposalNo += 1;
+    pipelineProgress(proposalNo === 1 ? P.designProposeStep : P.designThinking);
+    /* Part 1 only. The direction comes back, and the build stops here. */
+    rebuildPass(1, 0, { proposal: proposalNo, stopAfter: 1 }).then(function (data) {
       prog.done();
+      hideProgress();
       renderDesign(data && data.design_direction);
+      showDesignGate();
+      els["fix-hint"].textContent = "";
+      reenableFixButtons();
+    }).catch(function (e) {
+      hideProgress();
+      els["fix-hint"].textContent = P.err + " [design]" + fmtReason(e);
+      reenableFixButtons();
+    });
+  }
+
+  function showDesignGate() {
+    var g = els["design-gate"];
+    if (!g) return;
+    g.innerHTML =
+      '<p class="gate-ask">' + esc(P.designAsk) + "</p>" +
+      '<p class="gate-which">' + esc(P.proposalNo(proposalNo)) + "</p>" +
+      '<div class="gate-actions">' +
+        '<button type="button" class="btn btn-primary" id="design-approve">' + esc(P.designApprove) + "</button>" +
+        '<button type="button" class="btn" id="design-another">' + esc(P.designAnother) + "</button>" +
+      "</div>" +
+      '<p class="gate-note">' + esc(P.anotherCosts) + "</p>";
+    g.hidden = false;
+    document.getElementById("design-approve").addEventListener("click", buildApproved);
+    document.getElementById("design-another").addEventListener("click", proposeDesign);
+  }
+
+  function hideDesignGate() {
+    if (els["design-gate"]) els["design-gate"].hidden = true;
+  }
+
+  /* Approved. Resume from part 2 — the shell — using the spec part 1 stored. */
+  function buildApproved() {
+    hideDesignGate();
+    busyFixButtons();
+    pipelineProgress(P.rbStepUnderstand);
+    rebuildPass(2).then(function (data) {
+      prog.done();
       renderBuildWarnings(data && data.warnings);
       showDeliver(); /* the rebuilt bundle is saved — offer download / PR */
       return runAfterScan(); /* measure the honest before/after AI score */
@@ -1749,7 +1977,7 @@
   function loadHistory() {
     if (!sb || !user || !els.history) return;
     sb.from("scans")
-      .select("id,source_type,source_ref,ai_fingerprint_score,present_count,files_scanned,detection,design_direction,pipeline_status,change_log,self_check,created_at")
+      .select("id,source_type,source_ref,ai_fingerprint_score,present_count,files_scanned,detection,site_profile,design_direction,pipeline_status,change_log,self_check,created_at")
       .eq("user_id", user.id).eq("status", "done")
       .order("created_at", { ascending: false }).limit(20)
       .then(function (r) {

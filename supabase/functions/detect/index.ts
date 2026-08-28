@@ -18,6 +18,8 @@ import {
 } from "../_shared/pipeline.ts";
 import { MECHANICAL_IDS, mechanicalSignals, overlayMechanical } from "../_shared/mechanical.ts";
 import { applyCatalogueRules, fillUnevaluated, missingIds } from "../_shared/catalogue.ts";
+import { assetInventory, detectLanguage, isAiDefaultColour, normHex } from "../_shared/profile.ts";
+import { checkDetectionSanity } from "../_shared/sanity.ts";
 import { callClaude } from "../_shared/anthropic.ts";
 import { buildEntry, recordStageUsage } from "../_shared/usage.ts";
 
@@ -105,6 +107,18 @@ STEP 5 — SCORE deterministically: score = round(100 * sum(weight_points of pre
 - present=true requires concrete evidence: file path + a VERBATIM code snippet (max ~200 chars, copied exactly) + a one-line explanation of how it meets the criteria. Cap at 5 representative locations, note total_occurrences.
 - Report EVERY signal you can back with a verbatim snippet as present — do not withhold a genuinely-evidenced signal out of caution. The only thing you must never do is claim a signal with no exact snippet to quote. If an absence-type signal cannot be verified because the file wasn't provided, mark present=false, confidence <= 0.3, note "insufficient input".
 </evidence_rules>
+
+<site_profile_rules>
+- business_domain: what the business IS, read off its real content. This decides the tone the rebuild is allowed to take — a law firm and a skate shop do not get the same design language. Pick "other" only when the content genuinely will not say.
+- brand_colour: the site's single most identity-carrying colour, and — separately — whether it looks CHOSEN or merely DEFAULTED.
+  evidence="logo" the colour appears in the logo mark or logo text.
+  evidence="consistent_across_pages" the same colour carries the primary action on every page.
+  evidence="industry_conventional" it is the colour this industry actually uses.
+  evidence="css_variable_only" it is named as a token but nothing else backs it.
+  evidence="none" no colour stands out as the site's own.
+  deliberate=true ONLY for a colour a person appears to have picked. A default from an AI builder's palette — indigo/violet #6366f1-family, a purple-to-blue hero gradient, neon, or the dark-navy-plus-gold combination — is deliberate=false however consistently it is used. Consistency is not intent.
+  When nothing qualifies, return hex "" with evidence "none" and deliberate false. That is a normal answer, not a failure.
+</site_profile_rules>
 
 <confidence_calibration>
 0.95-1.0 exact literal match; 0.7-0.9 clear interpretation backed by a verbatim snippet → report PRESENT; 0.4-0.7 evidenced judgment call → lean PRESENT if you can quote it; <0.4 nothing to quote → present=false. Simple rule: if you can quote it verbatim, report it present.
@@ -204,6 +218,34 @@ const SCHEMA = {
         },
         distinctive_elements: { type: "array", items: { type: "string" } },
         tech_stack: { type: "array", items: { type: "string" } },
+        // The design stage rebuilds the site in a deliberately different look.
+        // Without these two it departs from the brand as readily as from the
+        // template — a different colour for a business whose colour IS the
+        // business, and a playful direction for a law firm.
+        business_domain: {
+          type: "string",
+          enum: [
+            "legal", "medical", "finance", "real_estate", "education",
+            "food", "retail", "creative", "technology", "services",
+            "nonprofit", "personal", "other",
+          ],
+        },
+        brand_colour: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            hex: { type: "string" },
+            // Where the evidence comes from. "none" is a real answer and the
+            // most common one: most AI-built sites wear a default.
+            evidence: {
+              type: "string",
+              enum: ["logo", "consistent_across_pages", "industry_conventional", "css_variable_only", "none"],
+            },
+            deliberate: { type: "boolean" },
+            note: { type: "string" },
+          },
+          required: ["hex", "evidence", "deliberate", "note"],
+        },
       },
       required: [
         "purpose",
@@ -215,6 +257,8 @@ const SCHEMA = {
         "fonts",
         "distinctive_elements",
         "tech_stack",
+        "business_domain",
+        "brand_colour",
       ],
     },
   },
@@ -568,6 +612,42 @@ Deno.serve(async (req) => {
     // Recompute the score deterministically from the returned signals.
     const { score, present } = computeScore(detection.signals ?? []);
 
+    // Three profile facts the design stage needs are measurements, not
+    // opinions, so they are taken from the bundle rather than believed from
+    // the model: what language the copy is in, what visual material the site
+    // owns, and whether its "brand" colour is one of the tool defaults. The
+    // model's own reading is kept alongside, never overwritten.
+    const files = parseBundle(bundle);
+    const profile = (detection.site_profile ?? {}) as Record<string, unknown>;
+    const language = detectLanguage(files);
+    const assets = assetInventory(files);
+    const brand = (profile.brand_colour ?? {}) as { hex?: string; deliberate?: boolean };
+    const brandHex = normHex(brand.hex);
+    detection.site_profile = {
+      ...profile,
+      measured_language: language,
+      visual_assets: assets,
+      brand_colour: {
+        ...(brand as Record<string, unknown>),
+        hex: brandHex ?? "",
+        // The model may call a default deliberate; a text search cannot be
+        // talked into it. A colour on the AI-default list is never preserved,
+        // whatever the model concluded about intent.
+        ai_default: brandHex ? isAiDefaultColour(brandHex) : false,
+        preserve: !!brandHex && brand.deliberate === true && !isAiDefaultColour(brandHex),
+      },
+    };
+
+    // Can this result be shown as a clean bill of health? Only the mechanical
+    // checks can corroborate a near-empty audit, and only they can contradict
+    // one. This never changes a signal or a score — it labels the run.
+    const sanity = checkDetectionSanity(detection.signals ?? []);
+    // Stored, not just returned: whether a result can be shown as clean has to
+    // survive the tab that produced it, or reopening the scan from the history
+    // quietly turns an under-read audit back into a clean bill of health.
+    (detection as Record<string, unknown>).sanity_ok = sanity.trustworthy;
+    (detection as Record<string, unknown>).sanity_reason = sanity.reason;
+
     if (mode === "after") {
       // Written to the *_after columns; the original numbers stay untouched so
       // the pair can be shown side by side.
@@ -619,6 +699,13 @@ Deno.serve(async (req) => {
       })
       .eq("id", scanId);
 
+    if (!sanity.trustworthy) {
+      console.warn(
+        `detection UNDER-READ on ${scanId}: model found ${sanity.model_present} ` +
+        `where text search found ${sanity.mechanical_present}`,
+      );
+    }
+
     return json({
       ok: true,
       scan_id: scanId,
@@ -630,6 +717,13 @@ Deno.serve(async (req) => {
       present_count: present,
       files_scanned: detection.meta?.files_scanned ?? fileCount,
       unevaluated: gaps.length,
+      // The client decides what to show on the strength of these: a clean
+      // result it can stand behind, or one that needs looking at again.
+      sanity: sanity.reason,
+      trustworthy: sanity.trustworthy,
+      language: detection.site_profile
+        ? (detection.site_profile as { measured_language?: unknown }).measured_language ?? null
+        : null,
     });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);

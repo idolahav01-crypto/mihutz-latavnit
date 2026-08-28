@@ -575,6 +575,41 @@ code, .mono { font-family: var(--font-mono); }
 }
 .tok i { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
 
+/* A direction is approved on what it looks like, so the preview shows the real
+   thing: the palette as colour, and the two families set in themselves. */
+.dd-sample {
+  margin-block-start: var(--s-2);
+  padding: var(--s-2) var(--s-3);
+  border-inline-start: 3px solid var(--color-neutral-300);
+}
+.dd-sample-h { font-size: 1.45rem; font-weight: 700; line-height: 1.25; margin: 0; }
+.dd-sample-b { font-size: 0.95rem; line-height: 1.6; margin-block-start: 4px; }
+
+/* ===== the design gate: nothing is built until this is answered ===== */
+.design-gate {
+  margin-block-start: var(--s-3);
+  padding: var(--s-3);
+  border: 1px solid var(--color-neutral-300);
+  border-radius: var(--radius-2, 10px);
+  background: var(--color-neutral-050, transparent);
+}
+.gate-ask { font-weight: 600; margin: 0; }
+.gate-which { font-size: 0.82rem; color: var(--color-neutral-600); margin-block: 4px 0; }
+.gate-actions {
+  display: flex; flex-wrap: wrap; gap: var(--s-2);
+  margin-block-start: var(--s-3);
+}
+.gate-note { font-size: 0.82rem; color: var(--color-neutral-600); margin-block-start: var(--s-2); }
+
+/* A site that is already in good shape, and a scan we could not corroborate.
+   Both are advice, so neither shouts. */
+#clean-note, #lang-note {
+  padding: var(--s-3);
+  border-inline-start: 3px solid var(--color-neutral-400);
+  background: var(--color-neutral-050, transparent);
+}
+#clean-note p, #lang-note p { font-size: 0.9rem; line-height: 1.6; margin: 0; }
+
 
 /* the report view's bar sits inside the fix pipeline */
 .rb-progress { margin-block-start: var(--s-3); }
