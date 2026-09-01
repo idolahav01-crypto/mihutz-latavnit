@@ -37,8 +37,21 @@ export function constraintsBlock(profile: unknown): string {
     brand_colour?: { hex?: string; preserve?: boolean; evidence?: string; ai_default?: boolean };
     visual_assets?: { verdict?: string; photos?: number; css_images?: number };
     measured_language?: { code?: string; rtl?: boolean };
+    logo_colours?: string[];
   };
   const lines: string[] = [];
+
+  // An inline logo is markup, so its colours are readable. That is the only
+  // honest way we can answer "base the design on the logo": a raster mark is a
+  // binary the scan never opens, and we do not guess at what is inside it.
+  const logo = p.logo_colours ?? [];
+  if (logo.length) {
+    lines.push(
+      `logo_colours: ${logo.join(", ")} — read from the site's own logo mark. The palette ` +
+      `must sit with these, not fight them: reuse one as the primary if it also appears in ` +
+      `brand_colour, and otherwise choose a family that a header carrying this mark can hold.`,
+    );
+  }
 
   const brand = p.brand_colour;
   if (brand?.preserve && brand.hex) {

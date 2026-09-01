@@ -117,3 +117,27 @@ Deno.test("designSchema carries the per-site direction, not the generic one", ()
   };
   assert(s.properties.design_direction.properties.typography.properties.heading.enum.includes("Assistant"));
 });
+
+// ---------- the logo's own colours (#5) ----------
+
+Deno.test("a readable logo's colours steer the palette", () => {
+  const out = constraintsBlock({ logo_colours: ["#1477c9", "#e8a33d"] });
+  assert(out.includes("#1477c9") && out.includes("#e8a33d"));
+  assert(out.includes("must sit with these"));
+});
+
+Deno.test("no logo colours means no instruction invented about them", () => {
+  assertFalse(constraintsBlock({ logo_colours: [] }).includes("logo_colours"));
+  assertFalse(constraintsBlock({}).includes("logo_colours"));
+});
+
+Deno.test("logo colours coexist with a preserved brand colour", () => {
+  const out = constraintsBlock({
+    logo_colours: ["#1477c9"],
+    brand_colour: { hex: "#1477c9", preserve: true, evidence: "logo" },
+    business_domain: "retail",
+  });
+  assert(out.includes("KEEP IT"));
+  assert(out.includes("logo_colours"));
+  assertEquals(out.split("\n").length, 3);
+});

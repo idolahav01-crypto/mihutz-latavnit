@@ -27,6 +27,22 @@ export interface LedgerImage {
   alt?: string;
 }
 
+/**
+ * The site's mark. Either a file at a path, or an inline <svg> — which is worth
+ * separating, because an inline logo is TEXT: its colours can be read, and the
+ * design stage can be told what the brand's own mark is coloured before it
+ * proposes a palette to sit beside it. A raster logo cannot be read that way
+ * and does not pretend to be.
+ */
+export interface LedgerLogo {
+  src?: string;
+  alt?: string;
+  /** Verbatim markup, when the logo is drawn inline rather than linked. */
+  svg?: string;
+  /** Colours found in an inline mark, most-used first. */
+  colours?: string[];
+}
+
 export interface LedgerSection {
   /** Stable slug: the element's own id, else a slug of the heading, else section-N. */
   id: string;
@@ -81,7 +97,7 @@ export interface Ledger {
      * told to write the logo as TEXT. A business's mark is not a fault to be
      * cleaned out of its own site.
      */
-    logo?: LedgerImage;
+    logo?: LedgerLogo;
   };
   dir: "rtl" | "ltr";
   facts: string[];
@@ -137,21 +153,45 @@ function imagesIn(el: Element, limit = 8): LedgerImage[] {
   return out;
 }
 
+/** Hex colours used in a chunk of SVG markup, most-used first. */
+function svgColours(svg: string): string[] {
+  const tally = new Map<string, number>();
+  for (const m of svg.matchAll(/#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})\b/g)) {
+    let hex = m[1].toLowerCase();
+    if (hex.length === 3) hex = hex.split("").map((c) => c + c).join("");
+    // Black and white are the ink a mark is drawn in, not the brand's colour.
+    if (hex === "000000" || hex === "ffffff") continue;
+    tally.set("#" + hex, (tally.get("#" + hex) ?? 0) + 1);
+  }
+  return [...tally.entries()].sort((a, b) => b[1] - a[1]).map(([h]) => h).slice(0, 4);
+}
+
 /** The logo, hunted where a logo is actually put. */
-function findLogo(doc: ReturnType<DOMParser["parseFromString"]>): LedgerImage | undefined {
-  const selectors = [
-    "header .logo img", "header [class*='logo'] img", ".logo img", "[class*='logo'] img",
-    "header a[href='/'] img", "header img", "a[href='/'] img",
+function findLogo(doc: ReturnType<DOMParser["parseFromString"]>): LedgerLogo | undefined {
+  const homes = [
+    "header .logo", "header [class*='logo']", ".logo", "[class*='logo']",
+    "header a[href='/']", "a[href='/']", "header",
   ];
-  for (const sel of selectors) {
-    const el = doc.querySelector(sel);
-    if (!el) continue;
-    const [img] = imagesIn(el.parentElement ?? el, 1);
-    if (img) return img;
-    const src = el.getAttribute("src");
+  for (const sel of homes) {
+    const host = doc.querySelector(sel);
+    if (!host) continue;
+
+    const img = host.querySelector("img");
+    const src = img?.getAttribute("src") ?? "";
     if (src && !src.startsWith("data:")) {
-      const alt = (el.getAttribute("alt") ?? "").trim();
+      const alt = (img?.getAttribute("alt") ?? "").trim();
       return alt ? { src, alt } : { src };
+    }
+
+    // An inline mark. Carried verbatim so the rebuilt header shows the real
+    // logo rather than the site's name set in whatever font won the design.
+    const svg = host.querySelector("svg");
+    if (svg) {
+      const markup = (svg as unknown as { outerHTML?: string }).outerHTML ?? "";
+      if (markup) {
+        const colours = svgColours(markup);
+        return { svg: markup, ...(colours.length ? { colours } : {}) };
+      }
     }
   }
   return undefined;

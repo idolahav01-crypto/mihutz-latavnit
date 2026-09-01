@@ -325,3 +325,33 @@ Deno.test("the same image twice in one section is carried once", () => {
   </section></main></body></html>`);
   assertEquals(l.sections[0].images?.length, 1);
 });
+
+// ---------- the logo ----------
+
+Deno.test("an inline SVG logo is carried verbatim, with its colours", () => {
+  const l = buildLedger(`<html><body><div class="wrap">
+    <header><a class="logo" href="/"><svg viewBox="0 0 10 10"><path fill="#1477c9" d="M0 0h10v10H0z"/>
+      <circle fill="#1477C9" cx="5" cy="5" r="2"/><rect fill="#e8a33d" x="1" y="1" width="2" height="2"/>
+      <path fill="#FFFFFF" d="M2 2h1v1H2z"/></svg></a><nav><a href="#a">א</a></nav></header>
+    <main><section id="a"><h2>א</h2><p>טקסט</p></section></main>
+  </div></body></html>`);
+  assert(l.meta.logo?.svg?.startsWith("<svg"), "the mark is kept as markup, not redrawn");
+  // Most-used first, and white is ink rather than brand.
+  assertEquals(l.meta.logo?.colours, ["#1477c9", "#e8a33d"]);
+  assertEquals(l.meta.logo?.src, undefined);
+});
+
+Deno.test("a linked logo file is carried by path", () => {
+  const l = buildLedger(`<html><body><div class="wrap">
+    <header><a class="logo" href="/"><img src="/img/mark.svg" alt="iCell"></a></header>
+    <main><section id="a"><h2>א</h2><p>טקסט</p></section></main>
+  </div></body></html>`);
+  assertEquals(l.meta.logo?.src, "/img/mark.svg");
+  assertEquals(l.meta.logo?.alt, "iCell");
+  assertEquals(l.meta.logo?.colours, undefined, "a file's colours are not guessed at");
+});
+
+Deno.test("a page with no logo claims none", () => {
+  const l = buildLedger(`<html><body><main><section id="a"><h2>א</h2><p>ט</p></section></main></body></html>`);
+  assertEquals(l.meta.logo, undefined);
+});
