@@ -128,6 +128,8 @@ interface Section {
   items?: Array<{ title?: string; text?: string; value?: string }>;
   cta?: { label?: string; href?: string };
   image?: string;
+  /** Real photographs this section shows, carried from the original page. */
+  images?: Array<{ src: string; alt?: string }>;
   component_id?: string; // an interactive container this section must contain
   /** For a component section: the widget container's exact inner HTML to carry. */
   verbatim_html?: string;
@@ -253,7 +255,8 @@ const SECTION_SYSTEM =
   `You are RebuildDesigner, building ONE section of a website from scratch. You are given the approved design_direction, the global tokens_css (the classes and CSS variables you MUST reuse), and the content spec for exactly one section. Build beautiful, human, semantic markup for it and its CSS.
 
 Hard rules:
-- Use ONLY the content in this section's spec (its heading, body, items, cta, facts). NEVER invent facts, testimonials, stats, logos, or copy that isn't given. If a field is empty, omit that element — do not fill it with placeholder text.
+- Use ONLY the content in this section's spec (its heading, body, items, cta, facts, images). NEVER invent facts, testimonials, stats, logos, or copy that isn't given. If a field is empty, omit that element — do not fill it with placeholder text.
+- IMAGES: if the spec gives this section an "images" array, those are REAL photographs the site already ships, and the section must SHOW them. Emit a real <img> for each one with the src EXACTLY as given, its alt text (or a truthful one derived from the section's content when alt is empty), and width/height omitted only if you cannot know them — add loading="lazy" on anything below the first screen. Lay them out as a designer would: a photograph carrying a hero, a portrait beside prose, a real grid of product shots. NEVER invent an src, never substitute a placeholder service, and never drop an image the spec listed — a section built as a bare box of text when the original had photographs is a worse page than the one it replaced. If "images" is absent or empty, do not reach for imagery: build the section on type, colour, space and rule.
 - Reuse the design tokens and component classes from tokens_css (CSS variables, .container, .btn, spacing). Your section CSS should add only what's specific to this section, scoped under a unique wrapper class derived from the section id (e.g. .sec-<id>) so it can't collide.
 - If the spec gives this section a component_id, include an element with exactly that id (the original interactive script will be re-attached to it). Do not write any <script>.
 - Compose with real design judgement, like a human designer laying out this one section by hand: vary the layout from what a generator would do, use asymmetry and editorial rhythm, real whitespace, an intentional focal point. Do NOT default to a centred heading over a symmetric card grid — that is the #1 "this was AI-built" tell. Follow the design_direction's layout_principle. RTL if dir is rtl (logical properties, right alignment).
@@ -756,7 +759,9 @@ Deno.serve(async (req) => {
         (avoidList ? `<avoid_ai_patterns>\n${avoidList}\n</avoid_ai_patterns>\n\n` : "") +
         `<section_spec>\n${JSON.stringify(section, null, 2)}\n</section_spec>\n\n` +
         alreadyBuilt +
-        `Build ONLY this section (html + css) and include EVERY item in section_spec.items — all of them, not a sample. Lay it out like a human designer would — not the symmetric, centred default a generator produces.`;
+        `Build ONLY this section (html + css) and include EVERY item in section_spec.items — all of them, not a sample. ` +
+        `Show EVERY image in section_spec.images, each with the exact src given. ` +
+        `Lay it out like a human designer would — not the symmetric, centred default a generator produces.`;
 
       /* Sections produce nearly all of the page's markup and CSS, so they get the
          same effort the shell already had — this stage was the one doing the most

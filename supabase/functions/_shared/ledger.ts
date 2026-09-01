@@ -22,6 +22,11 @@ export interface LedgerItem {
   value?: string;
 }
 
+export interface LedgerImage {
+  src: string;
+  alt?: string;
+}
+
 export interface LedgerSection {
   /** Stable slug: the element's own id, else a slug of the heading, else section-N. */
   id: string;
@@ -32,6 +37,16 @@ export interface LedgerSection {
   body?: string;
   items: LedgerItem[];
   cta?: { label?: string; href?: string };
+  /**
+   * The images this section actually shows, in document order.
+   *
+   * The ledger had no concept of an image at all — the word did not appear in
+   * this file — so a page's photography was invisible to every stage that came
+   * after it, and the rebuild returned text in boxes. A src the original used
+   * is a real asset at a real path: carrying it means the rebuilt page points
+   * at the same file the site already ships.
+   */
+  images?: LedgerImage[];
   /** Set when this section hosts an element a carried <script> references. */
   component_id?: string;
   /**
@@ -54,7 +69,20 @@ export interface LedgerComponent {
 }
 
 export interface Ledger {
-  meta: { name: string; language: string; dir: "rtl" | "ltr" };
+  meta: {
+    name: string;
+    language: string;
+    dir: "rtl" | "ltr";
+    /**
+     * The site's logo, if the page carries one.
+     *
+     * It lives in the header, which the ledger skips as chrome, so it was being
+     * thrown away before anything downstream could see it — and the shell is
+     * told to write the logo as TEXT. A business's mark is not a fault to be
+     * cleaned out of its own site.
+     */
+    logo?: LedgerImage;
+  };
   dir: "rtl" | "ltr";
   facts: string[];
   sections: LedgerSection[];
@@ -72,6 +100,122 @@ export interface Ledger {
 // a nav-only <header> likewise. A <header> that carries a heading is a hero and
 // stays as content.
 const CHROME_TAGS = new Set(["SCRIPT", "STYLE", "TEMPLATE", "LINK", "NOSCRIPT"]);
+
+/** Tags that declare themselves to be a section. Never split one open. */
+const SECTION_TAGS = new Set(["SECTION", "ARTICLE"]);
+/** Containers that hold sections rather than being one. */
+const WRAPPER_TAGS = new Set(["MAIN", "DIV", "BODY"]);
+/** How far to chase a nest of wrappers before calling it content. */
+const MAX_WRAPPER_DEPTH = 5;
+
+/** Images an element shows, in document order, with their alt text. */
+function imagesIn(el: Element, limit = 8): LedgerImage[] {
+  const out: LedgerImage[] = [];
+  const seen = new Set<string>();
+  const add = (src: string | null, alt?: string | null) => {
+    const url = (src ?? "").trim();
+    // A data: URI is already inline in the markup and would bloat the spec that
+    // gets sent to the model; a real path is what makes the asset reusable.
+    if (!url || url.startsWith("data:") || seen.has(url) || out.length >= limit) return;
+    seen.add(url);
+    const image: LedgerImage = { src: url };
+    const text = (alt ?? "").trim();
+    if (text) image.alt = text;
+    out.push(image);
+  };
+
+  for (const node of Array.from(el.querySelectorAll("img, source, [style*='background-image']")) as Element[]) {
+    if (node.tagName === "IMG") {
+      add(node.getAttribute("src"), node.getAttribute("alt"));
+    } else if (node.tagName === "SOURCE") {
+      add((node.getAttribute("srcset") ?? "").split(",")[0].trim().split(/\s+/)[0]);
+    } else {
+      const m = (node.getAttribute("style") ?? "").match(/background-image\s*:\s*url\(\s*["']?([^"')]+)/i);
+      if (m) add(m[1]);
+    }
+  }
+  return out;
+}
+
+/** The logo, hunted where a logo is actually put. */
+function findLogo(doc: ReturnType<DOMParser["parseFromString"]>): LedgerImage | undefined {
+  const selectors = [
+    "header .logo img", "header [class*='logo'] img", ".logo img", "[class*='logo'] img",
+    "header a[href='/'] img", "header img", "a[href='/'] img",
+  ];
+  for (const sel of selectors) {
+    const el = doc.querySelector(sel);
+    if (!el) continue;
+    const [img] = imagesIn(el.parentElement ?? el, 1);
+    if (img) return img;
+    const src = el.getAttribute("src");
+    if (src && !src.startsWith("data:")) {
+      const alt = (el.getAttribute("alt") ?? "").trim();
+      return alt ? { src, alt } : { src };
+    }
+  }
+  return undefined;
+}
+
+function hasHeadingChild(el: Element): boolean {
+  return (Array.from(el.children) as Element[])
+    .some((c) => /^H[1-4]$/.test(c.tagName));
+}
+
+/** Does this element look like a section in its own right? */
+function looksLikeSection(el: Element): boolean {
+  if (SECTION_TAGS.has(el.tagName)) return true;
+  return !!el.querySelector("h1, h2, h3, h4");
+}
+
+/**
+ * The blocks that are actually the page's sections.
+ *
+ * This used to be `body.children`, which assumes every site lays its sections
+ * out as direct children of <body>. Almost none do: a wrapper div, or a <main>,
+ * or both, sits in between. On a real site that assumption collapsed an entire
+ * page into two or three "sections", each of which then kept only its heading,
+ * one paragraph and one repeated group — so the rebuild came back as a handful
+ * of boxes of text, and two whole areas of the site (a price list and a
+ * branches page) vanished with the run's own log noting the nav links to them
+ * had nowhere to point.
+ *
+ * So: descend through anything that is holding sections rather than being one,
+ * and stop at the first thing that looks like content. A <section> or <article>
+ * is never opened up — it has declared what it is.
+ */
+function sectionBlocks(root: Element, depth = 0): Element[] {
+  const out: Element[] = [];
+  for (const child of Array.from(root.children) as Element[]) {
+    if (CHROME_TAGS.has(child.tagName)) continue;
+    if (isChrome(child)) continue; // footer / nav-only header
+
+    // A declared section, or a block with a heading of its own, IS the content.
+    if (SECTION_TAGS.has(child.tagName) || hasHeadingChild(child)) {
+      out.push(child);
+      continue;
+    }
+
+    // Otherwise it may be a wrapper. It is one if it holds several things that
+    // look like sections, or if it is a lone box around the whole page.
+    const inner = (Array.from(child.children) as Element[])
+      .filter((c) => !CHROME_TAGS.has(c.tagName) && !isChrome(c));
+    const sectionish = inner.filter(looksLikeSection);
+    const isWrapper = depth < MAX_WRAPPER_DEPTH && WRAPPER_TAGS.has(child.tagName) &&
+      (sectionish.length >= 2 || (inner.length === 1 && sectionish.length === 1));
+
+    if (isWrapper) {
+      const found = sectionBlocks(child, depth + 1);
+      // Descending must never LOSE a block: if the wrapper turned out to hold
+      // nothing we recognise, keep the wrapper itself rather than dropping it.
+      if (found.length) out.push(...found);
+      else out.push(child);
+      continue;
+    }
+    out.push(child);
+  }
+  return out;
+}
 
 /**
  * Parse the original page into a complete content ledger.
@@ -120,13 +264,11 @@ export function buildLedger(html: string, externalJs = ""): Ledger {
   }
 
   const body = doc.querySelector("body");
-  const blocks = body ? (Array.from(body.children) as Element[]) : [];
+  const blocks = body ? sectionBlocks(body) : [];
 
   const sections: LedgerSection[] = [];
   let n = 0;
   for (const block of blocks) {
-    if (CHROME_TAGS.has(block.tagName)) continue;
-    if (isChrome(block)) continue; // footer / nav-only header
     n++;
     sections.push(buildSection(block, n, idToScript, sections.length === 0));
   }
@@ -139,10 +281,13 @@ export function buildLedger(html: string, externalJs = ""): Ledger {
     }
   }
 
+  // Found before the header is discarded as chrome — that is where it lives.
+  const logo = findLogo(doc);
+
   const styleText = [...doc.querySelectorAll("style")].map((s) => s.textContent ?? "").join("\n");
 
   return {
-    meta: { name, language, dir },
+    meta: { name, language, dir, ...(logo ? { logo } : {}) },
     dir,
     facts: extractFacts(doc),
     sections,
@@ -193,6 +338,7 @@ function buildSection(
   const subheading = extractSubheading(block, heading);
   const body = items.length ? undefined : sectionBody(block, heading, subheading);
   const cta = extractCta(block);
+  const images = imagesIn(block);
 
   const type = isFirst && block.querySelector("h1") ? "hero" : "content";
 
@@ -205,6 +351,7 @@ function buildSection(
     items,
     cta,
     text,
+    ...(images.length ? { images } : {}),
   };
 }
 
