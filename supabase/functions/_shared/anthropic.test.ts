@@ -3,7 +3,9 @@ import {
   accumulateStream,
   buildClaudeRequestBody,
   callClaude,
+  ClaudeCallError,
   cleanApiKey,
+  hasBilledTokens,
   parseClaudeJson,
   sanitizeSchema,
   shouldStream,
@@ -272,4 +274,156 @@ Deno.test("no beta header is sent when fast mode is off", () => {
     maxTokens: 4000, system: "S", userContent: "U",
   });
   assertEquals(body.speed, undefined);
+});
+
+/* ===== a billed call that fails is still a billed call =====
+   These cover the two ways a stage can be charged and produce nothing usable —
+   the abort at 130-135s, and a reply that will not parse. Both are retried by
+   the client, so if `usage` does not survive the throw, the most expensive part
+   of a run is the part the cost model cannot see. */
+
+const MESSAGE_START =
+  'event: message_start\n' +
+  'data: {"type":"message_start","message":{"usage":{"input_tokens":95000,' +
+  '"cache_read_input_tokens":5000}}}\n\n';
+
+Deno.test("callClaude carries the usage it was already billed when the stream is aborted", async () => {
+  let release = () => {};
+  const gate = new Promise<void>((r) => { release = r; });
+  const ac = new AbortController();
+  const server = Deno.serve({ port: 0, signal: ac.signal, onListen: () => {} }, () =>
+    new Response(
+      new ReadableStream({
+        async start(c) {
+          // The input tokens are billed the moment the request is accepted, and
+          // message_start reports them. Then stall, exactly like a pass that
+          // thinks past its budget.
+          c.enqueue(new TextEncoder().encode(MESSAGE_START));
+          await gate;
+          try { c.close(); } catch { /* client already gone */ }
+        },
+      }),
+      { headers: { "content-type": "text/event-stream" } },
+    ));
+  const { port } = server.addr as Deno.NetAddr;
+
+  let caught: unknown = null;
+  try {
+    await callClaude({
+      apiKey: "sk-test",
+      model: "claude-sonnet-5",
+      effort: "medium",
+      maxTokens: 32000,
+      system: "S",
+      userContent: "U",
+      stream: true,
+      timeoutMs: 300,
+      baseUrl: `http://127.0.0.1:${port}`,
+    });
+  } catch (e) {
+    caught = e;
+  }
+  release();
+  ac.abort();
+  await server.finished;
+
+  assert(caught instanceof ClaudeCallError);
+  const err = caught as ClaudeCallError;
+  // Reported as a timeout to the client exactly as before...
+  assert(err.message.startsWith("stage_timeout_after_"));
+  // ...but no longer as a free one.
+  assertEquals(err.usage?.input_tokens, 95000);
+  assertEquals(err.usage?.cache_read_input_tokens, 5000);
+  assert(hasBilledTokens(err.usage));
+});
+
+Deno.test("callClaude carries usage when the reply is billed in full but malformed", async () => {
+  const ac = new AbortController();
+  const server = Deno.serve({ port: 0, signal: ac.signal, onListen: () => {} }, () =>
+    new Response(
+      JSON.stringify({
+        content: [{ type: "text", text: "not json at all" }],
+        usage: { input_tokens: 40000, output_tokens: 9000 },
+      }),
+      { headers: { "content-type": "application/json" } },
+    ));
+  const { port } = server.addr as Deno.NetAddr;
+
+  let caught: unknown = null;
+  try {
+    await callClaude({
+      apiKey: "sk-test",
+      model: "claude-opus-4-8",
+      effort: "high",
+      maxTokens: 1500,
+      system: "S",
+      userContent: "U",
+      stream: false,
+      baseUrl: `http://127.0.0.1:${port}`,
+    });
+  } catch (e) {
+    caught = e;
+  }
+  ac.abort();
+  await server.finished;
+
+  assert(caught instanceof ClaudeCallError);
+  assertEquals((caught as Error).message, "model_returned_malformed_json");
+  assertEquals((caught as ClaudeCallError).usage?.output_tokens, 9000);
+});
+
+Deno.test("callClaude reports no usage for a request that was never billed", async () => {
+  const ac = new AbortController();
+  const server = Deno.serve({ port: 0, signal: ac.signal, onListen: () => {} }, () =>
+    new Response("overloaded", { status: 529 }));
+  const { port } = server.addr as Deno.NetAddr;
+
+  let caught: unknown = null;
+  try {
+    await callClaude({
+      apiKey: "sk-test",
+      model: "claude-opus-4-8",
+      effort: "high",
+      maxTokens: 1500,
+      system: "S",
+      userContent: "U",
+      stream: false,
+      baseUrl: `http://127.0.0.1:${port}`,
+    });
+  } catch (e) {
+    caught = e;
+  }
+  ac.abort();
+  await server.finished;
+
+  assert(caught instanceof ClaudeCallError);
+  assertFalse(hasBilledTokens((caught as ClaudeCallError).usage));
+});
+
+Deno.test("a streamed reply that finishes normally is unchanged by the incremental read", async () => {
+  const ac = new AbortController();
+  const sse = MESSAGE_START +
+    'data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}\n\n' +
+    'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"{\\"ok\\":true}"}}\n\n' +
+    'data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":4200}}\n\n';
+  const server = Deno.serve({ port: 0, signal: ac.signal, onListen: () => {} }, () =>
+    new Response(sse, { headers: { "content-type": "text/event-stream" } }));
+  const { port } = server.addr as Deno.NetAddr;
+
+  const res = await callClaude({
+    apiKey: "sk-test",
+    model: "claude-sonnet-5",
+    effort: "medium",
+    maxTokens: 32000,
+    system: "S",
+    userContent: "U",
+    stream: true,
+    baseUrl: `http://127.0.0.1:${port}`,
+  });
+  ac.abort();
+  await server.finished;
+
+  assertEquals(res.json, { ok: true });
+  assertEquals(res.usage.input_tokens, 95000);
+  assertEquals(res.usage.output_tokens, 4200);
 });

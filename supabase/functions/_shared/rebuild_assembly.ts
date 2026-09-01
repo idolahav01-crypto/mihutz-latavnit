@@ -38,6 +38,16 @@ export interface RenderedSection {
  * original styles are scoped under a private wrapper — so the script's DOM and
  * appearance survive without a single rule touching the redesigned page.
  */
+/**
+ * Whether this section takes the deterministic widget path — carried verbatim,
+ * no model call, no cost. The build and the build PLAN must agree on this or
+ * the recorded N is not the N that was paid for, so both ask here rather than
+ * repeating the condition.
+ */
+export function isWidgetSection(section: RenderableSection): boolean {
+  return !!(section.component_id && section.verbatim_html);
+}
+
 export function renderWidgetSection(
   section: RenderableSection,
   styleText: string,

@@ -265,6 +265,34 @@ export function accumulateStream(rawSse: string): {
   return { stop_reason: stopReason, content: blocks.filter(Boolean), usage };
 }
 
+/**
+ * An API call that failed AFTER the request was accepted, carrying whatever the
+ * stream had already told us about billing.
+ *
+ * A timed-out or malformed call is not a free call: the input tokens were sent
+ * and priced, and `message_start` reports them before the first output byte.
+ * Throwing a plain Error here is what made every timeout — and every retry the
+ * client fires because of one — cost real money and record $0.00, which is
+ * exactly the waste the cost model exists to measure. `usage` is undefined only
+ * when the failure happened before the stream said anything (a non-2xx status,
+ * a DNS/connect failure), where nothing was billed.
+ */
+export class ClaudeCallError extends Error {
+  usage?: ClaudeUsage;
+  constructor(message: string, usage?: ClaudeUsage) {
+    super(message);
+    this.name = "ClaudeCallError";
+    this.usage = usage;
+  }
+}
+
+/** True when a usage object carries at least one billable token. */
+export function hasBilledTokens(u: ClaudeUsage | undefined): boolean {
+  if (!u) return false;
+  return (u.input_tokens ?? 0) + (u.output_tokens ?? 0) +
+      (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0) > 0;
+}
+
 export async function callClaude(opts: ClaudeCallOptions): Promise<ClaudeResult> {
   const doFetch = opts.fetchImpl ?? fetch;
   const base = (opts.baseUrl ?? Deno.env.get("ANTHROPIC_BASE_URL") ??
@@ -274,6 +302,7 @@ export async function callClaude(opts: ClaudeCallOptions): Promise<ClaudeResult>
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const abort = new AbortController();
   const timer = setTimeout(() => abort.abort(), timeoutMs);
+  const timedOut = () => `stage_timeout_after_${Math.round(timeoutMs / 1000)}s`;
 
   let res: Response;
   try {
@@ -291,10 +320,11 @@ export async function callClaude(opts: ClaudeCallOptions): Promise<ClaudeResult>
     });
   } catch (e) {
     clearTimeout(timer);
+    // Nothing was billed: the request never reached a response.
     if (abort.signal.aborted) {
       // Surfaced to the client so it can retry with a smaller scope rather than
       // seeing a generic edge-function 546.
-      throw new Error(`stage_timeout_after_${Math.round(timeoutMs / 1000)}s`);
+      throw new ClaudeCallError(timedOut());
     }
     throw e;
   }
@@ -302,24 +332,57 @@ export async function callClaude(opts: ClaudeCallOptions): Promise<ClaudeResult>
   try {
     if (!res.ok) {
       const text = await res.text().catch(() => "");
-      throw new Error(`anthropic ${res.status}: ${text}`);
+      // A rejected request (429/5xx) bills nothing, so no usage to carry.
+      throw new ClaudeCallError(`anthropic ${res.status}: ${text}`);
     }
 
     if (streaming) {
-      const sse = await res.text();
+      // Read the stream incrementally rather than with one `res.text()`. Both
+      // ways produce the same string on the happy path, but only this one still
+      // HAS the bytes when the abort fires mid-stream — and those bytes hold the
+      // message_start usage for a call we were charged for.
+      let sse = "";
+      try {
+        const reader = res.body?.getReader();
+        if (!reader) throw new Error("no_response_body");
+        const decoder = new TextDecoder();
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (value) sse += decoder.decode(value, { stream: true });
+        }
+        sse += decoder.decode();
+      } catch (e) {
+        const partial = accumulateStream(sse).usage;
+        throw new ClaudeCallError(
+          abort.signal.aborted ? timedOut() : String((e as Error)?.message ?? e),
+          partial,
+        );
+      }
+
       const acc = accumulateStream(sse);
-      return { json: parseClaudeJson(acc), usage: acc.usage, raw: acc };
+      try {
+        return { json: parseClaudeJson(acc), usage: acc.usage, raw: acc };
+      } catch (e) {
+        // The call completed and was billed in full; only its CONTENT is
+        // unusable. The client retries some of these (malformed JSON), so
+        // dropping the usage here would hide the most expensive kind of waste.
+        throw new ClaudeCallError(String((e as Error)?.message ?? e), acc.usage);
+      }
     }
 
     const data = await res.json();
-    return {
-      json: parseClaudeJson(data),
-      usage: (data?.usage ?? {}) as ClaudeUsage,
-      raw: data,
-    };
+    const usage = (data?.usage ?? {}) as ClaudeUsage;
+    try {
+      return { json: parseClaudeJson(data), usage, raw: data };
+    } catch (e) {
+      throw new ClaudeCallError(String((e as Error)?.message ?? e), usage);
+    }
   } catch (e) {
-    if (abort.signal.aborted) {
-      throw new Error(`stage_timeout_after_${Math.round(timeoutMs / 1000)}s`);
+    // Preserve the usage a ClaudeCallError is already carrying; only relabel a
+    // plain error that turns out to have been our own abort.
+    if (abort.signal.aborted && !(e instanceof ClaudeCallError)) {
+      throw new ClaudeCallError(timedOut());
     }
     throw e;
   } finally {

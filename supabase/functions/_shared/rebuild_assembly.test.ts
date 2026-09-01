@@ -1,6 +1,7 @@
-import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
+import { assert, assertEquals, assertFalse, assertStringIncludes } from "jsr:@std/assert@1";
 import {
   ensureSectionId,
+  isWidgetSection,
   missingSectionFacts,
   fixAnchors,
   renderContentSection,
@@ -144,4 +145,17 @@ Deno.test("renderContentSection: a section with both copy and cards keeps both",
   assertStringIncludes(out, "הנגרים 12");
   assertStringIncludes(out, "10:00-19:00");
   assertStringIncludes(out, "כרטיס");
+});
+
+Deno.test("isWidgetSection is the same test the build and the build plan both make", () => {
+  // A widget section takes the deterministic path: carried verbatim, no model
+  // call, no cost. If the plan counted it as billable, the recorded N would not
+  // be the N that was paid for — which is the number the cost equation is
+  // calibrated on.
+  assert(isWidgetSection({ id: "s1", component_id: "cart", verbatim_html: "<div id=cart></div>" }));
+  // Both halves are required: a component with nothing carried over is rebuilt
+  // by the model like any other section.
+  assertFalse(isWidgetSection({ id: "s2", component_id: "cart" }));
+  assertFalse(isWidgetSection({ id: "s3", verbatim_html: "<div></div>" }));
+  assertFalse(isWidgetSection({ id: "s4", heading: "About" }));
 });

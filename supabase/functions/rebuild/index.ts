@@ -35,14 +35,15 @@ import { checkPreservation, summarize } from "../_shared/preservation.ts";
 import { balanceCss, selfCheck } from "../_shared/selfcheck.ts";
 import { redressSecondaryPages } from "../_shared/redress.ts";
 import { checkRichness, collectCss, richnessTargets } from "../_shared/richness.ts";
-import { callClaude, cleanApiKey } from "../_shared/anthropic.ts";
+import { cleanApiKey } from "../_shared/anthropic.ts";
 import { adminClient, cors, json, requireUser } from "../_shared/http.ts";
 import { constraintsBlock, designSchema } from "../_shared/design_brief.ts";
-import { buildEntry, recordStageUsage } from "../_shared/usage.ts";
+import { assertModelPriced, meteredClaude } from "../_shared/usage.ts";
 import { buildLedger } from "../_shared/ledger.ts";
 import {
   ensureSectionId,
   fixAnchors,
+  isWidgetSection,
   missingSectionFacts,
   renderContentSection,
   renderWidgetSection,
@@ -52,6 +53,8 @@ import {
 } from "../_shared/rebuild_assembly.ts";
 
 const MODEL = "claude-opus-4-8";
+// Fail on the first invoke, not after a paid build recorded $0.00.
+assertModelPriced(MODEL);
 
 // ---- storage layout ----
 const paths = (uid: string, sid: string) => ({
@@ -585,22 +588,17 @@ Deno.serve(async (req) => {
       // This pass now emits only a design_direction and three descriptors, so it
       // is small and fast — no content to stream. medium effort; a 4k ceiling is
       // ample for the direction JSON.
-      const res = await callClaude({
-        apiKey, model: MODEL, effort: "medium", maxTokens: 4000, stream: true,
-        system: DESIGN_SYSTEM, schema: designSchema(rtlSite), userContent, timeoutMs: 135_000,
-      });
       // Every proposal after the first is a re-proposal the user asked for, and
       // is named as one so its cost is attributable rather than buried in the
       // first attempt's line. There is no cap: the user decides how many
       // directions are worth paying for.
-      await recordStageUsage(
-        admin,
-        scanId,
-        buildEntry(
-          proposalNo > 1 ? `rebuild_design_reproposal_${proposalNo}` : "rebuild_design",
-          MODEL, res.usage, Date.now() - startedAt, "medium",
-        ),
-      );
+      const res = await meteredClaude({
+        admin, scanId, startedAt,
+        stage: proposalNo > 1 ? `rebuild_design_reproposal_${proposalNo}` : "rebuild_design",
+      }, {
+        apiKey, model: MODEL, effort: "medium", maxTokens: 4000, stream: true,
+        system: DESIGN_SYSTEM, schema: designSchema(rtlSite), userContent, timeoutMs: 135_000,
+      });
 
       const out = (res.json ?? {}) as {
         design_direction?: Direction;
@@ -648,13 +646,31 @@ Deno.serve(async (req) => {
       await writeJson(admin, P.sections, []);
 
       const parts = 2 + spec.sections.length; // spec + shell + one per section
-      await admin.from("scans").update({
+
+      // What this build is going to be, from the deterministic ledger — before
+      // a single section is paid for. Widget sections are carried verbatim and
+      // cost nothing, so sections_total over-predicts; sections_model is the N
+      // the cost equation multiplies. Recording it here (rather than counting
+      // stage_usage afterwards) is what lets a build that DIED half-way still
+      // say how big it was going to be, instead of looking like a small one.
+      const widgetSections = spec.sections.filter(isWidgetSection).length;
+      const buildShape = {
+        sections_total: spec.sections.length,
+        sections_widget: widgetSections,
+        sections_model: spec.sections.length - widgetSections,
+        components: spec.components?.length ?? 0,
+        facts: spec.facts?.length ?? 0,
+      };
+
+      const { error: shapeErr } = await admin.from("scans").update({
         design_direction: direction ?? scan.design_direction ?? null,
         site_url: siteUrl,
         pipeline_status: "applying",
+        build_shape: buildShape,
         // A fresh attempt must not inherit the error of the one before it.
         error: null,
       }).eq("id", scanId);
+      if (shapeErr) console.error(`[usage] build_shape not recorded for ${scanId}: ${shapeErr.message}`);
 
       return json({
         ok: true, scan_id: scanId, part, parts, done: false,
@@ -698,11 +714,10 @@ Deno.serve(async (req) => {
         (depthTarget ? `${depthTarget}\n\n` : "") +
         `Build the global shell: head_extras, tokens_css, header_html, footer_html.`;
 
-      const res = await callClaude({
+      const res = await meteredClaude({ admin, scanId, startedAt, stage: "rebuild_shell" }, {
         apiKey, model: MODEL, effort: "high", maxTokens: 12000, stream: true,
         system: SHELL_SYSTEM + NEVER_INTRODUCE, schema: SHELL_SCHEMA, userContent, timeoutMs: 135_000,
       });
-      await recordStageUsage(admin, scanId, buildEntry("rebuild_shell", MODEL, res.usage, Date.now() - startedAt, "high"));
 
       const shell = (res.json ?? {}) as Shell;
       if (!shell.tokens_css) throw new Error("empty_shell");
@@ -723,7 +738,7 @@ Deno.serve(async (req) => {
     let sectionCss: string;
     let cssRepaired = false;
 
-    if (section.component_id && section.verbatim_html) {
+    if (isWidgetSection(section)) {
       // Interactive section: carried verbatim so the script's DOM survives, its
       // original styles scoped under a private wrapper. No model call — this path
       // cannot drift, cannot drop the widget, and cannot orphan its script.
@@ -761,11 +776,13 @@ Deno.serve(async (req) => {
       /* Sections produce nearly all of the page's markup and CSS, so they get the
          same effort the shell already had — this stage was the one doing the most
          work on the least thinking. */
-      const res = await callClaude({
-        apiKey, model: MODEL, effort: "high", maxTokens: 10000, stream: true,
-        system: SECTION_SYSTEM + avoidBlock, schema: SECTION_BUILD_SCHEMA, userContent, timeoutMs: 135_000,
-      });
-      await recordStageUsage(admin, scanId, buildEntry(`rebuild_section_${sectionIndex + 1}`, MODEL, res.usage, Date.now() - startedAt, "high"));
+      const res = await meteredClaude(
+        { admin, scanId, startedAt, stage: `rebuild_section_${sectionIndex + 1}` },
+        {
+          apiKey, model: MODEL, effort: "high", maxTokens: 10000, stream: true,
+          system: SECTION_SYSTEM + avoidBlock, schema: SECTION_BUILD_SCHEMA, userContent, timeoutMs: 135_000,
+        },
+      );
 
       const built = (res.json ?? {}) as { html?: string; css?: string };
       const modelHtml = built.html ? ensureSectionId(built.html, section.id) : "";

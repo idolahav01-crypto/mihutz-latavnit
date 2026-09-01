@@ -1573,7 +1573,8 @@
      (detect mode:"after") and show before → after. The scoring is the exact same
      deterministic, weight-based formula used for the original scan, so the two
      numbers are directly comparable and the "after" is measured, not asserted. */
-  function afterScanPass(n, total) {
+  function afterScanPass(n, total, attempt) {
+    attempt = attempt || 1;
     els["fix-hint"].textContent = P.scoreScanning(n, total);
     prog.to(P.scoreScanning(n, total), ((n - 1) / total) * 100);
     return invokeFn("detect", { scan_id: currentScanId, mode: "after", part: n, parts: total })
@@ -1581,6 +1582,17 @@
         prog.to(null, (n / total) * 100);
         if (data && data.done) return data;
         return afterScanPass(n + 1, total);
+      })
+      .catch(function (e) {
+        /* Each pass is persisted server-side in detection_after, so re-running
+           THIS pass repeats no earlier work. Ride out an overrun the same way
+           the rebuild does: the after-scan is what proves the score went down,
+           and half its cost is already spent by the time one pass times out —
+           giving up there throws that away and leaves the row looking like a
+           site that was never re-scanned. */
+        var msg = (e && e.body && e.body.error) || "";
+        if (String(msg).indexOf("stage_timeout") === -1 || attempt >= 4) throw e;
+        return afterScanPass(n, total, attempt + 1);
       });
   }
   function runAfterScan() {
@@ -1589,8 +1601,12 @@
     return afterScanPass(1, 3).then(function (data) {
       renderScoreDelta(data && data.before, data && data.after);
       return data;
-    }).catch(function () {
-      /* non-fatal: the rebuild already delivered; we just couldn't measure after */
+    }).catch(function (e) {
+      /* Still non-fatal — the rebuild already delivered and the download must
+         not be held hostage to a measurement. But it is no longer invisible:
+         a row with rescanned_at null is an after-scan that never finished, and
+         its scan_after_usd of 0 means "not measured", not "was free". */
+      console.error("after-scan did not finish:", (e && e.body && e.body.error) || e);
       return null;
     });
   }

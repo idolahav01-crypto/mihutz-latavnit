@@ -20,9 +20,7 @@ import { MECHANICAL_IDS, mechanicalSignals, overlayMechanical } from "../_shared
 import { applyCatalogueRules, fillUnevaluated, missingIds } from "../_shared/catalogue.ts";
 import { assetInventory, detectLanguage, isAiDefaultColour, normHex } from "../_shared/profile.ts";
 import { checkDetectionSanity } from "../_shared/sanity.ts";
-import { callClaude } from "../_shared/anthropic.ts";
-import { buildEntry, recordStageUsage } from "../_shared/usage.ts";
-
+import { assertModelPriced, meteredClaude } from "../_shared/usage.ts";
 
 // Secrets pasted through a dashboard often carry a trailing newline or space,
 // which makes fetch() reject the header as a non-ByteString. Clean it here.
@@ -36,6 +34,8 @@ const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 // faster, which matters directly here because every pass races a 150s
 // edge-function wall clock.
 const MODEL = "claude-sonnet-5";
+// Fail on the first invoke, not after a paid scan recorded $0.00.
+assertModelPriced(MODEL);
 const SIGNAL_COUNT = (signals as unknown[]).length; // 110
 // The mechanical ids are decided by text search in _shared/mechanical.ts, so
 // they are never put to the model: same answer every run, and the output tokens
@@ -389,7 +389,7 @@ Deno.serve(async (req) => {
       const bundle = await file.text();
 
       const idList = absentIds.map((id) => `#${id}`).join(", ");
-      const claude = await callClaude({
+      const claude = await meteredClaude({ admin, scanId, startedAt, stage: "detect_rehunt" }, {
         apiKey: ANTHROPIC_API_KEY,
         model: MODEL,
         effort: "medium",
@@ -416,11 +416,6 @@ Deno.serve(async (req) => {
       );
       applyCatalogueRules(merged);
       const { score, present } = computeScore(merged.signals ?? []);
-
-      await recordStageUsage(
-        admin, scanId,
-        buildEntry("detect_rehunt", MODEL, claude.usage, Date.now() - startedAt, "medium"),
-      );
       await admin.from("scans")
         .update({ detection: merged, ai_fingerprint_score: score, present_count: present })
         .eq("id", scanId);
@@ -468,6 +463,19 @@ Deno.serve(async (req) => {
 
     const fileCount = (bundle.match(/^=== FILE: /gm) ?? []).length;
 
+    // The size of what we are about to pay to scan, recorded BEFORE the first
+    // model call. Scan cost scales with bundle size — the whole bundle is sent
+    // on every pass — so this is the per-site driver the estimate buckets on,
+    // and a scan that dies half-way is only interpretable if its size was
+    // written down before it died. Cheap: one small update, on pass 1 only.
+    if (part === 1 && !gapPass && mode !== "after") {
+      const { error: sizeErr } = await admin
+        .from("scans")
+        .update({ bundle_bytes: bundle.length })
+        .eq("id", scanId);
+      if (sizeErr) console.error(`[usage] bundle_bytes not recorded for ${scanId}: ${sizeErr.message}`);
+    }
+
     // Which signals this pass is responsible for. The SYSTEM prompt still
     // carries all 110 (identical bytes every pass, so it stays prompt-cached);
     // only the user turn narrows the scope.
@@ -484,7 +492,10 @@ Deno.serve(async (req) => {
       if (!need.length) {
         detection = prior;
       } else {
-        const claude = await callClaude({
+        const claude = await meteredClaude({
+          admin, scanId, startedAt,
+          stage: `${mode === "after" ? "detect_after" : "detect"}_gap${gapAttempt}`,
+        }, {
           apiKey: ANTHROPIC_API_KEY,
           model: MODEL,
           effort: "medium",
@@ -499,10 +510,6 @@ Deno.serve(async (req) => {
           timeoutMs: 130_000,
         });
         detection = mergeDetection(prior, claude.json as DetectionResult);
-        await recordStageUsage(
-          admin, scanId,
-          buildEntry(`${mode === "after" ? "detect_after" : "detect"}_gap${gapAttempt}`, MODEL, claude.usage, Date.now() - startedAt, "medium"),
-        );
       }
       detection.signals = overlayMechanical(
         detection.signals ?? [],
@@ -520,7 +527,10 @@ Deno.serve(async (req) => {
       //
       // NOT fast mode: this org's fast-mode quota is 0 tokens/min, so speed:"fast"
       // returns a hard 429. Splitting the work is what buys the headroom instead.
-      const claude = await callClaude({
+      const claude = await meteredClaude({
+        admin, scanId, startedAt,
+        stage: `${mode === "after" ? "detect_after" : "detect"}_part${part}`,
+      }, {
         apiKey: ANTHROPIC_API_KEY,
         model: MODEL,
         effort: "medium",
@@ -547,18 +557,6 @@ Deno.serve(async (req) => {
       detection.signals = overlayMechanical(
         detection.signals ?? [],
         mechanicalSignals(parseBundle(bundle)),
-      );
-
-      await recordStageUsage(
-        admin,
-        scanId,
-        buildEntry(
-          `${mode === "after" ? "detect_after" : "detect"}_part${part}`,
-          MODEL,
-          claude.usage,
-          Date.now() - startedAt,
-          "medium",
-        ),
       );
     }
 
