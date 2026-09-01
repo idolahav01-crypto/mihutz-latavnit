@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Buy tokens — תשנה</title>
+  <meta name="robots" content="noindex" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700;9..144,800&family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/styles.css" />
+  <link rel="stylesheet" href="/css/app.css?v=8" />
+</head>
+<body>
+  <a class="skip-link" href="#store-main">Skip to content</a>
+
+  <header class="app-header">
+    <div class="shell">
+      <div class="header-lead">
+        <a class="wordmark" href="/">
+          <span lang="he" dir="rtl">תשנה<span class="mark-dot">.</span></span>
+          <small>TESHANE</small>
+        </a>
+        <span class="wallet">
+          <span class="wallet-balance" aria-live="polite">
+            <svg class="wallet-icon" width="15" height="15" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.4" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="8" cy="8" r="2.3" fill="currentColor"/></svg>
+            <span class="wallet-n" data-wallet-n>&mdash;</span>
+            <span class="wallet-unit">tokens left</span>
+          </span>
+        </span>
+      </div>
+      <div class="app-header-actions">
+        <a class="app-back" href="/app/"><span class="back-arrow" aria-hidden="true">←</span> Back to the dashboard</a>
+        <span class="app-user" id="app-user"></span>
+        <button type="button" class="btn btn-quiet btn-sm" id="signout">Sign out</button>
+        <a class="small" href="/he/store/" lang="he" dir="rtl">עברית</a>
+      </div>
+    </div>
+  </header>
+
+  <main class="app-main" id="store-main">
+    <div class="store">
+
+      <div class="store-head">
+        <h1>Buy tokens</h1>
+        <p class="store-lead">One token is the same token in every package. The larger the package, the less each token costs — and the price per token is printed on every line, so nothing here needs working out.</p>
+      </div>
+
+      <div class="store-balance">
+        <p class="store-balance-label">Your balance right now</p>
+        <p class="store-balance-value">
+          <span class="store-balance-n" data-wallet-n>&mdash;</span>
+          <span class="store-balance-unit">tokens</span>
+        </p>
+      </div>
+
+      <ul class="pack-list" id="pack-list"></ul>
+      <div class="custom">
+        <div class="custom-head">
+          <h2>A quantity of your own</h2>
+          <p>No package the right size? Type how many tokens you want. Any amount is charged at the base price &mdash; the discounts belong to the packages above, and typing one of their numbers gets you its price anyway.</p>
+        </div>
+        <div class="custom-row">
+          <label class="custom-field">
+            <span class="custom-label" id="custom-label">How many tokens</span>
+            <input type="number" id="custom-qty" min="1" step="1" value="15"
+                   inputmode="numeric" autocomplete="off" aria-describedby="custom-note" />
+          </label>
+          <span class="custom-total">
+            <span class="custom-total-label">To pay</span>
+            <span class="custom-price ltr" id="custom-price">&mdash;</span>
+          </span>
+          <button type="button" class="btn btn-quiet" id="custom-buy">Buy</button>
+        </div>
+        <p class="custom-note" id="custom-note" aria-live="polite"></p>
+      </div>
+
+      <p class="store-status" id="store-status" role="status" aria-live="polite"></p>
+
+    </div>
+  </main>
+
+  <script src="/js/wallet.js" defer></script>
+  <script src="/js/store.js" defer></script>
+</body>
+</html>

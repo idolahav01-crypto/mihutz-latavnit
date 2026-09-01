@@ -35,23 +35,32 @@ import { checkPreservation, summarize } from "../_shared/preservation.ts";
 import { balanceCss, selfCheck } from "../_shared/selfcheck.ts";
 import { redressSecondaryPages } from "../_shared/redress.ts";
 import { checkRichness, collectCss, richnessTargets } from "../_shared/richness.ts";
-import { callClaude, cleanApiKey } from "../_shared/anthropic.ts";
+import { cleanApiKey } from "../_shared/anthropic.ts";
 import { adminClient, cors, json, requireUser } from "../_shared/http.ts";
 import { constraintsBlock, designSchema } from "../_shared/design_brief.ts";
-import { buildEntry, recordStageUsage } from "../_shared/usage.ts";
+import { assertModelPriced, meteredClaude } from "../_shared/usage.ts";
 import { buildLedger } from "../_shared/ledger.ts";
 import {
-  ensureSectionId,
+  applyNavPlan,
+  applySectionId,
+  collectIds,
   fixAnchors,
+  isWidgetSection,
   missingSectionFacts,
+  NAV_SLOT,
+  type NavItem,
   renderContentSection,
   renderWidgetSection,
+  rootId,
   sectionCoverage,
+  stripDeadControls,
   stripSkipLinks,
   widgetWrapId,
 } from "../_shared/rebuild_assembly.ts";
 
 const MODEL = "claude-opus-4-8";
+// Fail on the first invoke, not after a paid build recorded $0.00.
+assertModelPriced(MODEL);
 
 // ---- storage layout ----
 const paths = (uid: string, sid: string) => ({
@@ -158,6 +167,8 @@ interface Shell {
   tokens_css: string;
   header_html: string;
   footer_html: string;
+  /** Which sections the nav links to, and what it calls them. Never hrefs. */
+  nav?: NavItem[];
 }
 interface BuiltSection {
   index: number;
@@ -165,6 +176,8 @@ interface BuiltSection {
   css: string;
   /** This section's CSS came back structurally broken and was repaired. */
   cssRepaired?: boolean;
+  /** Controls the builder invented here that no script could ever drive. */
+  deadControls?: string[];
 }
 
 // ================= PROMPTS =================
@@ -193,8 +206,11 @@ const SHELL_SYSTEM =
 Return:
 - head_extras: the <link> tags that load the chosen fonts (Google Fonts is fine). For Hebrew, use Hebrew-capable fonts (Heebo, Assistant, Rubik, Frank Ruhl Libre, Noto Sans Hebrew).
 - tokens_css: a real design system as CSS — :root custom properties for the brand palette, type scale, spacing rhythm, radii and shadows; sensible base element styles (body font/line-height/color, headings, links, img{max-width:100%}); and reusable component classes the sections will use (.container, .btn / .btn-primary, .section, etc.). Do NOT define an .eyebrow class or any other "small label above every heading" helper — offering one makes every section reach for it, and a kicker on every section is itself an AI tell. Body font-weight >= 500, headings >= 700. Respect dir (logical properties for RTL).
-- header_html: the site header/nav markup (logo text = site name, real nav links only). Use the token classes.
-- footer_html: a real footer built from the site's real facts. EVERY fact given to you that belongs in a footer MUST appear: company number, physical address, opening hours, phone, email, and the legal pages (terms, cancellation, privacy, accessibility statement) with the exact href each one already uses. Israeli law requires several of these and the audit checks for them, so dropping one makes the site worse than it was. Invent nothing: if a fact was not given, omit it rather than filling in a placeholder.
+- nav: which sections the header links to, in order, as {section_id, label}. section_id must come from <page_anchors>; label is your short wording for it (the heading trimmed to a nav label — "האצטדיון", not "אצטדיון האמירויות — בית התותחנים"). Pick the 4–6 sections a visitor actually navigates by; skip the hero and anything a link would not help with.
+- header_html: the site header markup — logo (text = site name), layout, everything except the nav links themselves. Put the exact token {{NAV}} where the links belong; it is replaced with <a class="nav-link" href="#id">label</a> for each nav entry, in order, so style .nav-link and its container in tokens_css. Do NOT write the nav links yourself and do NOT write any href="#..." — you cannot know the ids, and a link to a section that is not on the page reads as a broken site.
+- footer_html: a real footer built from the site's real facts. EVERY fact given to you that belongs in a footer MUST appear: company number, physical address, opening hours, phone, email, and the legal pages (terms, cancellation, privacy, accessibility statement) with the exact href each one already uses. Israeli law requires several of these and the audit checks for them, so dropping one makes the site worse than it was. Invent nothing: if a fact was not given, omit it rather than filling in a placeholder. If the footer repeats a link to a section, give it the SAME label the nav entry uses — that is how it is matched to the section, and a footer that renames it ("חידון טריוויה" for the nav's "חידון") is a link that cannot be placed.
+
+NO CONTROL THAT NEEDS JAVASCRIPT. You emit markup only; every script on the finished page is the original site's, carried over untouched, and nothing will ever be wired to a control you invent. A contrast toggle, a dark-mode switch, a language switcher, a search box, a hamburger that hides the nav behind a click — each ships as a button that does nothing when a visitor presses it, which is worse than not offering it. The nav must work with JavaScript off: plain <a href="#id"> links, reachable at every screen size (wrap them, scroll them, shrink them — never collapse them behind a toggle). The only button-looking things allowed are <a> links styled as buttons.
 
 DEPART from the original. If <original_look> is provided, the tokens_css must NOT reuse its palette or fonts — build the shell in the NEW design_direction, clearly different from the old site.
 
@@ -267,17 +283,42 @@ Hard rules:
 Return ONLY valid JSON { "html": "...", "css": "..." } for this one section. No prose.`;
 
 // ================= SCHEMAS =================
-const SHELL_SCHEMA = {
-  type: "object",
-  additionalProperties: false,
-  properties: {
-    head_extras: { type: "string" },
-    tokens_css: { type: "string" },
-    header_html: { type: "string" },
-    footer_html: { type: "string" },
-  },
-  required: ["tokens_css", "header_html", "footer_html"],
-};
+/**
+ * The shell's schema, with the nav constrained to sections that exist.
+ *
+ * section_id is an enum of the real ids rather than a free string, so the one
+ * thing that kept breaking — a link to a section that is not on the page —
+ * cannot be expressed in a valid response. The model still decides which
+ * sections belong in the nav and what to call them; it never writes an href.
+ *
+ * The schema travels in output_config, not in the cached system prompt, so
+ * making it depend on the run costs no cache hit.
+ */
+function shellSchema(sectionIds: string[]) {
+  return {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      head_extras: { type: "string" },
+      tokens_css: { type: "string" },
+      header_html: { type: "string" },
+      footer_html: { type: "string" },
+      nav: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            section_id: { type: "string", enum: sectionIds },
+            label: { type: "string" },
+          },
+          required: ["section_id", "label"],
+        },
+      },
+    },
+    required: ["tokens_css", "header_html", "footer_html", "nav"],
+  };
+}
 
 const SECTION_BUILD_SCHEMA = {
   type: "object",
@@ -422,20 +463,80 @@ function fontPreload(headExtras: string): string {
   return m ? `<link rel="preload" as="style" href="${m[1]}">` : "";
 }
 
-function assemble(spec: Spec, shell: Shell, sections: BuiltSection[], scripts: string[], siteUrl: string | null): string {
+interface Assembled {
+  html: string;
+  /** The chrome as it actually shipped: controls stripped, anchors resolved. */
+  chrome: { header: string; footer: string };
+  /** Nav entries naming a section that is not on the page. Should be empty. */
+  navDropped: string[];
+  /** Nav/footer links no section answered; they now point at #main. */
+  navFallbacks: string[];
+  /** Controls the shell invented that nothing on the page could drive. */
+  deadControls: string[];
+}
+
+function assemble(spec: Spec, shell: Shell, sections: BuiltSection[], scripts: string[], siteUrl: string | null): Assembled {
   const ordered = [...sections].sort((a, b) => a.index - b.index);
   const sectionCss = ordered.map((s) => s.css || "").join("\n\n");
-  const sectionHtml = ordered.map((s) => s.html || "").join("\n\n");
+  const rawSectionHtml = ordered.map((s) => s.html || "").join("\n\n");
   const lang = spec.meta.language || (spec.dir === "rtl" ? "he" : "en");
   const scriptBlock = scripts.length ? "\n" + scripts.join("\n") + "\n" : "";
 
-  // Every real section id, so nav/footer links can only point at sections that
-  // exist. The shell model may also emit its own skip-link — drop it, since the
-  // one below is the page's single, canonical one.
-  const anchorTargets = spec.sections.map((s) => ({ id: s.id, heading: s.heading }));
-  const header = fixAnchors(stripSkipLinks(shell.header_html || ""), anchorTargets);
-  const footer = fixAnchors(shell.footer_html || "", anchorTargets);
-  return `<!doctype html>
+  // Anchor targets come from the markup about to ship, not from the plan. The
+  // two are not the same document: a builder that renamed a section's id leaves
+  // the planned id looking linkable and unreachable, and a link validated
+  // against a plan is exactly the link that does nothing in a browser. Each
+  // heading stays attached to whichever id its section really has, so a nav
+  // label that matches no id can still be resolved by what it says.
+  const existingIds = collectIds(rawSectionHtml);
+  existingIds.add("main");
+  const anchorTargets = ordered
+    .map((s) => ({
+      id: rootId(s.html || "") ?? spec.sections[s.index]?.id ?? "",
+      heading: spec.sections[s.index]?.heading,
+      text: spec.sections[s.index]?.text,
+    }))
+    .filter((t) => t.id);
+
+  // The shell may also emit its own skip-link: drop it, the one below is the
+  // page's single canonical one. Then remove any control it invented that no
+  // carried script can drive, before its dead click reaches a visitor.
+  const scriptText = scripts.join("\n");
+
+  // The nav is generated from the plan, not parsed out of the model's markup.
+  // If the model returned no usable plan, the sections themselves are the plan:
+  // a nav built from real ids and real headings is never wrong, only plainer.
+  const navPlan: NavItem[] = shell.nav?.length
+    ? shell.nav
+    : anchorTargets
+      .filter((t) => t.heading && t.id !== anchorTargets[0]?.id)
+      .slice(0, 6)
+      .map((t) => ({ section_id: t.id, label: t.heading as string }));
+  const navved = applyNavPlan(stripSkipLinks(shell.header_html || ""), navPlan, existingIds);
+
+  const headerClean = stripDeadControls(navved.html, scriptText);
+
+  // The footer usually mirrors the nav, and a mirror of a link is a link. It
+  // gets the same plan by label — the slot itself is dropped there, since the
+  // page has exactly one nav and it is in the header.
+  const footerPlanned = applyNavPlan(
+    (shell.footer_html || "").split(NAV_SLOT).join(""),
+    navPlan,
+    existingIds,
+  );
+  const footerClean = stripDeadControls(footerPlanned.html, scriptText);
+  const headerFixed = fixAnchors(headerClean.html, anchorTargets, existingIds);
+  const footerFixed = fixAnchors(footerClean.html, anchorTargets, existingIds);
+  const header = headerFixed.html;
+  const footer = footerFixed.html;
+
+  // The body gets the same treatment as the chrome. An in-section CTA is a link
+  // a visitor clicks too, and "#" — which the floor renderer emits whenever the
+  // original CTA had no target — jumps to the top of the page and looks broken.
+  const bodyFixed = fixAnchors(rawSectionHtml, anchorTargets, existingIds);
+  const sectionHtml = bodyFixed.html;
+
+  const html = `<!doctype html>
 <html lang="${lang}" dir="${spec.dir}">
 <head>
 <meta charset="utf-8">
@@ -462,6 +563,17 @@ ${footer}
 ${scriptBlock}</body>
 </html>
 `;
+  return {
+    html,
+    chrome: { header, footer },
+    navDropped: navved.dropped,
+    navFallbacks: [...headerFixed.fallbacks, ...footerFixed.fallbacks, ...bodyFixed.fallbacks],
+    deadControls: [
+      ...headerClean.removed,
+      ...footerClean.removed,
+      ...ordered.flatMap((s) => s.deadControls ?? []),
+    ],
+  };
 }
 
 function clip(s: string, n: number): string {
@@ -588,22 +700,17 @@ Deno.serve(async (req) => {
       // This pass now emits only a design_direction and three descriptors, so it
       // is small and fast — no content to stream. medium effort; a 4k ceiling is
       // ample for the direction JSON.
-      const res = await callClaude({
-        apiKey, model: MODEL, effort: "medium", maxTokens: 4000, stream: true,
-        system: DESIGN_SYSTEM, schema: designSchema(rtlSite), userContent, timeoutMs: 135_000,
-      });
       // Every proposal after the first is a re-proposal the user asked for, and
       // is named as one so its cost is attributable rather than buried in the
       // first attempt's line. There is no cap: the user decides how many
       // directions are worth paying for.
-      await recordStageUsage(
-        admin,
-        scanId,
-        buildEntry(
-          proposalNo > 1 ? `rebuild_design_reproposal_${proposalNo}` : "rebuild_design",
-          MODEL, res.usage, Date.now() - startedAt, "medium",
-        ),
-      );
+      const res = await meteredClaude({
+        admin, scanId, startedAt,
+        stage: proposalNo > 1 ? `rebuild_design_reproposal_${proposalNo}` : "rebuild_design",
+      }, {
+        apiKey, model: MODEL, effort: "medium", maxTokens: 4000, stream: true,
+        system: DESIGN_SYSTEM, schema: designSchema(rtlSite), userContent, timeoutMs: 135_000,
+      });
 
       const out = (res.json ?? {}) as {
         design_direction?: Direction;
@@ -651,13 +758,31 @@ Deno.serve(async (req) => {
       await writeJson(admin, P.sections, []);
 
       const parts = 2 + spec.sections.length; // spec + shell + one per section
-      await admin.from("scans").update({
+
+      // What this build is going to be, from the deterministic ledger — before
+      // a single section is paid for. Widget sections are carried verbatim and
+      // cost nothing, so sections_total over-predicts; sections_model is the N
+      // the cost equation multiplies. Recording it here (rather than counting
+      // stage_usage afterwards) is what lets a build that DIED half-way still
+      // say how big it was going to be, instead of looking like a small one.
+      const widgetSections = spec.sections.filter(isWidgetSection).length;
+      const buildShape = {
+        sections_total: spec.sections.length,
+        sections_widget: widgetSections,
+        sections_model: spec.sections.length - widgetSections,
+        components: spec.components?.length ?? 0,
+        facts: spec.facts?.length ?? 0,
+      };
+
+      const { error: shapeErr } = await admin.from("scans").update({
         design_direction: direction ?? scan.design_direction ?? null,
         site_url: siteUrl,
         pipeline_status: "applying",
+        build_shape: buildShape,
         // A fresh attempt must not inherit the error of the one before it.
         error: null,
       }).eq("id", scanId);
+      if (shapeErr) console.error(`[usage] build_shape not recorded for ${scanId}: ${shapeErr.message}`);
 
       return json({
         ok: true, scan_id: scanId, part, parts, done: false,
@@ -690,6 +815,14 @@ Deno.serve(async (req) => {
         `<meta>\n${JSON.stringify(spec.meta, null, 2)}\ndir: ${spec.dir}\n</meta>\n\n` +
         `<design_direction>\n${JSON.stringify(direction ?? {}, null, 2)}\n</design_direction>\n\n` +
         `<facts>\n${(spec.facts ?? []).join("\n")}\n</facts>\n\n` +
+        // The exact anchors the finished page will offer. Without this the shell
+        // invents plausible slugs from its own nav wording: one run linked
+        // "הסגל" and "האצטדיון" at sections the ledger had named
+        // "שחקנים-בולטים" and "אצטדיון-האמירויות", and three of five nav items
+        // shipped pointing at the top of the page instead.
+        `<page_anchors note="The ONLY in-page targets that will exist. Nav links must use these hrefs verbatim.">\n` +
+        spec.sections.map((sec) => `#${sec.id} — ${sec.heading ?? ""}`).join("\n") +
+        `\n</page_anchors>\n\n` +
         (originalLook
           ? `<original_look note="The OLD design being replaced. Do NOT reuse its palette or fonts — depart from it.">\n${originalLook}\n</original_look>\n\n`
           : "") +
@@ -701,11 +834,13 @@ Deno.serve(async (req) => {
         (depthTarget ? `${depthTarget}\n\n` : "") +
         `Build the global shell: head_extras, tokens_css, header_html, footer_html.`;
 
-      const res = await callClaude({
+      const res = await meteredClaude({ admin, scanId, startedAt, stage: "rebuild_shell" }, {
         apiKey, model: MODEL, effort: "high", maxTokens: 12000, stream: true,
-        system: SHELL_SYSTEM + NEVER_INTRODUCE, schema: SHELL_SCHEMA, userContent, timeoutMs: 135_000,
+        system: SHELL_SYSTEM + NEVER_INTRODUCE,
+        schema: shellSchema(spec.sections.map((sec) => sec.id)),
+        userContent,
+        timeoutMs: 135_000,
       });
-      await recordStageUsage(admin, scanId, buildEntry("rebuild_shell", MODEL, res.usage, Date.now() - startedAt, "high"));
 
       const shell = (res.json ?? {}) as Shell;
       if (!shell.tokens_css) throw new Error("empty_shell");
@@ -725,8 +860,9 @@ Deno.serve(async (req) => {
     let sectionHtml: string;
     let sectionCss: string;
     let cssRepaired = false;
+    let deadControls: string[] = [];
 
-    if (section.component_id && section.verbatim_html) {
+    if (isWidgetSection(section)) {
       // Interactive section: carried verbatim so the script's DOM survives, its
       // original styles scoped under a private wrapper. No model call — this path
       // cannot drift, cannot drop the widget, and cannot orphan its script.
@@ -766,14 +902,27 @@ Deno.serve(async (req) => {
       /* Sections produce nearly all of the page's markup and CSS, so they get the
          same effort the shell already had — this stage was the one doing the most
          work on the least thinking. */
-      const res = await callClaude({
-        apiKey, model: MODEL, effort: "high", maxTokens: 10000, stream: true,
-        system: SECTION_SYSTEM + avoidBlock, schema: SECTION_BUILD_SCHEMA, userContent, timeoutMs: 135_000,
-      });
-      await recordStageUsage(admin, scanId, buildEntry(`rebuild_section_${sectionIndex + 1}`, MODEL, res.usage, Date.now() - startedAt, "high"));
+      const res = await meteredClaude(
+        { admin, scanId, startedAt, stage: `rebuild_section_${sectionIndex + 1}` },
+        {
+          apiKey, model: MODEL, effort: "high", maxTokens: 10000, stream: true,
+          system: SECTION_SYSTEM + avoidBlock, schema: SECTION_BUILD_SCHEMA, userContent, timeoutMs: 135_000,
+        },
+      );
 
       const built = (res.json ?? {}) as { html?: string; css?: string };
-      const modelHtml = built.html ? ensureSectionId(built.html, section.id) : "";
+      // The ledger's id is the one the nav links to, so it is forced onto the
+      // fragment here rather than merely offered to the builder.
+      const withId = built.html
+        ? applySectionId(built.html, built.css ?? "", section.id)
+        : { html: "", css: built.css ?? "" };
+      // Nothing in a built section can be scripted: the builder is told not to
+      // write a <script>, and every script on the page is the original site's,
+      // carried over for widgets it has never seen. A button invented here is a
+      // control that does nothing when pressed, so it does not ship.
+      const cleaned = stripDeadControls(withId.html, scripts.join("\n"));
+      const modelHtml = cleaned.html;
+      deadControls = cleaned.removed;
 
       // Completeness floor: if the model dropped content (kept a sample of a
       // repeated group, or skipped copy), render every item from the ledger
@@ -786,7 +935,7 @@ Deno.serve(async (req) => {
       // eats every rule below it in the assembled <style> — and it does that on
       // the failure path too, because the floor renderer replaces the model's
       // MARKUP and carries its CSS through unchanged.
-      const balanced = balanceCss(built.css ?? "");
+      const balanced = balanceCss(withId.css);
       cssRepaired = balanced.changed;
 
       if (modelHtml && sectionCoverage(modelHtml, section) >= 0.85 && !lostFacts.length) {
@@ -802,7 +951,7 @@ Deno.serve(async (req) => {
     // Accumulate this section (merge-upload, keyed by index). Parts run strictly
     // one at a time per scan, so the copy read before the call is still current.
     const merged = built0.filter((s) => s.index !== sectionIndex);
-    merged.push({ index: sectionIndex, html: sectionHtml, css: sectionCss, cssRepaired });
+    merged.push({ index: sectionIndex, html: sectionHtml, css: sectionCss, cssRepaired, deadControls });
     await writeJson(admin, P.sections, merged);
 
     const done = part >= parts;
@@ -811,7 +960,10 @@ Deno.serve(async (req) => {
     let deliveryWarnings: Array<{ kind: string; detail: string; items: unknown }> = [];
     if (done) {
       // Every section built — assemble the final self-contained document.
-      const assembled = assemble(spec, shell, merged, scripts, siteUrl);
+      const { html: assembled, chrome, navDropped, navFallbacks, deadControls: pageDeadControls } =
+        assemble(
+        spec, shell, merged, scripts, siteUrl,
+      );
 
       // The original is read before anything is judged against it: the
       // self-check needs it to know which ids the page's scripts require, the
@@ -846,7 +998,15 @@ Deno.serve(async (req) => {
       // footer, and runs the same self-check over them. It is text work: no
       // model call, no token, no added cost to a run. It is NOT a rebuild, and
       // the signals living in a page's own content and structure survive it.
-      const redress = redressSecondaryPages(originals, shell, target);
+      // The chrome the other pages get is the chrome that shipped, not the raw
+      // one the model returned: same links resolved, same dead controls gone.
+      // Handing them the model's draft put the button that does nothing back on
+      // every page the rebuild had just cleaned it off.
+      const redress = redressSecondaryPages(
+        originals,
+        { ...shell, header_html: chrome.header, footer_html: chrome.footer },
+        target,
+      );
       for (const [path, content] of redress.files) editedMap.set(path, content);
 
       // The rebuilt page is self-contained: its CSS is inline and the original
@@ -927,6 +1087,28 @@ Deno.serve(async (req) => {
       const cssBroken = repairedSections.length > 0 || check.cssBalance.changed;
 
       const warnings: Array<{ kind: string; detail: string; items: unknown }> = [
+        // A link that scrolls nowhere and a button that does nothing are the
+        // two failures a screenshot cannot show. Both are repaired above; both
+        // are reported here so a run cannot look clean while shipping them.
+        ...(navFallbacks.length || navDropped.length
+          ? [{
+            kind: "nav_unresolved",
+            detail: [
+              navDropped.length ? `nav entries dropped (no such section): ${navDropped.join(", ")}` : "",
+              navFallbacks.length
+                ? `links with no matching section, now pointing at #main: ${navFallbacks.join(", ")}`
+                : "",
+            ].filter(Boolean).join("; "),
+            items: { dropped: navDropped, fallbacks: navFallbacks },
+          }]
+          : []),
+        ...(pageDeadControls.length
+          ? [{
+            kind: "dead_controls_removed",
+            detail: `controls no script could drive, removed: ${pageDeadControls.join(", ")}`,
+            items: pageDeadControls,
+          }]
+          : []),
         ...(guard.ok ? [] : [{ kind: "content_loss", detail: summarize(guard), items: guard.failures }]),
         ...(depth.ok ? [] : [{ kind: "design_thin", detail: depth.detail, items: depth.thinnest }]),
         ...(cssBroken

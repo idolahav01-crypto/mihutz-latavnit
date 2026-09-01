@@ -17,11 +17,13 @@
 // Body: { scan_id, action, exclude? } — exclude carries already-rejected names.
 
 import { parseBundle, pickHomePageSmart, serializeBundle } from "../_shared/pipeline.ts";
-import { callClaude, cleanApiKey } from "../_shared/anthropic.ts";
+import { cleanApiKey } from "../_shared/anthropic.ts";
 import { adminClient, cors, json, requireUser } from "../_shared/http.ts";
-import { buildEntry, recordStageUsage } from "../_shared/usage.ts";
+import { assertModelPriced, meteredClaude } from "../_shared/usage.ts";
 
 const MODEL = "claude-opus-4-8";
+// Fail on the first invoke, not after a paid call recorded $0.00.
+assertModelPriced(MODEL);
 
 function extractScripts(html: string): { stripped: string; scripts: string[] } {
   const scripts: string[] = [];
@@ -189,11 +191,10 @@ Deno.serve(async (req) => {
         rejected +
         `<site_html>\n${stripped}\n</site_html>\n\n` +
         `Propose exactly one new feature that fits this site.`;
-      const res = await callClaude({
+      const res = await meteredClaude({ admin, scanId, startedAt, stage: "features_plan" }, {
         apiKey, model: MODEL, effort: "high", maxTokens: 1500, stream: false,
         system: PLAN_SYSTEM, schema: PLAN_SCHEMA, userContent, timeoutMs: 120_000,
       });
-      await recordStageUsage(admin, scanId, buildEntry("features_plan", MODEL, res.usage, Date.now() - startedAt, "high"));
 
       const out = (res.json ?? {}) as { feature?: { name?: string; summary?: string } };
       const feature = out.feature;
@@ -218,11 +219,10 @@ Deno.serve(async (req) => {
       `<feature_to_build>\nname: ${feat.name}\nsummary: ${feat.summary}\n</feature_to_build>\n\n` +
       `<site_html>\n${stripped}\n</site_html>\n\n` +
       `Implement ONLY this feature as html/css/js that matches the site's design.`;
-    const res = await callClaude({
+    const res = await meteredClaude({ admin, scanId, startedAt, stage: "features_impl" }, {
       apiKey, model: MODEL, effort: "high", maxTokens: 12000, stream: false,
       system: IMPL_SYSTEM, schema: IMPL_SCHEMA, userContent, timeoutMs: 120_000,
     });
-    await recordStageUsage(admin, scanId, buildEntry("features_impl", MODEL, res.usage, Date.now() - startedAt, "high"));
 
     const impl = (res.json ?? {}) as { html?: string; css?: string; js?: string };
     const injected = injectFeature(stripped, impl);

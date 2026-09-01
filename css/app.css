@@ -8,6 +8,13 @@
 
    Builds on css/styles.css tokens. Logical properties only;
    direction comes from dir="" in the HTML.
+
+   ►► The four pages that load this file link it as app.css?v=N.
+      BUMP THAT N WHENEVER YOU EDIT THIS FILE. Vercel revalidates
+      /css/* on every request, but a plain local static server sends
+      no Cache-Control at all, and Chrome then serves its own cached
+      copy without asking — which shows the new HTML wearing the old
+      stylesheet, and looks like the page is broken.
    ============================================================ */
 
 :root {
@@ -48,6 +55,102 @@
 .app-back { font-size: 0.9rem; text-decoration: none; color: var(--color-neutral-600); }
 .app-back:hover { color: var(--color-ink); }
 .app-user { font-size: 0.9rem; color: var(--color-neutral-600); }
+
+/* ---------- the wallet ----------
+   Two real controls beside the wordmark, not a line of text: a balance
+   chip that reads as an object you own, and a solid button that reads as
+   somewhere to go. The balance is a fact about the account, which is why
+   it sits by the logo rather than in the actions cluster — a customer
+   should meet it before they meet the work.
+
+   The button is ink, not terracotta. Terracotta is the accent for the
+   primary action of whatever page is underneath, and the chrome must not
+   outrank it; ink is unmistakably a button without taking the brand
+   colour, and hover hands it the terracotta anyway. */
+.header-lead {
+  display: flex; align-items: center; flex-wrap: wrap;
+  gap: var(--s-1) var(--s-2);
+  min-inline-size: 0;
+}
+.wallet { display: flex; align-items: center; gap: var(--s-1); }
+
+.wallet-balance {
+  display: inline-flex; align-items: center; gap: 7px;
+  min-block-size: 40px;
+  padding-inline: 12px;
+  border: 1px solid var(--color-neutral-300);
+  border-radius: var(--r-control);
+  background: var(--color-paper-raised);
+  line-height: 1;
+  white-space: nowrap;
+}
+/* The two icons also carry width/height attributes in the HTML. That is
+   deliberate belt and braces: if this stylesheet is ever late, stale or
+   blocked, an SVG with no intrinsic size fills whatever box it is given
+   and the header becomes two enormous blobs. Sized markup fails small. */
+.wallet-icon {
+  inline-size: 15px; block-size: 15px; flex: none;
+  color: var(--color-primary);
+}
+.wallet-n {
+  font-family: var(--font-mono);
+  font-weight: 700; font-size: 1rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-ink);
+}
+.wallet-unit { font-size: 0.8rem; color: var(--color-neutral-600); }
+
+.btn-buy {
+  display: inline-flex; align-items: center; gap: 7px;
+  min-block-size: 40px;
+  padding-inline: 16px;
+  border: 1px solid var(--color-ink);
+  border-radius: var(--r-control);
+  background: var(--color-ink);
+  color: var(--color-paper);
+  font: inherit; font-weight: 600; font-size: 0.88rem; line-height: 1;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  box-shadow: var(--shadow-press);
+  transition: background-color 160ms ease, border-color 160ms ease,
+              transform 160ms ease, box-shadow 160ms ease;
+}
+:lang(he) .btn-buy { font-weight: 700; }
+.btn-buy-icon { inline-size: 14px; block-size: 14px; flex: none; }
+.btn-buy:hover {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: #FFF7F2;
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-lift);
+}
+.btn-buy:active { transform: translateY(0); box-shadow: var(--shadow-press); }
+
+/* Narrow chrome: the pair keeps the wordmark's line and takes the far end
+   of it, so the balance and the store stay beside the logo instead of being
+   pushed into the middle of the actions cluster. */
+@media (max-width: 940px) {
+  .app-header .shell { flex-wrap: wrap; }
+  .header-lead { inline-size: 100%; flex-wrap: nowrap; justify-content: space-between; }
+  /* stacked, the actions align to the same edge the wordmark starts on
+     rather than drifting to the opposite end of their own line */
+  .app-header-actions { inline-size: 100%; justify-content: flex-start; }
+}
+/* On the narrowest screens the unit comes off the chip to save the line,
+   but only from sight: the coin mark carries the meaning for anyone who
+   can see it, and the word stays in the accessibility tree for anyone
+   who cannot. */
+@media (max-width: 420px) {
+  .wallet-unit {
+    position: absolute;
+    inline-size: 1px; block-size: 1px;
+    margin: -1px; padding: 0; border: 0;
+    overflow: hidden; white-space: nowrap;
+    clip-path: inset(50%);
+  }
+  .btn-buy { padding-inline: 12px; }
+}
 
 /* the work column — everything the user acts on lives inside it */
 .app-main { padding-block: clamp(var(--s-1), 2vw, var(--s-2)); }
@@ -705,6 +808,477 @@ code, .mono { font-family: var(--font-mono); }
   display: block;
   font-family: var(--font-mono);
   font-size: 0.75rem; color: var(--color-neutral-600);
+}
+
+/* ============================================================
+   THE STORE — /store/ and /he/store/
+
+   A price ledger, not a rack of look-alike cards (#20). Every package
+   shares one grid, so the rate column reads straight down and the
+   customer compares offers instead of five identical boxes. Three
+   decisions carry the page:
+
+   · one primary button only, on the recommended package — five
+     equally loud CTAs recommend nothing;
+   · the saving is stated twice, as a percentage and as real dollars,
+     because "$20 off" persuades where "20%" only informs;
+   · a bar draws the same saving to scale, so the ladder is legible
+     before a single number is read. It is redundant by design — the
+     figure is always in the text beside it (#colour-not-only).
+
+   Terracotta is spent on the recommended row and its button. Nothing
+   else on the page competes for it.
+   ============================================================ */
+.store { max-inline-size: 900px; margin-inline: auto; padding-inline: var(--s-2); }
+
+/* Start-aligned, never centred: an Israeli page aligns to the inline
+   start and reads down the same edge (#75, #21). */
+.store-head { padding-block: clamp(var(--s-3), 5vw, var(--s-6)) var(--s-3); }
+.store-head h1 {
+  font-size: clamp(2.2rem, 5vw, 3.4rem);
+  line-height: 1.08;
+  margin-block-end: var(--s-1);
+}
+.store-lead {
+  font-size: 1.05rem;
+  color: var(--color-ink-soft);
+  margin: 0;
+  max-width: 56ch;
+}
+/* ---------- what they hold right now ----------
+   Set in the size the number deserves: on a page whose whole job is to sell
+   more of them, how many are left is the fact the customer is actually
+   deciding against. Ink, not terracotta — it is data, and every other number
+   in this dashboard is monospace ink. The terracotta goes on the panel's
+   edge, which is where .build-warnings already puts it. */
+.store-balance {
+  margin-block: var(--s-3) var(--s-4);
+  padding: var(--s-3);
+  background: var(--color-paper-raised);
+  border: 1px solid var(--color-neutral-300);
+  border-inline-start: 3px solid var(--color-primary);
+  border-radius: var(--r-surface);
+  box-shadow: var(--shadow-press);
+}
+.store-balance-label {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--color-neutral-600);
+  max-width: none;
+}
+.store-balance-value {
+  display: flex; align-items: baseline; flex-wrap: wrap;
+  gap: 10px;
+  margin: 6px 0 0;
+  max-width: none;
+}
+.store-balance-n {
+  font-family: var(--font-mono);
+  font-weight: 800;
+  font-size: clamp(2.8rem, 8vw, 4.4rem);
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-ink);
+}
+.store-balance-unit { font-size: 1.1rem; color: var(--color-neutral-600); }
+
+/* ---------- the ladder ---------- */
+.pack-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s-2); }
+.pack {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(112px, auto) minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: var(--s-1) var(--s-3);
+  padding: var(--s-3);
+  background: var(--color-paper-raised);
+  border: 1px solid var(--color-neutral-300);
+  border-radius: var(--r-surface);
+  box-shadow: var(--shadow-press);
+  max-width: none;
+  transition: border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
+}
+.pack:hover {
+  border-color: var(--color-ink-soft);
+  box-shadow: var(--shadow-lift);
+  transform: translateY(-1px);
+}
+/* the only package lifted off the page, because it is the only one
+   carrying a claim about what other people chose */
+.pack.is-popular {
+  border-color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 3%, var(--color-paper-raised));
+  box-shadow: var(--shadow-lift);
+  padding-block: var(--s-4);
+}
+.pack.is-popular:hover { border-color: var(--color-primary-deep); }
+.pack-flag {
+  position: absolute;
+  inset-block-start: -10px; inset-inline-start: var(--s-3);
+  padding: 3px 10px;
+  background: var(--color-primary); color: #FFF7F2;
+  font-size: 0.7rem; font-weight: 700; letter-spacing: 0.04em;
+  border-radius: var(--r-control);
+}
+:lang(he) .pack-flag { letter-spacing: 0; font-size: 0.75rem; }
+.pack-flag.is-quiet {
+  background: var(--color-paper-raised);
+  color: var(--color-ok);
+  border: 1px solid var(--color-ok);
+  padding-block: 2px;
+}
+
+.pack-qty { display: flex; align-items: baseline; gap: 7px; }
+.pack-n {
+  font-family: var(--font-mono);
+  font-weight: 800; font-size: 2rem; line-height: 1;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-ink);
+}
+.is-popular .pack-n { font-size: 2.4rem; color: var(--color-primary-deep); }
+.pack-unit { font-size: 0.85rem; color: var(--color-neutral-600); }
+
+.pack-value { min-inline-size: 0; font-size: 0.85rem; color: var(--color-neutral-600); }
+.pack-rate .fig { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+/* saving drawn to scale — the same figure that is written beside it */
+.pack-bar {
+  display: block;
+  block-size: 4px;
+  /* the full width of its column, so every bar shares one track and the
+     six of them line up as a chart rather than six loose dashes */
+  inline-size: 100%;
+  margin-block: 8px 6px;
+  background: var(--color-neutral-300);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.pack-bar i { display: block; block-size: 100%; background: var(--color-ok); }
+.is-popular .pack-bar i { background: var(--color-primary); }
+.pack-save { display: block; font-weight: 700; color: var(--color-ok); }
+.is-popular .pack-save { color: var(--color-primary-deep); }
+.pack-save .fig { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.pack-save.is-base { font-weight: 400; color: var(--color-neutral-600); }
+
+.pack-money {
+  display: flex; flex-direction: column; align-items: flex-end;
+  gap: 1px;
+  text-align: end;
+}
+[dir="rtl"] .pack-money { align-items: flex-start; }
+.pack-was {
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-neutral-600);
+  text-decoration-color: var(--color-error);
+  text-decoration-thickness: 1.5px;
+}
+.pack-price {
+  font-family: var(--font-mono);
+  font-weight: 800; font-size: 1.55rem; line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-ink);
+  white-space: nowrap;
+}
+.is-popular .pack-price { font-size: 1.85rem; color: var(--color-primary-deep); }
+
+/* for text a screen reader needs and a reader does not */
+.vh {
+  position: absolute;
+  inline-size: 1px; block-size: 1px;
+  margin: -1px; padding: 0; border: 0;
+  overflow: hidden; white-space: nowrap;
+  clip-path: inset(50%);
+}
+.pack .btn { min-block-size: 48px; min-inline-size: 116px; }
+/* The quiet rows still have to feel like somewhere to press: the border
+   fills with ink on hover, so every row answers the pointer while the
+   recommended one keeps the terracotta to itself. */
+.pack .btn-quiet:hover {
+  background: var(--color-ink);
+  border-color: var(--color-ink);
+  color: var(--color-paper);
+}
+
+/* ---------- a quantity of the customer's own ----------
+   Set apart from the ladder rather than added to the bottom of it: it is
+   the one row on the page that is not an offer. Dashed edge, quiet button,
+   no discount colour — the packages keep the emphasis, which is exactly
+   what the pricing itself says. */
+.custom {
+  margin-block-start: var(--s-4);
+  padding: var(--s-3);
+  border: 1px dashed var(--color-neutral-300);
+  border-radius: var(--r-surface);
+}
+.custom-head h2 { font-size: 1.15rem; margin-block-end: 4px; }
+.custom-head p {
+  margin: 0;
+  font-size: 0.88rem;
+  color: var(--color-neutral-600);
+  max-width: 62ch;
+}
+.custom-row {
+  display: flex; align-items: flex-end; flex-wrap: wrap;
+  gap: var(--s-2) var(--s-3);
+  margin-block-start: var(--s-3);
+}
+.custom-field { display: block; }
+.custom-label {
+  display: block;
+  font-size: 0.78rem; color: var(--color-neutral-600);
+  margin-block-end: 4px;
+}
+.custom-field input {
+  inline-size: 140px;
+  min-block-size: 48px;
+  padding: var(--s-1) var(--s-2);
+  border: 1px solid var(--color-neutral-300);
+  border-radius: var(--r-control);
+  background: var(--color-paper-raised);
+  font: inherit;
+  font-family: var(--font-mono);
+  font-weight: 700; font-size: 1.15rem;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  color: var(--color-ink);
+}
+.custom-field input:focus-visible { outline-offset: 1px; }
+
+.custom-total { display: flex; flex-direction: column; gap: 4px; }
+.custom-total-label { font-size: 0.78rem; color: var(--color-neutral-600); }
+.custom-price {
+  font-family: var(--font-mono);
+  font-weight: 800; font-size: 1.55rem; line-height: 1;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-ink);
+}
+.custom .btn { min-block-size: 48px; margin-inline-start: auto; }
+
+.custom-note {
+  margin: var(--s-2) 0 0;
+  min-block-size: 1.3em;
+  font-size: 0.85rem;
+  color: var(--color-neutral-600);
+  max-width: 66ch;
+}
+/* green only when the page has just found the customer a better deal than
+   the one they typed, so the colour means exactly one thing here */
+.custom-note.is-win { color: var(--color-ok); font-weight: 700; }
+.custom-note.is-bad { color: var(--color-error); font-weight: 700; }
+
+@media (max-width: 620px) {
+  .custom-field { flex: 1 1 100%; }
+  .custom-field input { inline-size: 100%; }
+  .custom .btn { inline-size: 100%; margin-inline-start: 0; }
+}
+
+.store-status {
+  margin-block-start: var(--s-3);
+  min-block-size: 1.3em;
+  font-weight: 600;
+  color: var(--color-ink-soft);
+  max-width: none;
+}
+:lang(he) .store-status { font-weight: 700; }
+
+/* One package per line on a phone: the count and the price on the top
+   line, the value under them, the button across the full width so it is
+   never a small target. */
+@media (max-width: 720px) {
+  .pack { grid-template-columns: 1fr auto; }
+  .pack-qty   { grid-column: 1; grid-row: 1; }
+  .pack-money { grid-column: 2; grid-row: 1; align-items: flex-end; }
+  [dir="rtl"] .pack-money { align-items: flex-start; }
+  .pack-value { grid-column: 1 / -1; grid-row: 2; }
+  .pack .btn  { grid-column: 1 / -1; grid-row: 3; inline-size: 100%; margin-block-start: var(--s-1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .btn-buy, .pack { transition: none; }
+}
+
+/* ============================================================
+   TOKEN ADMIN — /admin/ and /he/admin/
+
+   A worksheet, not a product page: one row per account, the number
+   editable in place, and a status line that says what actually
+   happened to it. The email is the identity, so it is monospace and
+   always LTR whatever direction the page runs in.
+
+   Nothing here is a permission check. The two database functions this
+   page calls refuse a caller who is not in public.admins, so hiding
+   the tool is only about not showing somebody a form they cannot use.
+   ============================================================ */
+.admin { max-inline-size: 960px; margin-inline: auto; padding-inline: var(--s-2); }
+
+/* ---------- the three panels ----------
+   A rule under the row of names, and the open one sits on it. No pills, no
+   boxes: the underline is the whole affordance, which is what a tab is. */
+.admin-tabs {
+  display: flex; gap: var(--s-3);
+  margin-block-end: var(--s-3);
+  border-block-end: 1px solid var(--color-neutral-300);
+}
+.admin-tab {
+  appearance: none; background: none; border: none;
+  padding: 0 0 var(--s-1);
+  margin-block-end: -1px;
+  border-block-end: 2px solid transparent;
+  font: inherit; font-weight: 600; font-size: 0.95rem;
+  color: var(--color-neutral-600);
+  cursor: pointer;
+}
+:lang(he) .admin-tab { font-weight: 700; }
+.admin-tab:hover { color: var(--color-ink); }
+.admin-tab.is-on { color: var(--color-ink); border-block-end-color: var(--color-primary); }
+.admin-panel[hidden] { display: none; }
+
+/* ---------- report tables ----------
+   A real table, because this is real tabular data and a screen reader should
+   be told so. It scrolls inside its own box rather than pushing the page
+   sideways. */
+.tablewrap { overflow-x: auto; border: 1px solid var(--color-neutral-300); border-radius: var(--r-surface); }
+.dtable {
+  inline-size: 100%;
+  border-collapse: collapse;
+  background: var(--color-paper-raised);
+  font-size: 0.85rem;
+}
+.dtable th, .dtable td {
+  padding: 10px var(--s-2);
+  text-align: start;
+  border-block-end: 1px solid var(--color-neutral-300);
+  white-space: nowrap;
+}
+.dtable thead th {
+  position: sticky; inset-block-start: 0;
+  background: var(--color-paper);
+  font-size: 0.75rem; font-weight: 700;
+  color: var(--color-neutral-600);
+}
+.dtable tbody tr:last-child td { border-block-end: none; }
+.dtable tbody tr:hover { background: var(--color-paper); }
+/* numbers align on the same edge down the column so they can be compared
+   without reading each one */
+.dtable td.n {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: end;
+}
+.dtable td.m { font-family: var(--font-mono); font-size: 0.8rem; }
+.dtable td.src {
+  font-family: var(--font-mono); font-size: 0.78rem;
+  max-inline-size: 22ch; overflow: hidden; text-overflow: ellipsis;
+}
+.dtable-note {
+  caption-side: bottom;
+  padding: var(--s-3);
+  color: var(--color-neutral-600);
+  text-align: start;
+}
+
+.admin-note {
+  margin: 0 0 var(--s-3);
+  min-block-size: 1.3em;
+  color: var(--color-neutral-600);
+  max-width: 68ch;
+}
+.admin-note.is-denied {
+  padding: var(--s-2);
+  border: 1px solid var(--color-error);
+  border-radius: var(--r-surface);
+  background: var(--color-paper-raised);
+  color: var(--color-error);
+  font-weight: 600;
+}
+:lang(he) .admin-note.is-denied { font-weight: 700; }
+
+.admin-tools { margin-block-end: var(--s-3); max-inline-size: 420px; }
+.admin-tools[hidden] { display: none; }
+.admin-search-label {
+  display: block;
+  font-size: 0.82rem; font-weight: 600;
+  color: var(--color-ink-soft);
+  margin-block-end: 4px;
+}
+:lang(he) .admin-search-label { font-weight: 700; }
+
+.wallet-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s-2); }
+.wal {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 120px minmax(0, 1fr) auto;
+  align-items: end;
+  gap: var(--s-1) var(--s-2);
+  padding: var(--s-2) var(--s-3);
+  background: var(--color-paper-raised);
+  border: 1px solid var(--color-neutral-300);
+  border-radius: var(--r-surface);
+  max-width: none;
+}
+.wal:focus-within { border-color: var(--color-primary); }
+
+.wal-who { min-inline-size: 0; }
+.wal-email {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 0.9rem; font-weight: 600;
+  color: var(--color-ink);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.wal-meta {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 0.75rem; color: var(--color-neutral-600);
+  margin-block-start: 2px;
+}
+
+/* a visible label per field, never a placeholder standing in for one (#89) */
+.wal-field { display: block; min-inline-size: 0; }
+.wal-label {
+  display: block;
+  font-size: 0.75rem; color: var(--color-neutral-600);
+  margin-block-end: 3px;
+}
+.wal-field input {
+  inline-size: 100%;
+  min-block-size: 44px;
+  padding: var(--s-1);
+  border: 1px solid var(--color-neutral-300);
+  border-radius: var(--r-control);
+  background: var(--color-paper);
+  font: inherit; color: var(--color-ink);
+}
+.wal-input {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+.wal-field input:focus-visible { outline-offset: 1px; }
+.wal .btn { min-block-size: 44px; }
+
+/* the outcome of the last save on this row, in words rather than a colour
+   alone: green and red are the emphasis, the sentence is the message */
+.wal-status {
+  grid-column: 1 / -1;
+  min-block-size: 1.2em;
+  font-size: 0.82rem;
+  color: var(--color-neutral-600);
+}
+.wal-status.is-ok { color: var(--color-ok); font-weight: 700; }
+.wal-status.is-bad { color: var(--color-error); font-weight: 700; }
+
+.admin-empty {
+  margin-block-start: var(--s-3);
+  color: var(--color-neutral-600);
+}
+.admin-empty[hidden] { display: none; }
+
+@media (max-width: 780px) {
+  .wal { grid-template-columns: 1fr 1fr; align-items: start; }
+  .wal-who { grid-column: 1 / -1; }
+  .wal-field-wide { grid-column: 1 / -1; }
+  .wal .btn { grid-column: 1 / -1; inline-size: 100%; }
 }
 
 /* ---------- directional icons ---------- */

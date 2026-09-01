@@ -92,6 +92,8 @@
     warnContentLoss: "שימו לב: התוצאה יצאה חסרה לעומת האתר המקורי. האתר מוכן להורדה, אבל כדאי לבדוק לפני שמעלים אותו.",
     warnDesignThin: "שימו לב: האתר יצא נקי אבל חיוור מהמקורי — הוסרו הסימנים, ואיתם חלק מהעיצוב. אפשר להוריד כמו שהוא, או לבנות שוב ולקבל תוצאה עשירה יותר.",
     warnCssRepaired: "שימו לב: העיצוב חזר מהבנאי עם CSS שבור. סגרנו אותו אוטומטית כדי שהעמוד לא יאבד את שאר הכללים, אבל כדאי להסתכל על התוצאה לפני שמעלים אותה.",
+    warnNavUnresolved: "שימו לב: לכמה קישורים בתפריט לא נמצא סקשן מתאים בעמוד. הפנינו אותם לראש התוכן כדי שלא יישברו, אבל כדאי לבדוק לאן הם אמורים להוביל.",
+    warnDeadControls: "הסרנו כפתורים שהבנאי הוסיף ואף סקריפט בעמוד לא יכול להפעיל — כפתור שלא עושה כלום בלחיצה גרוע יותר מכפתור שלא קיים.",
     warnHeading: "מה מצאנו בתוצאה"
   } : {
     hi: "Hi, ",
@@ -164,6 +166,8 @@
     warnContentLoss: "Heads up: the result came back missing content the original had. The site is ready to download, but check it before you publish.",
     warnDesignThin: "Heads up: the site came back clean but paler than the original — the AI tells are gone, and some of the design went with them. Download it as is, or build again for a richer result.",
     warnCssRepaired: "Heads up: the builder returned broken CSS. We closed it automatically so the rest of the page kept its styling, but look the result over before you publish it.",
+    warnNavUnresolved: "Heads up: a few nav links had no matching section on the page. We pointed them at the top of the content so they are not broken, but check where they were meant to lead.",
+    warnDeadControls: "We removed buttons the builder added that no script on the page could drive — a button that does nothing when pressed is worse than one that is not there.",
     warnHeading: "What we found in the result"
   };
 
@@ -317,7 +321,7 @@
       showUser();
       return refreshGithubStatus();
     }).then(function () {
-      if (user) { wireInputs(); loadHistory(); }
+      if (user) { wireInputs(); loadHistory(); Wallet.load(sb, user); }
     }).catch(function () {
       if (DEV_NO_AUTH) return;
       window.location.replace(HOME);
@@ -391,7 +395,6 @@
     wireFiles();
     wireUrl();
     wireGithubRow();
-    wireDialogs();
   }
 
   /* The GitHub row never disappears — only its button changes, so the
@@ -1268,7 +1271,9 @@
       var kinds = {
         content_loss: "התוצאה יצאה חסרה לעומת המקור",
         design_thin: "התוצאה יצאה חיוורת מהמקור",
-        css_repaired: "ה-CSS חזר שבור ותוקן אוטומטית"
+        css_repaired: "ה-CSS חזר שבור ותוקן אוטומטית",
+        nav_unresolved: "כמה קישורים בתפריט לא מצאו סקשן והופנו לראש התוכן",
+        dead_controls_removed: "הסרנו כפתורים שאף סקריפט לא יכול להפעיל"
       };
       var what = (list || []).map(function (w) { return "· " + (kinds[w.kind] || w.kind); }).join("\n");
       return "מצאנו את זה בתוצאה של הבנייה:\n" + what +
@@ -1371,7 +1376,9 @@
       var kinds = {
         content_loss: "the result came back missing content the original had",
         design_thin: "the result came back paler than the original",
-        css_repaired: "the CSS came back broken and was repaired automatically"
+        css_repaired: "the CSS came back broken and was repaired automatically",
+        nav_unresolved: "some nav links found no section and now point at the top of the content",
+        dead_controls_removed: "we removed buttons no script could drive"
       };
       var what = (list || []).map(function (w) { return "- " + (kinds[w.kind] || w.kind); }).join("\n");
       return "Here is what we found in the build:\n" + what +
@@ -1573,7 +1580,8 @@
      (detect mode:"after") and show before → after. The scoring is the exact same
      deterministic, weight-based formula used for the original scan, so the two
      numbers are directly comparable and the "after" is measured, not asserted. */
-  function afterScanPass(n, total) {
+  function afterScanPass(n, total, attempt) {
+    attempt = attempt || 1;
     els["fix-hint"].textContent = P.scoreScanning(n, total);
     prog.to(P.scoreScanning(n, total), ((n - 1) / total) * 100);
     return invokeFn("detect", { scan_id: currentScanId, mode: "after", part: n, parts: total })
@@ -1581,6 +1589,17 @@
         prog.to(null, (n / total) * 100);
         if (data && data.done) return data;
         return afterScanPass(n + 1, total);
+      })
+      .catch(function (e) {
+        /* Each pass is persisted server-side in detection_after, so re-running
+           THIS pass repeats no earlier work. Ride out an overrun the same way
+           the rebuild does: the after-scan is what proves the score went down,
+           and half its cost is already spent by the time one pass times out —
+           giving up there throws that away and leaves the row looking like a
+           site that was never re-scanned. */
+        var msg = (e && e.body && e.body.error) || "";
+        if (String(msg).indexOf("stage_timeout") === -1 || attempt >= 4) throw e;
+        return afterScanPass(n, total, attempt + 1);
       });
   }
   function runAfterScan() {
@@ -1589,8 +1608,12 @@
     return afterScanPass(1, 3).then(function (data) {
       renderScoreDelta(data && data.before, data && data.after);
       return data;
-    }).catch(function () {
-      /* non-fatal: the rebuild already delivered; we just couldn't measure after */
+    }).catch(function (e) {
+      /* Still non-fatal — the rebuild already delivered and the download must
+         not be held hostage to a measurement. But it is no longer invisible:
+         a row with rescanned_at null is an after-scan that never finished, and
+         its scan_after_usd of 0 means "not measured", not "was free". */
+      console.error("after-scan did not finish:", (e && e.body && e.body.error) || e);
       return null;
     });
   }
@@ -1890,7 +1913,9 @@
     var text = {
       content_loss: T.warnContentLoss,
       design_thin: T.warnDesignThin,
-      css_repaired: T.warnCssRepaired
+      css_repaired: T.warnCssRepaired,
+      nav_unresolved: T.warnNavUnresolved,
+      dead_controls_removed: T.warnDeadControls
     };
     el.hidden = false;
     el.innerHTML =
@@ -2338,6 +2363,10 @@
   function fmtDate(iso) { try { return new Date(iso).toISOString().slice(0, 10); } catch (e) { return ""; } }
 
   function wireStatic() {
+    /* Dialogs are wired here rather than after sign-in: a sheet a visitor
+       can open must be a sheet they can close, whatever the session is
+       doing at that moment. */
+    wireDialogs();
     if (els["report-back"]) els["report-back"].addEventListener("click", backToInput);
     // Primary flow is now the whole-file redesign (TransformDesigner). The old
     // propose→apply patch handlers stay defined but are no longer wired.

@@ -7,6 +7,7 @@ import {
   paletteOf,
   primaryFontStack,
   redressSecondaryPages,
+  relativePath,
   rewriteEmbeddedCss,
   scopedTokens,
   type Shell,
@@ -54,6 +55,37 @@ function project() {
     ["script.js", `document.querySelector("#nav").addEventListener("click",()=>{});`],
   ]);
 }
+
+Deno.test("the carried nav points at the rebuilt page, not at this one", () => {
+  // The shell's nav links are anchors into the ONE page that was rebuilt. On a
+  // secondary page they have to cross over to it or they are dead links.
+  const shell = {
+    ...SHELL,
+    header_html: `<header><nav><a href="#הישגים">הישגים</a><a href="index.html">בית</a></nav></header>`,
+  };
+  const r = redressSecondaryPages(project(), shell, "index.html");
+  const contact = r.files.get("contact.html") ?? "";
+  assertStringIncludes(contact, `href="index.html#הישגים"`);
+  assertStringIncludes(contact, `href="index.html"`); // a page link is left alone
+});
+
+Deno.test("a nav carried into a subfolder climbs back out to the rebuilt page", () => {
+  const files = project();
+  files.set("pages/about.html", PAGE(`<main><h1>אודות</h1></main>`));
+  const shell = {
+    ...SHELL,
+    header_html: `<header><nav><a href="#הישגים">הישגים</a></nav></header>`,
+  };
+  const r = redressSecondaryPages(files, shell, "index.html");
+  assertStringIncludes(r.files.get("pages/about.html") ?? "", `href="../index.html#הישגים"`);
+});
+
+Deno.test("relativePath walks between bundle paths", () => {
+  assertEquals(relativePath("contact.html", "index.html"), "index.html");
+  assertEquals(relativePath("pages/about.html", "index.html"), "../index.html");
+  assertEquals(relativePath("a/b/c.html", "a/index.html"), "../index.html");
+  assertEquals(relativePath("a/b.html", "a/index.html"), "index.html");
+});
 
 // ---------- palette ----------
 
