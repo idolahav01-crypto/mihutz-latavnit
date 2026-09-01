@@ -30,6 +30,7 @@
 // markup, its card grid, its copy — are NOT, and still need a real rebuild.
 
 import { selfCheck } from "./selfcheck.ts";
+import { retargetAnchors } from "./rebuild_assembly.ts";
 
 export interface Shell {
   head_extras: string;
@@ -353,6 +354,20 @@ export function rewriteEmbeddedCss(
     .replace(/\bstyle\s*=\s*'([^']*)'/gi, (_, css) => `style='${fix(css)}'`);
 }
 
+/**
+ * How one page in the bundle links to another. Bundle paths are POSIX-style and
+ * always relative to the site root, so this is plain segment arithmetic: how
+ * far up from the linking page's folder, then down to the target.
+ */
+export function relativePath(from: string, to: string): string {
+  const fromDir = from.split("/").slice(0, -1);
+  const toParts = to.split("/");
+  let i = 0;
+  while (i < fromDir.length && i < toParts.length - 1 && fromDir[i] === toParts[i]) i++;
+  const up = fromDir.slice(i).map(() => "..");
+  return [...up, ...toParts.slice(i)].join("/");
+}
+
 function replaceRegion(html: string, tag: "header" | "footer", markup: string): string | null {
   const re = new RegExp(`<${tag}\\b[^>]*>[\\s\\S]*?<\\/${tag}>`, "i");
   return re.test(html) ? html.replace(re, markup) : null;
@@ -447,11 +462,20 @@ export function redressSecondaryPages(
     // new chrome arrives so the replacement markup is never rewritten.
     let out = rewriteEmbeddedCss(src, map, stack);
 
+    // The chrome's nav links are anchors into the rebuilt page. On THIS page
+    // they point at sections that are not here, so they are retargeted to the
+    // rebuilt page by a path relative to where this page sits — a nav that
+    // works on one page and is dead on the other three is the same broken nav,
+    // filed where nobody looks.
+    const toRebuilt = relativePath(page, rebuiltPage);
+    const headerMarkup = retargetAnchors(shell.header_html, toRebuilt);
+    const footerMarkup = retargetAnchors(shell.footer_html, toRebuilt);
+
     const header = shell.header_html
-      ? replaceRegion(out, "header", shell.header_html)
+      ? replaceRegion(out, "header", headerMarkup)
       : null;
     const footer = shell.footer_html
-      ? replaceRegion(header ?? out, "footer", shell.footer_html)
+      ? replaceRegion(header ?? out, "footer", footerMarkup)
       : null;
     out = footer ?? header ?? out;
 

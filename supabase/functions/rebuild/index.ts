@@ -431,6 +431,8 @@ function fontPreload(headExtras: string): string {
 
 interface Assembled {
   html: string;
+  /** The chrome as it actually shipped: controls stripped, anchors resolved. */
+  chrome: { header: string; footer: string };
   /** Nav/footer links no section answered; they now point at #main. */
   navFallbacks: string[];
   /** Controls the shell invented that nothing on the page could drive. */
@@ -506,6 +508,7 @@ ${scriptBlock}</body>
 `;
   return {
     html,
+    chrome: { header, footer },
     navFallbacks: [...headerFixed.fallbacks, ...footerFixed.fallbacks, ...bodyFixed.fallbacks],
     deadControls: [
       ...headerClean.removed,
@@ -894,7 +897,7 @@ Deno.serve(async (req) => {
     let deliveryWarnings: Array<{ kind: string; detail: string; items: unknown }> = [];
     if (done) {
       // Every section built — assemble the final self-contained document.
-      const { html: assembled, navFallbacks, deadControls: pageDeadControls } = assemble(
+      const { html: assembled, chrome, navFallbacks, deadControls: pageDeadControls } = assemble(
         spec, shell, merged, scripts, siteUrl,
       );
 
@@ -931,7 +934,15 @@ Deno.serve(async (req) => {
       // footer, and runs the same self-check over them. It is text work: no
       // model call, no token, no added cost to a run. It is NOT a rebuild, and
       // the signals living in a page's own content and structure survive it.
-      const redress = redressSecondaryPages(originals, shell, target);
+      // The chrome the other pages get is the chrome that shipped, not the raw
+      // one the model returned: same links resolved, same dead controls gone.
+      // Handing them the model's draft put the button that does nothing back on
+      // every page the rebuild had just cleaned it off.
+      const redress = redressSecondaryPages(
+        originals,
+        { ...shell, header_html: chrome.header, footer_html: chrome.footer },
+        target,
+      );
       for (const [path, content] of redress.files) editedMap.set(path, content);
 
       // The rebuilt page is self-contained: its CSS is inline and the original

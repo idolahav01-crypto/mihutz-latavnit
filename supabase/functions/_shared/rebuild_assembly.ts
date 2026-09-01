@@ -313,6 +313,26 @@ function decodeTarget(t: string): string {
 }
 
 /**
+ * Point a page's in-page anchors at the page that actually holds those sections.
+ *
+ * The rebuilt header is carried onto every other page of the site, and its nav
+ * links are anchors into the ONE page that was rebuilt. Left as "#הישגים" they
+ * are dead everywhere except that page — the same broken nav as before, just
+ * moved to the files nobody looked at. Here they become "index.html#הישגים":
+ * the visitor lands on the section, one page over.
+ *
+ * "#" alone is left alone: it means the top of the page you are on, and it
+ * means that on every page.
+ */
+export function retargetAnchors(html: string, pageHref: string): string {
+  if (!pageHref) return html;
+  return html.replace(
+    /(<a\b[^>]*\bhref=)(["'])#([^"']+)\2/gi,
+    (whole, pre, q, target) => `${pre}${q}${pageHref}#${target}${q}`,
+  );
+}
+
+/**
  * Drop a control the finished page cannot honour.
  *
  * The shell model is asked for markup only — every script on the page is the
