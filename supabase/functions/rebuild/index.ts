@@ -206,7 +206,7 @@ Return:
 - tokens_css: a real design system as CSS — :root custom properties for the brand palette, type scale, spacing rhythm, radii and shadows; sensible base element styles (body font/line-height/color, headings, links, img{max-width:100%}); and reusable component classes the sections will use (.container, .btn / .btn-primary, .section, etc.). Do NOT define an .eyebrow class or any other "small label above every heading" helper — offering one makes every section reach for it, and a kicker on every section is itself an AI tell. Body font-weight >= 500, headings >= 700. Respect dir (logical properties for RTL).
 - nav: which sections the header links to, in order, as {section_id, label}. section_id must come from <page_anchors>; label is your short wording for it (the heading trimmed to a nav label — "האצטדיון", not "אצטדיון האמירויות — בית התותחנים"). Pick the 4–6 sections a visitor actually navigates by; skip the hero and anything a link would not help with.
 - header_html: the site header markup — logo (text = site name), layout, everything except the nav links themselves. Put the exact token {{NAV}} where the links belong; it is replaced with <a class="nav-link" href="#id">label</a> for each nav entry, in order, so style .nav-link and its container in tokens_css. Do NOT write the nav links yourself and do NOT write any href="#..." — you cannot know the ids, and a link to a section that is not on the page reads as a broken site.
-- footer_html: a real footer built from the site's real facts. EVERY fact given to you that belongs in a footer MUST appear: company number, physical address, opening hours, phone, email, and the legal pages (terms, cancellation, privacy, accessibility statement) with the exact href each one already uses. Israeli law requires several of these and the audit checks for them, so dropping one makes the site worse than it was. Invent nothing: if a fact was not given, omit it rather than filling in a placeholder.
+- footer_html: a real footer built from the site's real facts. EVERY fact given to you that belongs in a footer MUST appear: company number, physical address, opening hours, phone, email, and the legal pages (terms, cancellation, privacy, accessibility statement) with the exact href each one already uses. Israeli law requires several of these and the audit checks for them, so dropping one makes the site worse than it was. Invent nothing: if a fact was not given, omit it rather than filling in a placeholder. If the footer repeats a link to a section, give it the SAME label the nav entry uses — that is how it is matched to the section, and a footer that renames it ("חידון טריוויה" for the nav's "חידון") is a link that cannot be placed.
 
 NO CONTROL THAT NEEDS JAVASCRIPT. You emit markup only; every script on the finished page is the original site's, carried over untouched, and nothing will ever be wired to a control you invent. A contrast toggle, a dark-mode switch, a language switcher, a search box, a hamburger that hides the nav behind a click — each ships as a button that does nothing when a visitor presses it, which is worse than not offering it. The nav must work with JavaScript off: plain <a href="#id"> links, reachable at every screen size (wrap them, scroll them, shrink them — never collapse them behind a toggle). The only button-looking things allowed are <a> links styled as buttons.
 
@@ -512,7 +512,16 @@ function assemble(spec: Spec, shell: Shell, sections: BuiltSection[], scripts: s
   const navved = applyNavPlan(stripSkipLinks(shell.header_html || ""), navPlan, existingIds);
 
   const headerClean = stripDeadControls(navved.html, scriptText);
-  const footerClean = stripDeadControls(shell.footer_html || "", scriptText);
+
+  // The footer usually mirrors the nav, and a mirror of a link is a link. It
+  // gets the same plan by label — the slot itself is dropped there, since the
+  // page has exactly one nav and it is in the header.
+  const footerPlanned = applyNavPlan(
+    (shell.footer_html || "").split(NAV_SLOT).join(""),
+    navPlan,
+    existingIds,
+  );
+  const footerClean = stripDeadControls(footerPlanned.html, scriptText);
   const headerFixed = fixAnchors(headerClean.html, anchorTargets, existingIds);
   const footerFixed = fixAnchors(footerClean.html, anchorTargets, existingIds);
   const header = headerFixed.html;

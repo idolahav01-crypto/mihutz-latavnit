@@ -132,6 +132,13 @@ Deno.test("applyNavPlan repoints the model's own links when it ignored the slot"
   assertStringIncludes(html, `href="#היסטוריה">היסטוריה</a>`);
 });
 
+Deno.test("applyNavPlan fixes the footer's mirror of the nav by label", () => {
+  const footer = `<footer><a href="#squad">הסגל</a><a href="/terms">תנאים</a></footer>`;
+  const { html } = applyNavPlan(footer, [{ section_id: "שחקנים-בולטים", label: "הסגל" }], new Set(["שחקנים-בולטים"]));
+  assertStringIncludes(html, `href="#שחקנים-בולטים">הסגל</a>`);
+  assertStringIncludes(html, `href="/terms"`); // a real page link is untouched
+});
+
 Deno.test("applyNavPlan drops a duplicate section rather than linking it twice", () => {
   const header = `<header><nav>${NAV_SLOT}</nav></header>`;
   const plan = [
