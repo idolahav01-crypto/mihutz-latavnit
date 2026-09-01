@@ -161,34 +161,262 @@ export function stripSkipLinks(html: string): string {
 }
 
 /**
- * Point every in-page anchor at a section that actually exists. An unknown
- * "#target" is remapped to the section whose heading best matches the link
- * text, and to "#main" when nothing matches — so a nav link is never dead.
+ * The ids a document actually offers as anchor targets.
+ *
+ * The valid set has to come from the shipped markup, not from the plan. A real
+ * run planned a section as "בקצרה-מהאלמנך" and the builder returned it as
+ * <section id="section-2">; the plan still listed the planned id, so a nav link
+ * to it would have passed every check and landed nowhere.
+ */
+export function collectIds(html: string): Set<string> {
+  const ids = new Set<string>();
+  for (const m of html.matchAll(/\bid\s*=\s*(?:"([^"]*)"|'([^']*)')/g)) {
+    const id = (m[1] ?? m[2] ?? "").trim();
+    if (id) ids.add(id);
+  }
+  return ids;
+}
+
+/** The id on a built fragment's outermost element, if it carries one. */
+export function rootId(html: string): string | null {
+  const open = html.trimStart().match(/^<([a-z][\w-]*)\b([^>]*)>/i);
+  if (!open) return null;
+  const id = open[2].match(/\bid\s*=\s*(?:"([^"]*)"|'([^']*)')/);
+  return id ? (id[1] ?? id[2] ?? "").trim() || null : null;
+}
+
+// Hebrew nav labels are almost never the section heading verbatim: the heading
+// is "אצטדיון האמירויות" and the link says "האצטדיון", the definite article
+// making a plain substring test fail. Comparison therefore happens on words,
+// with a leading ה stripped — but only when a real word is left, so "הודעות"
+// does not quietly become "ודעות".
+function normalizeLabel(s: string): string {
+  return s
+    .replace(/[\u0591-\u05C7]/g, "") // niqqud
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim()
+    .toLowerCase();
+}
+
+function labelWords(s: string): string[] {
+  return normalizeLabel(s)
+    .split(" ")
+    .filter((w) => w.length >= 3)
+    .map((w) => (/^ה\p{L}{3,}$/u.test(w) ? w.slice(1) : w));
+}
+
+/**
+ * How well a link's text names a section. 3 = the same phrase, 2 = one contains
+ * the other, 1 = they share a significant word, 0 = unrelated. Anything above
+ * zero beats the #main fallback, which is a link that scrolls nowhere.
+ */
+function anchorScore(wanted: string, heading: string): number {
+  const a = normalizeLabel(wanted);
+  const b = normalizeLabel(heading);
+  if (!a || !b) return 0;
+  if (a === b) return 3;
+  if (a.includes(b) || b.includes(a)) return 2;
+  const wb = new Set(labelWords(heading));
+  return labelWords(wanted).some((w) => wb.has(w)) ? 1 : 0;
+}
+
+/**
+ * Words that occur in exactly one section, mapped to it.
+ *
+ * The last resort before giving up on a link. A nav label often shares no word
+ * with the heading it means — "חידון" over a section headed "טריוויית
+ * התותחנים" — but the word it uses almost always appears somewhere inside that
+ * one section and nowhere else. Uniqueness is the whole safeguard: a word two
+ * sections both use says nothing about which one the link wants, so it is not
+ * in this index at all.
+ */
+function uniqueWordIndex(
+  sections: Array<{ id: string; heading?: string; text?: string }>,
+): Map<string, string> {
+  const seen = new Map<string, Set<string>>();
+  for (const s of sections) {
+    for (const w of labelWords(`${s.heading ?? ""} ${s.text ?? ""}`)) {
+      const owners = seen.get(w) ?? new Set<string>();
+      owners.add(s.id);
+      seen.set(w, owners);
+    }
+  }
+  const unique = new Map<string, string>();
+  for (const [w, owners] of seen) if (owners.size === 1) unique.set(w, [...owners][0]);
+  return unique;
+}
+
+/**
+ * Point every in-page anchor at a section that actually exists.
+ *
+ * `existingIds` is the set of ids in the shipped markup; when it is omitted the
+ * targets' own ids stand in. An unknown "#target" is resolved against the
+ * section this link most plausibly names — by its text, then by the slug the
+ * shell tried to link to, then by a word only one section uses — and falls back
+ * to "#main" only when nothing matches at all.
+ *
+ * Every fallback is reported. A link to #main is not a broken link, but it is
+ * not the section the visitor asked for either, and a run that quietly pointed
+ * three of five nav items at the top of the page looked perfect in a screenshot
+ * and did nothing when clicked.
  */
 export function fixAnchors(
   html: string,
-  sections: Array<{ id: string; heading?: string }>,
-): string {
-  const ids = new Set(sections.map((s) => s.id));
-  return html.replace(
-    /(<a\b[^>]*\bhref=")#([^"]*)("[^>]*>)([\s\S]*?)(<\/a>)/gi,
-    (whole, pre, target, post, text, close) => {
-      if (target === "" || target === "main" || ids.has(target)) return whole;
+  sections: Array<{ id: string; heading?: string; text?: string }>,
+  existingIds?: Iterable<string>,
+): { html: string; fallbacks: string[] } {
+  const ids = new Set(existingIds ?? sections.map((s) => s.id));
+  const live = sections.filter((s) => ids.has(s.id));
+  const unique = uniqueWordIndex(live);
+  const fallbacks: string[] = [];
+  const out = html.replace(
+    // Both quote styles: a link the regex cannot see is a link nothing checks.
+    /(<a\b[^>]*\bhref=)(["'])#([^"']*)\2([^>]*>)([\s\S]*?)(<\/a>)/gi,
+    (whole, pre, q, target, post, text, close) => {
+      // href="#" is not a target, it is a placeholder the model left behind. It
+      // scrolls to the top of the document, which under a nav label like "הסגל"
+      // is indistinguishable from a broken link, so it goes through the matcher
+      // like any unknown target and only stays "#" if nothing fits.
+      if (target === "main" || ids.has(target) || ids.has(decodeTarget(target))) return whole;
+
       const wanted = stripTags(text).trim();
-      const match = sections.find((s) =>
-        s.heading && wanted && (s.heading.includes(wanted) || wanted.includes(s.heading))
-      );
-      return `${pre}#${match ? match.id : "main"}${post}${text}${close}`;
+      const slug = decodeTarget(target).replace(/[-_]+/g, " ");
+      let best: { id: string; score: number } | null = null;
+      for (const s of live) {
+        if (!s.heading) continue;
+        const score = Math.max(anchorScore(wanted, s.heading), anchorScore(slug, s.heading));
+        if (score > 0 && (!best || score > best.score)) best = { id: s.id, score };
+      }
+      if (!best) {
+        for (const w of [...labelWords(wanted), ...labelWords(slug)]) {
+          const owner = unique.get(w);
+          if (owner) {
+            best = { id: owner, score: 1 };
+            break;
+          }
+        }
+      }
+      if (best) return `${pre}${q}#${best.id}${q}${post}${text}${close}`;
+      fallbacks.push(wanted || `#${target}`);
+      return `${pre}${q}#${target === "" ? "" : "main"}${q}${post}${text}${close}`;
     },
+  );
+  return { html: out, fallbacks };
+}
+
+function decodeTarget(t: string): string {
+  try {
+    return decodeURIComponent(t);
+  } catch {
+    return t;
+  }
+}
+
+/**
+ * Drop a control the finished page cannot honour.
+ *
+ * The shell model is asked for markup only — every script on the page is the
+ * ORIGINAL site's, carried over byte for byte — so a control it invents has no
+ * handler and never will. One run shipped a "ניגודיות" button in the header
+ * that did nothing at all when clicked, next to nav links that worked. A button
+ * A button is kept whenever anything could plausibly drive it: an inline
+ * handler, a form submit, a script that queries buttons by tag, or a script
+ * naming its id, one of its classes, a data-attribute, or its aria-controls
+ * target. Only what nothing at all can reach is removed.
+ */
+export function stripDeadControls(
+  html: string,
+  scriptText: string,
+): { html: string; removed: string[] } {
+  const removed: string[] = [];
+  // A script that reaches for buttons by tag rather than by hook could own any
+  // of them, so none may be removed. Only a real query counts: an original
+  // script doing document.createElement("button") mentions the word too, and
+  // treating that as ownership keeps every dead control on the page.
+  const genericSelector =
+    /(?:querySelector(?:All)?|closest|matches)\s*\([^)]*\bbutton\b/i.test(scriptText) ||
+    /getElementsByTagName\s*\(\s*["'`]button/i.test(scriptText);
+  const out = html.replace(/<button\b([^>]*)>([\s\S]*?)<\/button>/gi, (whole, attrs, inner) => {
+    if (genericSelector) return whole;
+    if (/\son[a-z]+\s*=/i.test(attrs)) return whole;
+    if (/\btype\s*=\s*["']?submit/i.test(attrs)) return whole;
+    // A bare <button> inside a form is a submit button by default.
+    if (!/\btype\s*=/i.test(attrs) && /<form\b/i.test(html)) return whole;
+    const hooks: string[] = [];
+    const id = attrs.match(/\bid\s*=\s*(?:"([^"]*)"|'([^']*)')/);
+    if (id) hooks.push(id[1] ?? id[2]);
+    const controls = attrs.match(/\baria-controls\s*=\s*(?:"([^"]*)"|'([^']*)')/);
+    if (controls) hooks.push(controls[1] ?? controls[2]);
+    const cls = attrs.match(/\bclass\s*=\s*(?:"([^"]*)"|'([^']*)')/);
+    if (cls) hooks.push(...(cls[1] ?? cls[2] ?? "").split(/\s+/));
+    for (const m of attrs.matchAll(/\b(data-[\w-]+)/g)) hooks.push(m[1]);
+    if (hooks.some((h) => referencedInScript(h, scriptText))) return whole;
+    const label = attrs.match(/\baria-label\s*=\s*(?:"([^"]*)"|'([^']*)')/);
+    removed.push(
+      stripTags(inner).trim() || (label ? (label[1] ?? label[2]) : "") ||
+        (id ? `#${id[1] ?? id[2]}` : "button"),
+    );
+    return "";
+  });
+  return { html: out, removed };
+}
+
+/**
+ * Does a script name this hook as a whole token?
+ *
+ * A substring test is not good enough: a header button classed "btn" would be
+ * kept alive by any script that happens to contain ".ans-btn", which is how a
+ * dead control survives a check that looks like it ran.
+ */
+function referencedInScript(hook: string, scriptText: string): boolean {
+  if (!hook || hook.length < 2) return false;
+  return new RegExp(`(^|[^\\w-])${escapeRegExp(hook)}($|[^\\w-])`).test(scriptText);
+}
+
+/**
+ * Make a built section answer to the id the ledger assigned it.
+ *
+ * The builder is free to invent one, and it does: a run planned a section as
+ * "בקצרה-מהאלמנך" and got back <section id="section-2">. Leaving that alone
+ * loses the only id anything else links to, so the ledger's id wins and the
+ * displaced one is renamed everywhere the section's own CSS referred to it —
+ * the id is overwritten, not the styling that hung off it.
+ *
+ * A fragment whose root is a <div> or <article> rather than a <section> gets
+ * the id all the same; an anchor target does not care about the tag name.
+ */
+export function applySectionId(
+  html: string,
+  css: string,
+  id: string,
+): { html: string; css: string } {
+  const lead = html.match(/^\s*/)?.[0] ?? "";
+  const open = html.slice(lead.length).match(/^<([a-z][\w-]*)\b([^>]*)>/i);
+  if (!open) return { html, css };
+
+  const attrs = open[2];
+  const existing = attrs.match(/\bid\s*=\s*(?:"([^"]*)"|'([^']*)')/);
+  const current = existing ? (existing[1] ?? existing[2] ?? "").trim() : "";
+  if (current === id) return { html, css };
+
+  const newAttrs = existing
+    ? attrs.replace(/\bid\s*=\s*(?:"[^"]*"|'[^']*')/, `id="${escapeHtml(id)}"`)
+    : ` id="${escapeHtml(id)}"${attrs}`;
+  const rebuilt = lead + `<${open[1]}${newAttrs}>` + html.slice(lead.length + open[0].length);
+  return { html: rebuilt, css: current ? renameCssId(css, current, id) : css };
+}
+
+/** Repoint `#old` selectors at the id the section ended up with. */
+function renameCssId(css: string, from: string, to: string): string {
+  if (!css || !from) return css;
+  return css.replace(
+    new RegExp(`#${escapeRegExp(from)}(?![\w-])`, "g"),
+    `#${to}`,
   );
 }
 
-/** Ensure a built section's outer element carries the id the ledger assigned. */
-export function ensureSectionId(html: string, id: string): string {
-  const openTag = html.match(/<section\b[^>]*>/i);
-  if (!openTag) return html;
-  if (/\bid=/.test(openTag[0])) return html; // model already set one; leave it
-  return html.replace(/<section\b/i, `<section id="${escapeHtml(id)}"`);
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 // A CSS-ident-safe wrapper id for a widget: ascii only, so the scoped selector

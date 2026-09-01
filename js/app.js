@@ -92,6 +92,8 @@
     warnContentLoss: "שימו לב: התוצאה יצאה חסרה לעומת האתר המקורי. האתר מוכן להורדה, אבל כדאי לבדוק לפני שמעלים אותו.",
     warnDesignThin: "שימו לב: האתר יצא נקי אבל חיוור מהמקורי — הוסרו הסימנים, ואיתם חלק מהעיצוב. אפשר להוריד כמו שהוא, או לבנות שוב ולקבל תוצאה עשירה יותר.",
     warnCssRepaired: "שימו לב: העיצוב חזר מהבנאי עם CSS שבור. סגרנו אותו אוטומטית כדי שהעמוד לא יאבד את שאר הכללים, אבל כדאי להסתכל על התוצאה לפני שמעלים אותה.",
+    warnNavUnresolved: "שימו לב: לכמה קישורים בתפריט לא נמצא סקשן מתאים בעמוד. הפנינו אותם לראש התוכן כדי שלא יישברו, אבל כדאי לבדוק לאן הם אמורים להוביל.",
+    warnDeadControls: "הסרנו כפתורים שהבנאי הוסיף ואף סקריפט בעמוד לא יכול להפעיל — כפתור שלא עושה כלום בלחיצה גרוע יותר מכפתור שלא קיים.",
     warnHeading: "מה מצאנו בתוצאה"
   } : {
     hi: "Hi, ",
@@ -164,6 +166,8 @@
     warnContentLoss: "Heads up: the result came back missing content the original had. The site is ready to download, but check it before you publish.",
     warnDesignThin: "Heads up: the site came back clean but paler than the original — the AI tells are gone, and some of the design went with them. Download it as is, or build again for a richer result.",
     warnCssRepaired: "Heads up: the builder returned broken CSS. We closed it automatically so the rest of the page kept its styling, but look the result over before you publish it.",
+    warnNavUnresolved: "Heads up: a few nav links had no matching section on the page. We pointed them at the top of the content so they are not broken, but check where they were meant to lead.",
+    warnDeadControls: "We removed buttons the builder added that no script on the page could drive — a button that does nothing when pressed is worse than one that is not there.",
     warnHeading: "What we found in the result"
   };
 
@@ -1267,7 +1271,9 @@
       var kinds = {
         content_loss: "התוצאה יצאה חסרה לעומת המקור",
         design_thin: "התוצאה יצאה חיוורת מהמקור",
-        css_repaired: "ה-CSS חזר שבור ותוקן אוטומטית"
+        css_repaired: "ה-CSS חזר שבור ותוקן אוטומטית",
+        nav_unresolved: "כמה קישורים בתפריט לא מצאו סקשן והופנו לראש התוכן",
+        dead_controls_removed: "הסרנו כפתורים שאף סקריפט לא יכול להפעיל"
       };
       var what = (list || []).map(function (w) { return "· " + (kinds[w.kind] || w.kind); }).join("\n");
       return "מצאנו את זה בתוצאה של הבנייה:\n" + what +
@@ -1370,7 +1376,9 @@
       var kinds = {
         content_loss: "the result came back missing content the original had",
         design_thin: "the result came back paler than the original",
-        css_repaired: "the CSS came back broken and was repaired automatically"
+        css_repaired: "the CSS came back broken and was repaired automatically",
+        nav_unresolved: "some nav links found no section and now point at the top of the content",
+        dead_controls_removed: "we removed buttons no script could drive"
       };
       var what = (list || []).map(function (w) { return "- " + (kinds[w.kind] || w.kind); }).join("\n");
       return "Here is what we found in the build:\n" + what +
@@ -1905,7 +1913,9 @@
     var text = {
       content_loss: T.warnContentLoss,
       design_thin: T.warnDesignThin,
-      css_repaired: T.warnCssRepaired
+      css_repaired: T.warnCssRepaired,
+      nav_unresolved: T.warnNavUnresolved,
+      dead_controls_removed: T.warnDeadControls
     };
     el.hidden = false;
     el.innerHTML =
