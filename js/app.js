@@ -317,7 +317,7 @@
       showUser();
       return refreshGithubStatus();
     }).then(function () {
-      if (user) { wireInputs(); loadHistory(); }
+      if (user) { wireInputs(); loadHistory(); Wallet.load(sb, user); }
     }).catch(function () {
       if (DEV_NO_AUTH) return;
       window.location.replace(HOME);
@@ -391,7 +391,6 @@
     wireFiles();
     wireUrl();
     wireGithubRow();
-    wireDialogs();
   }
 
   /* The GitHub row never disappears — only its button changes, so the
@@ -2354,6 +2353,10 @@
   function fmtDate(iso) { try { return new Date(iso).toISOString().slice(0, 10); } catch (e) { return ""; } }
 
   function wireStatic() {
+    /* Dialogs are wired here rather than after sign-in: a sheet a visitor
+       can open must be a sheet they can close, whatever the session is
+       doing at that moment. */
+    wireDialogs();
     if (els["report-back"]) els["report-back"].addEventListener("click", backToInput);
     // Primary flow is now the whole-file redesign (TransformDesigner). The old
     // propose→apply patch handlers stay defined but are no longer wired.

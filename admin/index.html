@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Token admin — תשנה</title>
+  <meta name="robots" content="noindex" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700;9..144,800&family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/styles.css" />
+  <link rel="stylesheet" href="/css/app.css?v=8" />
+</head>
+<body>
+  <a class="skip-link" href="#admin-main">Skip to content</a>
+
+  <header class="app-header">
+    <div class="shell">
+      <div class="header-lead">
+        <a class="wordmark" href="/">
+          <span lang="he" dir="rtl">תשנה<span class="mark-dot">.</span></span>
+          <small>TESHANE</small>
+        </a>
+        <span class="wallet">
+          <span class="wallet-balance" aria-live="polite">
+            <svg class="wallet-icon" width="15" height="15" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.4" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="8" cy="8" r="2.3" fill="currentColor"/></svg>
+            <span class="wallet-n" data-wallet-n>&mdash;</span>
+            <span class="wallet-unit">tokens left</span>
+          </span>
+        </span>
+      </div>
+      <div class="app-header-actions">
+        <a class="app-back" href="/app/"><span class="back-arrow" aria-hidden="true">←</span> Back to the dashboard</a>
+        <span class="app-user" id="app-user"></span>
+        <button type="button" class="btn btn-quiet btn-sm" id="signout">Sign out</button>
+        <a class="small" href="/he/admin/" lang="he" dir="rtl">עברית</a>
+      </div>
+    </div>
+  </header>
+
+  <main class="app-main" id="admin-main">
+    <div class="admin">
+
+      <div class="store-head">
+        <h1>Token admin</h1>
+        <p class="store-lead">Change an account's token balance by hand. Type the number the balance should be — not the difference — and save. Every change is written to a ledger with who made it, when, and what the balance was before.</p>
+      </div>
+
+      <p class="admin-note" id="admin-note" role="status" aria-live="polite"></p>
+
+      <div class="admin-tabs" role="tablist">
+        <button type="button" class="admin-tab is-on" role="tab" aria-selected="true" data-panel="panel-wallets">Balances</button>
+        <button type="button" class="admin-tab" role="tab" aria-selected="false" data-panel="panel-customers">Customers</button>
+        <button type="button" class="admin-tab" role="tab" aria-selected="false" data-panel="panel-runs">Runs</button>
+      </div>
+
+      <section class="admin-panel" id="panel-wallets">
+      <div class="admin-tools" id="admin-tools" hidden>
+        <label class="admin-search-label" for="admin-search">Search by email address</label>
+        <input type="search" class="sheet-search" id="admin-search" dir="ltr"
+               placeholder="name@example.com" autocomplete="off" />
+        <p class="sheet-count" id="admin-count" aria-live="polite"></p>
+      </div>
+
+      <ul class="wallet-list" id="wallet-list"></ul>
+      <p class="admin-empty" id="admin-empty" hidden></p>
+      </section>
+
+      <section class="admin-panel" id="panel-customers" hidden>
+        <div class="tablewrap"><table class="dtable" id="customers-table"></table></div>
+      </section>
+
+      <section class="admin-panel" id="panel-runs" hidden>
+        <div class="tablewrap"><table class="dtable" id="runs-table"></table></div>
+      </section>
+
+    </div>
+  </main>
+
+  <script src="/js/wallet.js" defer></script>
+  <script src="/js/admin.js" defer></script>
+</body>
+</html>

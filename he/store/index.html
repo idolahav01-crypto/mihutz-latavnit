@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>קניית טוקנים — תשנה</title>
+  <meta name="robots" content="noindex" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700;9..144,800&family=Frank+Ruhl+Libre:wght@500;700;800;900&family=Rubik:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/styles.css" />
+  <link rel="stylesheet" href="/css/app.css?v=8" />
+</head>
+<body>
+  <a class="skip-link" href="#store-main">דלג לתוכן העמוד</a>
+
+  <header class="app-header">
+    <div class="shell">
+      <div class="header-lead">
+        <a class="wordmark" href="/he/">
+          <span>תשנה<span class="mark-dot">.</span></span>
+          <small dir="ltr">TESHANE</small>
+        </a>
+        <span class="wallet">
+          <span class="wallet-balance" aria-live="polite">
+            <svg class="wallet-icon" width="15" height="15" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.4" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="8" cy="8" r="2.3" fill="currentColor"/></svg>
+            <span class="wallet-n" data-wallet-n>&mdash;</span>
+            <span class="wallet-unit">טוקנים נותרו</span>
+          </span>
+        </span>
+      </div>
+      <div class="app-header-actions">
+        <a class="app-back" href="/he/app/"><span class="back-arrow" aria-hidden="true">←</span> חזרה לדשבורד</a>
+        <span class="app-user" id="app-user"></span>
+        <button type="button" class="btn btn-quiet btn-sm" id="signout">התנתקות</button>
+        <a class="small" href="/store/" lang="en" dir="ltr">English</a>
+      </div>
+    </div>
+  </header>
+
+  <main class="app-main" id="store-main">
+    <div class="store">
+
+      <div class="store-head">
+        <h1>קניית טוקנים</h1>
+        <p class="store-lead">טוקן אחד הוא אותו טוקן בכל חבילה. ככל שהחבילה גדולה יותר, כל טוקן עולה פחות — והמחיר לטוקן רשום על כל שורה, כך שאין כאן מה לחשב.</p>
+      </div>
+
+      <div class="store-balance">
+        <p class="store-balance-label">היתרה שלכם עכשיו</p>
+        <p class="store-balance-value">
+          <span class="store-balance-n" data-wallet-n>&mdash;</span>
+          <span class="store-balance-unit">טוקנים</span>
+        </p>
+      </div>
+
+      <ul class="pack-list" id="pack-list"></ul>
+      <div class="custom">
+        <div class="custom-head">
+          <h2>כמות משלכם</h2>
+          <p>אין חבילה בגודל הנכון? הקלידו כמה טוקנים אתם רוצים. כל כמות נגבית לפי מחיר הבסיס &mdash; ההנחות שייכות לחבילות שלמעלה, ואם תקלידו אחד מהמספרים שלהן תקבלו את המחיר שלה בכל מקרה.</p>
+        </div>
+        <div class="custom-row">
+          <label class="custom-field">
+            <span class="custom-label" id="custom-label">כמה טוקנים</span>
+            <input type="number" id="custom-qty" min="1" step="1" value="15"
+                   inputmode="numeric" autocomplete="off" aria-describedby="custom-note" />
+          </label>
+          <span class="custom-total">
+            <span class="custom-total-label">לתשלום</span>
+            <span class="custom-price ltr" id="custom-price">&mdash;</span>
+          </span>
+          <button type="button" class="btn btn-quiet" id="custom-buy">רכישה</button>
+        </div>
+        <p class="custom-note" id="custom-note" aria-live="polite"></p>
+      </div>
+
+      <p class="store-status" id="store-status" role="status" aria-live="polite"></p>
+
+    </div>
+  </main>
+
+  <script src="/js/wallet.js" defer></script>
+  <script src="/js/store.js" defer></script>
+</body>
+</html>
