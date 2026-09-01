@@ -1,7 +1,9 @@
 import { assert, assertEquals, assertFalse, assertStringIncludes } from "jsr:@std/assert@1";
 import {
+  applyNavPlan,
   applySectionId,
   collectIds,
+  NAV_SLOT,
   isWidgetSection,
   missingSectionFacts,
   fixAnchors,
@@ -102,6 +104,45 @@ Deno.test("stripSkipLinks removes a duplicate skip link", () => {
   assertEquals(stripSkipLinks(h), "<header>x</header>");
 });
 
+Deno.test("applyNavPlan writes the nav from the plan, so no href can be wrong", () => {
+  const header = `<header><a class="brand" href="#hero">ארסנל</a><nav>${NAV_SLOT}</nav></header>`;
+  const plan = [
+    { section_id: "היסטוריה", label: "היסטוריה" },
+    { section_id: "שחקנים-בולטים", label: "הסגל" },
+    { section_id: "אין-כזה", label: "חידון" }, // names a section that is not here
+  ];
+  const ids = new Set(["hero", "היסטוריה", "שחקנים-בולטים", "main"]);
+  const { html, dropped, slotUsed } = applyNavPlan(header, plan, ids);
+  assert(slotUsed);
+  assertStringIncludes(html, `<a class="nav-link" href="#היסטוריה">היסטוריה</a>`);
+  assertStringIncludes(html, `<a class="nav-link" href="#שחקנים-בולטים">הסגל</a>`);
+  assertFalse(html.includes("אין-כזה"), "a section that is not on the page never gets a link");
+  assertEquals(dropped, ["חידון"]);
+});
+
+Deno.test("applyNavPlan repoints the model's own links when it ignored the slot", () => {
+  const header = `<header><nav><a href="#squad">הסגל</a><a href="#hist">היסטוריה</a></nav></header>`;
+  const plan = [
+    { section_id: "שחקנים-בולטים", label: "הסגל" },
+    { section_id: "היסטוריה", label: "היסטוריה" },
+  ];
+  const { html, slotUsed } = applyNavPlan(header, plan, new Set(["שחקנים-בולטים", "היסטוריה"]));
+  assertFalse(slotUsed);
+  assertStringIncludes(html, `href="#שחקנים-בולטים">הסגל</a>`);
+  assertStringIncludes(html, `href="#היסטוריה">היסטוריה</a>`);
+});
+
+Deno.test("applyNavPlan drops a duplicate section rather than linking it twice", () => {
+  const header = `<header><nav>${NAV_SLOT}</nav></header>`;
+  const plan = [
+    { section_id: "היסטוריה", label: "היסטוריה" },
+    { section_id: "היסטוריה", label: "העבר" },
+  ];
+  const { html, dropped } = applyNavPlan(header, plan, new Set(["היסטוריה"]));
+  assertEquals((html.match(/nav-link/g) ?? []).length, 1);
+  assertEquals(dropped, ["העבר"]);
+});
+
 Deno.test("fixAnchors remaps unknown targets and keeps valid ones", () => {
   const sections = [{ id: "squad", heading: "שחקנים" }, { id: "history", heading: "היסטוריה" }];
   const nav = `<a href="#squad">סגל</a><a href="#players">שחקנים</a><a href="#gone">אין</a><a href="#main">ראש</a>`;
@@ -198,11 +239,16 @@ Deno.test("stripDeadControls keeps every button something could drive", () => {
 });
 
 Deno.test("stripDeadControls keeps everything when a script queries buttons by tag", () => {
-  const { removed } = stripDeadControls(
-    `<button class="x">א</button>`,
-    `document.querySelectorAll(".panel button").forEach(b => b.onclick = go);`,
-  );
-  assertEquals(removed, []);
+  for (
+    const script of [
+      `document.querySelectorAll(".panel button").forEach(b => b.onclick = go);`,
+      `box.addEventListener("click", e => { if (e.target.tagName === "BUTTON") go(); });`,
+      `if (e.target instanceof HTMLButtonElement) go();`,
+      `document.getElementsByTagName("button")[0].click();`,
+    ]
+  ) {
+    assertEquals(stripDeadControls(`<button class="x">א</button>`, script).removed, [], script);
+  }
 });
 
 Deno.test("applySectionId forces the ledger id over one the builder invented", () => {

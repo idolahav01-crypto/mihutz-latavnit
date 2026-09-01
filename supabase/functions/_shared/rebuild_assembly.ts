@@ -312,6 +312,72 @@ function decodeTarget(t: string): string {
   }
 }
 
+export interface NavItem {
+  section_id: string;
+  label: string;
+}
+
+/** Where the shell is told to leave room for the nav we generate. */
+export const NAV_SLOT = "{{NAV}}";
+
+/**
+ * Put the nav into the header without ever letting the model write an href.
+ *
+ * Repairing a broken link after the fact can only ever be a guess. The links
+ * themselves are not a design decision — they are the section list, which is
+ * known before the shell is asked for anything — so the model picks WHICH
+ * sections and what to call them, from an enum of ids that exist, and the
+ * markup is generated here. A link to a section that is not on the page stops
+ * being something to detect and becomes something that cannot be written.
+ *
+ * Two ways in, in order of trust:
+ *   1. The header carries the NAV_SLOT token: the generated links replace it.
+ *   2. It does not, and wrote its own links: each one whose text matches a
+ *      planned label is repointed at that label's id. Exact text, no guessing.
+ *
+ * Whatever neither path resolves is left to fixAnchors, which is the floor
+ * rather than the mechanism.
+ */
+export function applyNavPlan(
+  headerHtml: string,
+  nav: NavItem[] | undefined,
+  existingIds: Set<string>,
+): { html: string; dropped: string[]; slotUsed: boolean } {
+  const dropped: string[] = [];
+  const planned: NavItem[] = [];
+  const seen = new Set<string>();
+  for (const item of nav ?? []) {
+    const id = (item?.section_id ?? "").trim();
+    const label = (item?.label ?? "").trim();
+    if (!id || !label || !existingIds.has(id) || seen.has(id)) {
+      if (id || label) dropped.push(label || id);
+      continue;
+    }
+    seen.add(id);
+    planned.push({ section_id: id, label });
+  }
+
+  if (headerHtml.includes(NAV_SLOT)) {
+    const links = planned
+      .map((i) => `<a class="nav-link" href="#${escapeHtml(i.section_id)}">${escapeHtml(i.label)}</a>`)
+      .join("");
+    return { html: headerHtml.split(NAV_SLOT).join(links), dropped, slotUsed: true };
+  }
+
+  // No slot: the model wrote the nav itself. Its labels came from the same plan,
+  // so matching them by text is exact rather than approximate.
+  const byLabel = new Map(planned.map((i) => [normalizeLabel(i.label), i.section_id]));
+  const html = headerHtml.replace(
+    /(<a\b[^>]*\bhref=)(["'])#([^"']*)\2([^>]*>)([\s\S]*?)(<\/a>)/gi,
+    (whole, pre, q, target, post, text, close) => {
+      const id = byLabel.get(normalizeLabel(stripTags(text)));
+      if (!id || id === target) return whole;
+      return `${pre}${q}#${id}${q}${post}${text}${close}`;
+    },
+  );
+  return { html, dropped, slotUsed: false };
+}
+
 /**
  * Point a page's in-page anchors at the page that actually holds those sections.
  *
@@ -355,7 +421,10 @@ export function stripDeadControls(
   // treating that as ownership keeps every dead control on the page.
   const genericSelector =
     /(?:querySelector(?:All)?|closest|matches)\s*\([^)]*\bbutton\b/i.test(scriptText) ||
-    /getElementsByTagName\s*\(\s*["'`]button/i.test(scriptText);
+    /getElementsByTagName\s*\(\s*["'`]button/i.test(scriptText) ||
+    // Delegation: a listener on a container that decides by element type.
+    /(?:tagName|nodeName)\s*[!=]==?\s*["'`]button/i.test(scriptText) ||
+    /instanceof\s+HTMLButtonElement/.test(scriptText);
   const out = html.replace(/<button\b([^>]*)>([\s\S]*?)<\/button>/gi, (whole, attrs, inner) => {
     if (genericSelector) return whole;
     if (/\son[a-z]+\s*=/i.test(attrs)) return whole;

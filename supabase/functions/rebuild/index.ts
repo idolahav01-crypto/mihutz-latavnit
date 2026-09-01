@@ -41,11 +41,14 @@ import { constraintsBlock, designSchema } from "../_shared/design_brief.ts";
 import { assertModelPriced, meteredClaude } from "../_shared/usage.ts";
 import { buildLedger } from "../_shared/ledger.ts";
 import {
+  applyNavPlan,
   applySectionId,
   collectIds,
   fixAnchors,
   isWidgetSection,
   missingSectionFacts,
+  NAV_SLOT,
+  type NavItem,
   renderContentSection,
   renderWidgetSection,
   rootId,
@@ -162,6 +165,8 @@ interface Shell {
   tokens_css: string;
   header_html: string;
   footer_html: string;
+  /** Which sections the nav links to, and what it calls them. Never hrefs. */
+  nav?: NavItem[];
 }
 interface BuiltSection {
   index: number;
@@ -199,7 +204,8 @@ const SHELL_SYSTEM =
 Return:
 - head_extras: the <link> tags that load the chosen fonts (Google Fonts is fine). For Hebrew, use Hebrew-capable fonts (Heebo, Assistant, Rubik, Frank Ruhl Libre, Noto Sans Hebrew).
 - tokens_css: a real design system as CSS — :root custom properties for the brand palette, type scale, spacing rhythm, radii and shadows; sensible base element styles (body font/line-height/color, headings, links, img{max-width:100%}); and reusable component classes the sections will use (.container, .btn / .btn-primary, .section, etc.). Do NOT define an .eyebrow class or any other "small label above every heading" helper — offering one makes every section reach for it, and a kicker on every section is itself an AI tell. Body font-weight >= 500, headings >= 700. Respect dir (logical properties for RTL).
-- header_html: the site header/nav markup (logo text = site name). Use the token classes. Every nav link must be one of the anchors listed in <page_anchors>, written EXACTLY as given — copy the "#id" and label it in the section's own wording. Do not invent an anchor, do not re-slug one, and do not link to a section that is not on the list: an anchor that does not exist scrolls nowhere and reads as a broken site. Link to fewer sections rather than to one that is not there.
+- nav: which sections the header links to, in order, as {section_id, label}. section_id must come from <page_anchors>; label is your short wording for it (the heading trimmed to a nav label — "האצטדיון", not "אצטדיון האמירויות — בית התותחנים"). Pick the 4–6 sections a visitor actually navigates by; skip the hero and anything a link would not help with.
+- header_html: the site header markup — logo (text = site name), layout, everything except the nav links themselves. Put the exact token {{NAV}} where the links belong; it is replaced with <a class="nav-link" href="#id">label</a> for each nav entry, in order, so style .nav-link and its container in tokens_css. Do NOT write the nav links yourself and do NOT write any href="#..." — you cannot know the ids, and a link to a section that is not on the page reads as a broken site.
 - footer_html: a real footer built from the site's real facts. EVERY fact given to you that belongs in a footer MUST appear: company number, physical address, opening hours, phone, email, and the legal pages (terms, cancellation, privacy, accessibility statement) with the exact href each one already uses. Israeli law requires several of these and the audit checks for them, so dropping one makes the site worse than it was. Invent nothing: if a fact was not given, omit it rather than filling in a placeholder.
 
 NO CONTROL THAT NEEDS JAVASCRIPT. You emit markup only; every script on the finished page is the original site's, carried over untouched, and nothing will ever be wired to a control you invent. A contrast toggle, a dark-mode switch, a language switcher, a search box, a hamburger that hides the nav behind a click — each ships as a button that does nothing when a visitor presses it, which is worse than not offering it. The nav must work with JavaScript off: plain <a href="#id"> links, reachable at every screen size (wrap them, scroll them, shrink them — never collapse them behind a toggle). The only button-looking things allowed are <a> links styled as buttons.
@@ -274,17 +280,42 @@ Hard rules:
 Return ONLY valid JSON { "html": "...", "css": "..." } for this one section. No prose.`;
 
 // ================= SCHEMAS =================
-const SHELL_SCHEMA = {
-  type: "object",
-  additionalProperties: false,
-  properties: {
-    head_extras: { type: "string" },
-    tokens_css: { type: "string" },
-    header_html: { type: "string" },
-    footer_html: { type: "string" },
-  },
-  required: ["tokens_css", "header_html", "footer_html"],
-};
+/**
+ * The shell's schema, with the nav constrained to sections that exist.
+ *
+ * section_id is an enum of the real ids rather than a free string, so the one
+ * thing that kept breaking — a link to a section that is not on the page —
+ * cannot be expressed in a valid response. The model still decides which
+ * sections belong in the nav and what to call them; it never writes an href.
+ *
+ * The schema travels in output_config, not in the cached system prompt, so
+ * making it depend on the run costs no cache hit.
+ */
+function shellSchema(sectionIds: string[]) {
+  return {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      head_extras: { type: "string" },
+      tokens_css: { type: "string" },
+      header_html: { type: "string" },
+      footer_html: { type: "string" },
+      nav: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            section_id: { type: "string", enum: sectionIds },
+            label: { type: "string" },
+          },
+          required: ["section_id", "label"],
+        },
+      },
+    },
+    required: ["tokens_css", "header_html", "footer_html", "nav"],
+  };
+}
 
 const SECTION_BUILD_SCHEMA = {
   type: "object",
@@ -433,6 +464,8 @@ interface Assembled {
   html: string;
   /** The chrome as it actually shipped: controls stripped, anchors resolved. */
   chrome: { header: string; footer: string };
+  /** Nav entries naming a section that is not on the page. Should be empty. */
+  navDropped: string[];
   /** Nav/footer links no section answered; they now point at #main. */
   navFallbacks: string[];
   /** Controls the shell invented that nothing on the page could drive. */
@@ -466,7 +499,19 @@ function assemble(spec: Spec, shell: Shell, sections: BuiltSection[], scripts: s
   // page's single canonical one. Then remove any control it invented that no
   // carried script can drive, before its dead click reaches a visitor.
   const scriptText = scripts.join("\n");
-  const headerClean = stripDeadControls(stripSkipLinks(shell.header_html || ""), scriptText);
+
+  // The nav is generated from the plan, not parsed out of the model's markup.
+  // If the model returned no usable plan, the sections themselves are the plan:
+  // a nav built from real ids and real headings is never wrong, only plainer.
+  const navPlan: NavItem[] = shell.nav?.length
+    ? shell.nav
+    : anchorTargets
+      .filter((t) => t.heading && t.id !== anchorTargets[0]?.id)
+      .slice(0, 6)
+      .map((t) => ({ section_id: t.id, label: t.heading as string }));
+  const navved = applyNavPlan(stripSkipLinks(shell.header_html || ""), navPlan, existingIds);
+
+  const headerClean = stripDeadControls(navved.html, scriptText);
   const footerClean = stripDeadControls(shell.footer_html || "", scriptText);
   const headerFixed = fixAnchors(headerClean.html, anchorTargets, existingIds);
   const footerFixed = fixAnchors(footerClean.html, anchorTargets, existingIds);
@@ -509,6 +554,7 @@ ${scriptBlock}</body>
   return {
     html,
     chrome: { header, footer },
+    navDropped: navved.dropped,
     navFallbacks: [...headerFixed.fallbacks, ...footerFixed.fallbacks, ...bodyFixed.fallbacks],
     deadControls: [
       ...headerClean.removed,
@@ -778,7 +824,10 @@ Deno.serve(async (req) => {
 
       const res = await meteredClaude({ admin, scanId, startedAt, stage: "rebuild_shell" }, {
         apiKey, model: MODEL, effort: "high", maxTokens: 12000, stream: true,
-        system: SHELL_SYSTEM + NEVER_INTRODUCE, schema: SHELL_SCHEMA, userContent, timeoutMs: 135_000,
+        system: SHELL_SYSTEM + NEVER_INTRODUCE,
+        schema: shellSchema(spec.sections.map((sec) => sec.id)),
+        userContent,
+        timeoutMs: 135_000,
       });
 
       const shell = (res.json ?? {}) as Shell;
@@ -897,7 +946,8 @@ Deno.serve(async (req) => {
     let deliveryWarnings: Array<{ kind: string; detail: string; items: unknown }> = [];
     if (done) {
       // Every section built — assemble the final self-contained document.
-      const { html: assembled, chrome, navFallbacks, deadControls: pageDeadControls } = assemble(
+      const { html: assembled, chrome, navDropped, navFallbacks, deadControls: pageDeadControls } =
+        assemble(
         spec, shell, merged, scripts, siteUrl,
       );
 
@@ -1026,11 +1076,16 @@ Deno.serve(async (req) => {
         // A link that scrolls nowhere and a button that does nothing are the
         // two failures a screenshot cannot show. Both are repaired above; both
         // are reported here so a run cannot look clean while shipping them.
-        ...(navFallbacks.length
+        ...(navFallbacks.length || navDropped.length
           ? [{
             kind: "nav_unresolved",
-            detail: `links with no matching section, now pointing at #main: ${navFallbacks.join(", ")}`,
-            items: navFallbacks,
+            detail: [
+              navDropped.length ? `nav entries dropped (no such section): ${navDropped.join(", ")}` : "",
+              navFallbacks.length
+                ? `links with no matching section, now pointing at #main: ${navFallbacks.join(", ")}`
+                : "",
+            ].filter(Boolean).join("; "),
+            items: { dropped: navDropped, fallbacks: navFallbacks },
           }]
           : []),
         ...(pageDeadControls.length
