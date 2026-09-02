@@ -16,6 +16,12 @@ const MAX_BUNDLE_BYTES = 300_000; // cap code sent to detect (context + cost)
 const MAX_FILE_BYTES = 60_000; // skip single huge files
 // How much we are willing to hold before choosing what fits in the cap above.
 const MAX_READ_BYTES = 3 * MAX_BUNDLE_BYTES;
+// The site's own media, kept so the ZIP download is a project that renders
+// rather than a page pointing at pictures nobody shipped. Never bundled, never
+// read by any stage, never sent to the model — stored so it can be handed back.
+const ASSET_FILE = /\.(png|jpe?g|gif|webp|avif|svg|ico|bmp|woff2?|ttf|otf|eot)$/i;
+const MAX_ASSET_BYTES = 20 * 1024 * 1024; // whole, for a photo-heavy small site
+const MAX_ONE_ASSET_BYTES = 4 * 1024 * 1024;
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
@@ -99,7 +105,9 @@ Deno.serve(async (req) => {
     // the page the audit exists to read. Collecting first costs a bounded
     // amount of memory and lets the website go in ahead of the plumbing.
     const collected: Array<[string, string]> = [];
+    const assets: Array<[string, ArrayBuffer]> = [];
     let read = 0;
+    let assetBytes = 0;
     const decoder = new TextDecoder();
 
     for await (const entry of entries) {
@@ -108,7 +116,22 @@ Deno.serve(async (req) => {
       // path in the ZIP the user unpacks and in the pull request we open.
       const rel = safeRelPath(entry.path.replace(/^[^/]+\//, ""));
       if (!entry.readable) continue;
-      if (!rel || entry.path.endsWith("/") || !keepPath(rel)) {
+      if (!rel || entry.path.endsWith("/")) {
+        await entry.readable.cancel();
+        continue;
+      }
+      // A picture the pages will point at. Taken before keepPath, which drops
+      // binaries from the BUNDLE for good reasons that have nothing to do with
+      // whether the user gets their project back.
+      if (!keepPath(rel)) {
+        if (ASSET_FILE.test(rel) && assetBytes < MAX_ASSET_BYTES) {
+          const bin = await new Response(entry.readable).arrayBuffer();
+          if (bin.byteLength <= MAX_ONE_ASSET_BYTES) {
+            assetBytes += bin.byteLength;
+            assets.push([rel, bin]);
+          }
+          continue;
+        }
         await entry.readable.cancel();
         continue;
       }
@@ -142,6 +165,26 @@ Deno.serve(async (req) => {
     // Files, but no website among them — a docs repo, a dataset, a config-only
     // repo. Stop here rather than pay a model pass to discover it.
     if (siteFiles === 0) throw new Error("no_site_code");
+
+    // Stored beside the bundle under their own prefix, with a manifest, in the
+    // same shape the browser upload path writes — one reader serves both.
+    if (assets.length) {
+      const kept: string[] = [];
+      for (const [rel, bytes] of assets) {
+        const { error } = await admin.storage.from("scans")
+          .upload(`${user.id}/${scanId}/assets/${rel}`, new Blob([bytes]), { upsert: true });
+        // Best-effort throughout: a picture that fails to store must not fail
+        // the scan. It costs the user a missing image, not a lost run.
+        if (!error) kept.push(rel);
+      }
+      if (kept.length) {
+        await admin.storage.from("scans").upload(
+          `${user.id}/${scanId}/assets.json`,
+          new Blob([JSON.stringify(kept)], { type: "application/json" }),
+          { upsert: true, contentType: "application/json" },
+        );
+      }
+    }
 
     const bundlePath = `${user.id}/${scanId}/bundle.txt`;
     const { error: upErr } = await admin.storage

@@ -289,6 +289,7 @@
   var carryThrough = [];   /* [{ path, data }] — data is a Blob or Uint8Array */
   var carryBytes = 0;
   var carrySkipped = 0;    /* assets the budget could not hold — reported, not hidden */
+  var assetsStored = null; /* the in-flight upload of those assets to Storage */
 
   /* True for a file we filtered out of the bundle but owe back to the user.
      Deliberately narrow: not .git internals, not macOS sidecars, not
@@ -624,6 +625,13 @@
       return createScan("zip", ref).then(function (id) {
         scanId = id;
         return uploadBundle(scanId, bundle);
+      }).then(function () {
+        /* Deliberately not awaited: the pictures are needed at DOWNLOAD time,
+           which is minutes away, and making the user watch a 20MB upload before
+           the audit starts would be charging them attention for nothing. The
+           promise is kept so the download can wait on it if it somehow gets
+           there first. */
+        assetsStored = uploadAssets(scanId);
       });
     }).then(function () {
       return runDetect(scanId);
@@ -948,6 +956,73 @@
         if (r.error) throw r.error;
         return r.data.id;
       });
+  }
+
+  /* ===== the assets, kept somewhere they survive the tab =====
+     Carry-through holds the site's pictures in this browser and puts them back
+     into the ZIP at download time, which works perfectly until the user closes
+     the tab. Then it does not: they come back tomorrow, open the run from the
+     history, download it, and get a page referencing photographs that are not
+     in the folder — which is exactly what happened on the first real run of
+     the image work.
+
+     So the bytes go to Storage too, under their own prefix, alongside the
+     bundle. They are NOT part of the bundle and no stage reads them: detect
+     never sees them, the model never sees them, and nothing about the scan
+     changes. They are there so the project can be handed back whole later.
+
+     A manifest is written beside them because Storage lists one level at a
+     time and a site's assets are nested; the list is what the download reads
+     rather than crawling folders. */
+  function assetPath(scanId, rel) { return user.id + "/" + scanId + "/assets/" + rel; }
+
+  function uploadAssets(scanId) {
+    if (!carryThrough.length) return Promise.resolve(0);
+    var manifest = [];
+    var chain = Promise.resolve();
+    carryThrough.forEach(function (c) {
+      chain = chain.then(function () {
+        return sb.storage.from("scans")
+          .upload(assetPath(scanId, c.path), c.data, { upsert: true })
+          .then(function (r) { if (!r.error) manifest.push(c.path); })
+          /* Best-effort by design: a picture that fails to store must never
+             fail the scan the user is paying for. The in-memory copy still
+             serves this session, and the manifest simply will not list it. */
+          .catch(function () {});
+      });
+    });
+    return chain.then(function () {
+      if (!manifest.length) return 0;
+      return sb.storage.from("scans").upload(
+        user.id + "/" + scanId + "/assets.json",
+        new Blob([JSON.stringify(manifest)], { type: "application/json" }),
+        { upsert: true, contentType: "application/json" }
+      ).then(function () { return manifest.length; }).catch(function () { return 0; });
+    });
+  }
+
+  /* What the download needs that the bundle does not carry. Returns the same
+     shape as carryThrough so the two paths converge. */
+  function fetchStoredAssets(scanId) {
+    return sb.storage.from("scans").download(user.id + "/" + scanId + "/assets.json")
+      .then(function (r) {
+        if (r.error || !r.data) return [];
+        return r.data.text().then(function (t) { return JSON.parse(t); });
+      })
+      .then(function (paths) {
+        if (!paths || !paths.length) return [];
+        var out = [];
+        var chain = Promise.resolve();
+        paths.forEach(function (rel) {
+          chain = chain.then(function () {
+            return sb.storage.from("scans").download(assetPath(scanId, rel))
+              .then(function (r) { if (!r.error && r.data) out.push({ path: rel, data: r.data }); })
+              .catch(function () {});
+          });
+        });
+        return chain.then(function () { return out; });
+      })
+      .catch(function () { return []; });
   }
 
   function uploadBundle(scanId, text) {
@@ -1511,7 +1586,7 @@
      audit must remove all of them; see deleteScan. */
   var SCAN_ARTEFACTS = [
     "bundle.txt", "edited-bundle.txt", "features.json",
-    "spec.json", "shell.json", "rebuild-sections.json"
+    "spec.json", "shell.json", "rebuild-sections.json", "assets.json"
   ];
   function restoreDelivery(scan) {
     if (DELIVERABLE.indexOf(scan.pipeline_status) === -1) return;
@@ -2072,9 +2147,14 @@
     deliverSay(join(note, attempt === 1 ? P.zipBuilding : P.zipBroken));
     Promise.all([
       invokeFn("package", { scan_id: currentScanId }),
-      import(JSZIP_CDN)
+      import(JSZIP_CDN),
+      /* Wait for this session's upload if one is still going, then read what
+         is actually stored. Stored assets are the authority: they are there
+         whether or not this is the tab that uploaded them. */
+      Promise.resolve(assetsStored).catch(function () {})
+        .then(function () { return fetchStoredAssets(currentScanId); })
     ]).then(function (r) {
-      var data = r[0], JSZip = r[1].default || r[1];
+      var data = r[0], JSZip = r[1].default || r[1], stored = r[2] || [];
       var zip = new JSZip();
       var written = {};
       data.files.forEach(function (f) {
@@ -2086,9 +2166,14 @@
 
       /* The files we excluded from the scan go back in exactly as they came:
          same bytes, same path, never opened, never sent anywhere. They are last
-         so they can never overwrite a file the pipeline actually produced. */
+         so they can never overwrite a file the pipeline actually produced.
+
+         Two sources, same shape: what Storage kept for this scan, and what this
+         browser still holds. Storage first — it is the copy that survives a
+         closed tab — and the in-memory one fills any gap, which is what covers
+         a run whose upload had not finished. */
       var restored = 0;
-      carryThrough.forEach(function (c) {
+      stored.concat(carryThrough).forEach(function (c) {
         var safe = safeRelPath(c.path);
         if (!safe || written[safe]) return;
         written[safe] = true;
@@ -2133,7 +2218,7 @@
              the user to discover in a folder of broken images. */
           var tail = restored ? " " + P.zipCarried(restored) : "";
           if (carrySkipped) tail += " " + P.zipAssetsDropped(carrySkipped);
-          else if (!carryThrough.length && referencesAssets(data.files)) tail += " " + P.zipFromHistory;
+          else if (!restored && referencesAssets(data.files)) tail += " " + P.zipFromHistory;
           deliverSay(join(note, P.zipReady((data.changed_files || []).length) + tail));
         });
       });
@@ -2281,6 +2366,12 @@
       var base = user.id + "/" + id + "/";
       try {
         sb.storage.from("scans").remove(SCAN_ARTEFACTS.map(function (f) { return base + f; }));
+        /* The assets live under their own prefix and are listed in a manifest,
+           so deletion follows the manifest rather than crawling folders. */
+        fetchStoredAssets(id).then(function (list) {
+          var paths = list.map(function (c) { return base + "assets/" + c.path; });
+          if (paths.length) sb.storage.from("scans").remove(paths);
+        }).catch(function () {});
       } catch (e) { /* best-effort */ }
       historyRows = historyRows.filter(function (x) { return x.id !== id; });
       renderHistory();

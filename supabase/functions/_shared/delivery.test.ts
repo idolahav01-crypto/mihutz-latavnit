@@ -96,3 +96,35 @@ Deno.test("hasZipSignature rejects a short read rather than reading past it", ()
   assertFalse(hasZipSignature(new Uint8Array([])));
   assert(hasZipSignature(PK));
 });
+
+// ---------- what belongs in the asset store ----------
+//
+// The predicate lives in two places that must agree: fetch-repo decides what to
+// keep off a tarball, and js/app.js decides what to keep out of a ZIP. Both are
+// "what a page paints or loads", and neither may quietly become "everything the
+// bundle filtered", which would put node_modules in the download.
+
+const ASSET_FILE = /\.(png|jpe?g|gif|webp|avif|svg|ico|bmp|woff2?|ttf|otf|eot)$/i;
+
+Deno.test("the media a rebuilt page will point at is kept", () => {
+  for (const p of [
+    "images/hero.jpg", "img/logo.svg", "assets/photo.webp", "a/b/c/shot.JPEG",
+    "favicon.ico", "fonts/heebo.woff2", "fonts/x.ttf",
+  ]) {
+    assert(ASSET_FILE.test(p), `${p} must be delivered`);
+  }
+});
+
+Deno.test("code and archives are not assets", () => {
+  for (const p of [
+    "index.html", "app.js", "style.css", "package.json", "README.md",
+    "build.zip", "video.mp4", "notes.pdf", "data.csv",
+  ]) {
+    assertFalse(ASSET_FILE.test(p), `${p} is not a page asset`);
+  }
+});
+
+Deno.test("an extension in the middle of a path does not qualify it", () => {
+  assertFalse(ASSET_FILE.test("png/readme.txt"));
+  assertFalse(ASSET_FILE.test("images/hero.jpg.bak"));
+});
