@@ -91,6 +91,46 @@ export const NOT_COUNTED: ReadonlyArray<{ id: number; because: string }> = [
 ];
 
 /**
+ * Real gaps that are not what this product measures.
+ *
+ * The score answers one question — how much does this site read as AI output,
+ * where 0 is fully human. A missing accessibility statement does not make a
+ * page look machine-made: a site a carpenter built by hand is every bit as
+ * likely to lack one. Scoring these was running a compliance audit inside a
+ * design tool, and it did two kinds of damage. It answered the wrong question,
+ * and because nothing we build can ever supply the owner's company number, it
+ * left dead weight in the denominator that capped how good the score could get
+ * however well the rebuild worked.
+ *
+ * So they leave the score and stay in the report, in the "waiting on you"
+ * list, which is what they always were: real things worth doing, and no
+ * evidence at all about who wrote the page.
+ *
+ * What did NOT move, and why: fabricated-feeling CONTENT is a genuine
+ * fingerprint even though the fix needs a fact from the owner. AI-generated
+ * faces (#104), testimonials with nobody's name on them (#54), "98% of
+ * customers are satisfied" with no source (#105), copy with no concrete
+ * numbers in it at all (#50), and a footer with none of a real business in it
+ * (#24) are exactly what a generator produces. Those stay scored.
+ *
+ * Note for anyone comparing numbers: this changes the denominator, so scores
+ * from before this list existed are not comparable with scores after it.
+ */
+export const IMPROVEMENT_ONLY: ReadonlyArray<{ id: number; because: string }> = [
+  { id: 92, because: "דרישות חוק לפוטר — חשוב לעסק, אבל לא מעיד שהאתר נבנה ב-AI" },
+  { id: 93, because: "הצהרת נגישות ת\"י 5568 — חובה חוקית, לא סימן AI" },
+  { id: 96, because: "התאמת מדיניות פרטיות לחוק הישראלי — חובה חוקית, לא סימן AI" },
+  { id: 62, because: "הגדרת אירועים ב-GA4 — תשתית מדידה, לא סימן AI" },
+  { id: 102, because: "חשבון Google Tag Manager — תשתית מדידה, לא סימן AI" },
+  { id: 25, because: "עמודים פנימיים נוספים — החלטה על היקף האתר, לא סימן AI" },
+  { id: 65, because: "תגי hreflang — רלוונטי רק לאתר רב-לשוני, לא סימן AI" },
+  { id: 107, because: "אתר בשפה אחת — החלטה עסקית על קהל, לא סימן AI" },
+  { id: 91, because: "עזרי חיפוש — פיצ'ר שצריך לבנות, לא סימן AI" },
+  { id: 31, because: "תגיות Open Graph — נדרשת כתובת האתר החי, לא סימן AI" },
+  { id: 98, because: "תמונת שיתוף ייעודית — נדרשת תמונה אמיתית של העסק, לא סימן AI" },
+];
+
+/**
  * Signals no automated rebuild can clear, because clearing them needs a fact
  * only the site's owner holds.
  *
@@ -134,10 +174,12 @@ export const OWNER_INPUT: ReadonlyArray<{ id: number; needs: string }> = [
  */
 export function applyCatalogueRules(detection: DetectionLike): void {
   const notCounted = new Map(NOT_COUNTED.map((n) => [n.id, n.because]));
+  const improvement = new Map(IMPROVEMENT_ONLY.map((n) => [n.id, n.because]));
   const ownerInput = new Map(OWNER_INPUT.map((o) => [o.id, o.needs]));
 
   for (const s of detection.signals ?? []) {
     const id = Number(s.id);
+
     const because = notCounted.get(id);
     if (because !== undefined) {
       s.applicable = false;
@@ -145,6 +187,17 @@ export function applyCatalogueRules(detection: DetectionLike): void {
       s.explanation = because;
       continue;
     }
+
+    // Out of the score, still in the report. The owner-input mark is kept on
+    // purpose: it is what puts the finding in the "waiting on you" list, which
+    // is now the only place these appear.
+    const why = improvement.get(id);
+    if (why !== undefined) {
+      s.applicable = false;
+      s.improvement_only = true;
+      s.improvement_reason = why;
+    }
+
     const needs = ownerInput.get(id);
     if (needs !== undefined) s.needs_owner_input = needs;
   }

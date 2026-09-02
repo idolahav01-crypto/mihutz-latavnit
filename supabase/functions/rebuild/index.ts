@@ -32,6 +32,8 @@ import {
   unreferencedAssets,
 } from "../_shared/pipeline.ts";
 import { checkPreservation, restoreMissingImages, summarize } from "../_shared/preservation.ts";
+import { polishPage } from "../_shared/polish.ts";
+import { sectionTells } from "../_shared/section_tells.ts";
 import { balanceCss, selfCheck } from "../_shared/selfcheck.ts";
 import { redressSecondaryPages } from "../_shared/redress.ts";
 import { checkRichness, collectCss, richnessTargets } from "../_shared/richness.ts";
@@ -186,6 +188,10 @@ interface BuiltSection {
   cssRepaired?: boolean;
   /** Photographs the builder dropped and we put back. */
   imagesRestored?: string[];
+  /** Whether this section was sent back once for reproducing a flagged tell. */
+  retried?: boolean;
+  /** Tells that survived even the retry. */
+  tellsLeft?: number[];
   /** Controls the builder invented here that no script could ever drive. */
   deadControls?: string[];
 }
@@ -642,6 +648,11 @@ Deno.serve(async (req) => {
     // "#78 currency order" on its own tells the builder nothing, so the block
     // carries what the audit saw in this site alongside each signal.
     const avoidBlock = buildAvoidBlock(present);
+    // The exact set handed to the builder as "do not reproduce". A section is
+    // only ever sent back for something on this list: a pattern the original
+    // never had is the designer making a choice, and second-guessing that with
+    // a regex is how you get a bland site and a large bill.
+    const flaggedIds = new Set(present.map((s) => Number(s.id)));
     // The ORIGINAL site's look, to push every design stage AWAY from it.
     const originalLook = originalLookBlock(scan.site_profile);
     // Recomputed below for part 1, where the ledger has read the logo.
@@ -882,6 +893,8 @@ Deno.serve(async (req) => {
     let sectionHtml: string;
     let sectionCss: string;
     let cssRepaired = false;
+    let retried = false;
+    let tellsLeft: number[] = [];
     let deadControls: string[] = [];
 
     if (isWidgetSection(section)) {
@@ -924,7 +937,7 @@ Deno.serve(async (req) => {
       /* Sections produce nearly all of the page's markup and CSS, so they get the
          same effort the shell already had — this stage was the one doing the most
          work on the least thinking. */
-      const res = await meteredClaude(
+      let res = await meteredClaude(
         { admin, scanId, startedAt, stage: `rebuild_section_${sectionIndex + 1}` },
         {
           apiKey, model: MODEL, effort: "high", maxTokens: 10000, stream: true,
@@ -932,7 +945,43 @@ Deno.serve(async (req) => {
         },
       );
 
-      const built = (res.json ?? {}) as { html?: string; css?: string };
+      // Did it reproduce a fingerprint the original was flagged for and it was
+      // explicitly told to avoid? The prompt asks; this checks. Once only — a
+      // second attempt that still misses is the model's judgement rather than a
+      // slip, and a third call is money spent to be told the same thing.
+      let firstTry = (res.json ?? {}) as { html?: string; css?: string };
+      let tells = sectionTells(firstTry.html ?? "", firstTry.css ?? "", flaggedIds);
+      if (tells.length) {
+        retried = true;
+        res = await meteredClaude(
+          { admin, scanId, startedAt: Date.now(), stage: `rebuild_section_${sectionIndex + 1}_retry` },
+          {
+            apiKey, model: MODEL, effort: "high", maxTokens: 10000, stream: true,
+            system: SECTION_SYSTEM + avoidBlock,
+            schema: SECTION_BUILD_SCHEMA,
+            userContent: userContent +
+              `\n\nYour previous attempt at this section reproduced ${tells.length} of the exact ` +
+              `AI fingerprints this site was flagged for and you were told not to reproduce:\n` +
+              tells.map((t) => `- #${t.signal}: ${t.detail}`).join("\n") +
+              `\n\nBuild this section again WITHOUT them. Do not simply delete the offending ` +
+              `element and leave a gap — compose the section differently so it does not need ` +
+              `one: a different rhythm, a different relationship between heading and content, ` +
+              `a different way of carrying the same facts. Keep every item and every image.`,
+            timeoutMs: 135_000,
+          },
+        );
+        const second = (res.json ?? {}) as { html?: string; css?: string };
+        // Keep whichever attempt carries fewer tells. A retry that came back
+        // worse, or empty, must not cost the user the first attempt's work.
+        const secondTells = sectionTells(second.html ?? "", second.css ?? "", flaggedIds);
+        if (second.html && secondTells.length < tells.length) {
+          firstTry = second;
+          tells = secondTells;
+        }
+        tellsLeft = tells.map((t) => t.signal);
+      }
+
+      const built = firstTry;
       // The ledger's id is the one the nav links to, so it is forced onto the
       // fragment here rather than merely offered to the builder.
       const withId = built.html
@@ -987,6 +1036,8 @@ Deno.serve(async (req) => {
       cssRepaired,
       deadControls,
       imagesRestored: restore.restored,
+      retried,
+      tellsLeft,
     });
     await writeJson(admin, P.sections, merged);
 
@@ -996,10 +1047,22 @@ Deno.serve(async (req) => {
     let deliveryWarnings: Array<{ kind: string; detail: string; items: unknown }> = [];
     if (done) {
       // Every section built — assemble the final self-contained document.
-      const { html: assembled, chrome, navDropped, navFallbacks, deadControls: pageDeadControls } =
+      const { html: assembledRaw, chrome, navDropped, navFallbacks, deadControls: pageDeadControls } =
         assemble(
         spec, shell, merged, scripts, siteUrl,
       );
+
+      // The dull, determined faults, fixed rather than asked for. Six signals
+      // survived a measured rebuild purely because the only mechanism the
+      // builder had for them was a sentence in a prompt — every one of them
+      // already detected by mechanical.ts, none of them repaired by anything.
+      // Runs on the finished document, costs nothing, and is a no-op on a page
+      // that had none of them.
+      const polished = polishPage(assembledRaw, {
+        rtl: spec.dir === "rtl",
+        images: spec.sections.flatMap((sec) => sec.images ?? []),
+      });
+      const assembled = polished.html;
 
       // The original is read before anything is judged against it: the
       // self-check needs it to know which ids the page's scripts require, the
@@ -1117,6 +1180,7 @@ Deno.serve(async (req) => {
       // failure a user cannot see in a screenshot and can see instantly in a
       // browser, so it is worth naming.
       const restoredImages = merged.flatMap((s) => s.imagesRestored ?? []);
+      const sectionRetries = merged.filter((s) => s.retried).map((s) => s.index + 1).sort((a, b) => a - b);
       const repairedSections = merged
         .filter((s) => s.cssRepaired)
         .map((s) => s.index + 1)
@@ -1127,6 +1191,13 @@ Deno.serve(async (req) => {
         // A link that scrolls nowhere and a button that does nothing are the
         // two failures a screenshot cannot show. Both are repaired above; both
         // are reported here so a run cannot look clean while shipping them.
+        ...(polished.fixed.length
+          ? [{
+            kind: "auto_repaired",
+            detail: `repaired after the build without a model call: ${polished.notes.join("; ")}`,
+            items: polished.fixed,
+          }]
+          : []),
         ...(restoredImages.length
           ? [{
             kind: "images_restored",

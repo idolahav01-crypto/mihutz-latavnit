@@ -1131,8 +1131,14 @@
        leftover score reads as a short to-do list the owner can act on, instead
        of as a failure on our side. Absent on scans audited before the catalogue
        started marking them, and the block simply does not render. */
+    /* Built from `all`, not `present`: the eleven compliance-and-scope findings
+       are deliberately outside the score (applicable:false) and this list is
+       now the only place they surface. Dropping them from here too would be
+       deleting the finding rather than reclassifying it. */
     var ownerGroups = [], ownerBy = {};
-    present.forEach(function (s) {
+    all.filter(function (s) {
+      return s.present === true && (s.applicable !== false || s.improvement_only === true);
+    }).forEach(function (s) {
       var needs = s.needs_owner_input;
       if (!needs || !T.ownerNeeds[needs]) return;
       if (!ownerBy[needs]) { ownerBy[needs] = []; ownerGroups.push(needs); }

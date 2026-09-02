@@ -1,11 +1,5 @@
 import { assert, assertEquals, assertFalse } from "jsr:@std/assert@1";
-import {
-  applyCatalogueRules,
-  fillUnevaluated,
-  missingIds,
-  NOT_COUNTED,
-  OWNER_INPUT,
-} from "./catalogue.ts";
+import { IMPROVEMENT_ONLY, NOT_COUNTED, OWNER_INPUT, applyCatalogueRules, fillUnevaluated, missingIds } from "./catalogue.ts";
 import signals from "./signals.json" with { type: "json" };
 
 const ALL = (signals as Array<{ id: number; weight: string }>);
@@ -134,12 +128,43 @@ Deno.test("applyCatalogueRules: owner-input signals are marked with what is miss
   }
 });
 
-Deno.test("applyCatalogueRules: an owner-input signal is still counted", () => {
-  // It stays in the score on purpose. It is a real gap on the site; the mark
-  // only says whose gap it is.
-  const detection = { signals: [{ id: 92, present: true, applicable: true }] };
-  applyCatalogueRules(detection);
-  assertEquals(detection.signals[0].applicable, true);
+Deno.test("applyCatalogueRules: fabricated-feeling content stays in the score", () => {
+  // These need a fact from the owner AND are what a generator produces:
+  // AI-generated faces, testimonials with nobody's name on them, a statistic
+  // with no source. The mark says whose gap it is; it does not excuse it.
+  for (const id of [24, 50, 54, 104, 105]) {
+    const detection = { signals: [{ id, present: true, applicable: true }] };
+    applyCatalogueRules(detection);
+    assertEquals(detection.signals[0].applicable, true, `#${id} must still be scored`);
+    assertEquals(
+      (detection.signals[0] as Record<string, unknown>).improvement_only,
+      undefined,
+      `#${id} is a fingerprint, not a note`,
+    );
+  }
+});
+
+Deno.test("applyCatalogueRules: a compliance gap leaves the score but stays in the report", () => {
+  // The score answers "how much does this read as AI output". A missing
+  // accessibility statement is a real obligation and no evidence at all about
+  // who wrote the page, so it moves to the waiting-on-you list.
+  for (const id of [92, 93, 96, 62, 102, 25, 65, 91, 107, 31, 98]) {
+    const detection = { signals: [{ id, present: true, applicable: true }] };
+    applyCatalogueRules(detection);
+    const s = detection.signals[0] as Record<string, unknown>;
+    assertEquals(s.applicable, false, `#${id} must be out of the score`);
+    assertEquals(s.improvement_only, true, `#${id} must be marked as a note`);
+    assert(typeof s.improvement_reason === "string", `#${id} must say why`);
+    assert(typeof s.needs_owner_input === "string", `#${id} must stay in the owner list`);
+  }
+});
+
+Deno.test("a signal cannot be both struck out and merely a note", () => {
+  const notCounted = new Set(NOT_COUNTED.map((n) => n.id));
+  for (const n of IMPROVEMENT_ONLY) {
+    assertFalse(notCounted.has(n.id), `#${n.id} is in both lists`);
+  }
+  assertEquals(IMPROVEMENT_ONLY.length, new Set(IMPROVEMENT_ONLY.map((n) => n.id)).size);
 });
 
 Deno.test("applyCatalogueRules: an ordinary signal is left exactly as it was", () => {
