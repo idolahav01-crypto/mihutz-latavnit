@@ -713,6 +713,20 @@ code, .mono { font-family: var(--font-mono); }
 }
 #clean-note p, #lang-note p { font-size: 0.9rem; line-height: 1.6; margin: 0; }
 
+/* The after-score is offered, not taken: a line saying what it costs and a
+   button. Quieter than the delivery actions beside it, because downloading the
+   work is the point and measuring it is optional. */
+#after-scan { padding-block: var(--s-2); }
+.after-ask {
+  font-size: 0.88rem; line-height: 1.55;
+  color: var(--color-neutral-600);
+  margin-block-end: var(--s-2);
+}
+
+/* A photograph the builder dropped and we put back. Plainly presented, and
+   never stretched past the column it landed in. */
+.restored-image { max-width: 100%; height: auto; display: block; }
+
 
 /* the report view's bar sits inside the fix pipeline */
 .rb-progress { margin-block-start: var(--s-3); }

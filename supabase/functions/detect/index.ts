@@ -17,7 +17,7 @@ import {
   serializeBundle,
 } from "../_shared/pipeline.ts";
 import { MECHANICAL_IDS, mechanicalSignals, overlayMechanical } from "../_shared/mechanical.ts";
-import { applyCatalogueRules, fillUnevaluated, missingIds } from "../_shared/catalogue.ts";
+import { applyCatalogueRules, fillUnevaluated, missingIds, stampWeights } from "../_shared/catalogue.ts";
 import { assetInventory, detectLanguage, isAiDefaultColour, normHex } from "../_shared/profile.ts";
 import { checkDetectionSanity } from "../_shared/sanity.ts";
 import { assertModelPriced, meteredClaude } from "../_shared/usage.ts";
@@ -265,6 +265,44 @@ const SCHEMA = {
   required: ["ai_fingerprint_score", "present_count", "meta", "signals", "site_profile"],
 };
 
+/**
+ * The same audit, asked for two numbers instead of an essay.
+ *
+ * The "after" pass exists to produce ai_fingerprint_score_after and
+ * present_count_after. Nothing reads detection_after itself — not the report,
+ * not the download, not the pull request — yet the pass was returning a name,
+ * an explanation and up to five evidence snippets for all 110 signals, three
+ * times. Measured over 14 runs it cost $0.60 against the first scan's $0.49,
+ * because output is where the money is and almost all of that output was prose
+ * nobody would ever read.
+ *
+ * Same model, same signals, same computeScore, same fixed denominator, so the
+ * before/after pair stays comparable — the one property this number has to
+ * have. `weight` is dropped along with the prose: it belongs to the catalogue,
+ * not to the site, and fillUnevaluated already reads it from signals.json.
+ */
+const AFTER_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    signals: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          id: { type: "integer" },
+          present: { type: "boolean" },
+          applicable: { type: "boolean" },
+          confidence: { type: "number" },
+        },
+        required: ["id", "present", "applicable", "confidence"],
+      },
+    },
+  },
+  required: ["signals"],
+};
+
 // Deterministic recompute — never trust the model's own arithmetic.
 /**
  * How many passes to split the 110-signal audit across.
@@ -506,7 +544,7 @@ Deno.serve(async (req) => {
             `present or absent, under the same evidence rules as any other pass. ` +
             `Do NOT return site_profile, meta, or scores.\n\n` +
             `Signals: ${need.map((id) => `#${id}`).join(", ")}\n\n${bundle}`,
-          schema: SCHEMA,
+          schema: mode === "after" ? AFTER_SCHEMA : SCHEMA,
           timeoutMs: 130_000,
         });
         detection = mergeDetection(prior, claude.json as DetectionResult);
@@ -539,11 +577,19 @@ Deno.serve(async (req) => {
         userContent: `Audit this project. Return JSON per the schema.\n\n` +
           `THIS PASS (${part} of ${parts}): evaluate ONLY these signals and return ` +
           `no others: ${idList}\n` +
-          (part === 1
+          (mode === "after"
+            // Re-measurement, not a report. The verdict is the whole product of
+            // this pass, and the schema will not accept anything else — so the
+            // hunting rules still apply, and the writing-up does not.
+            ? `RE-MEASUREMENT PASS. Return ONLY id, present, applicable and confidence ` +
+              `for each signal. Do NOT write names, explanations or evidence, and do NOT ` +
+              `return site_profile, meta or scores. Judge each signal exactly as ` +
+              `rigorously as a first audit — you are simply not writing the verdict up.\n`
+            : part === 1
             ? `Also return site_profile and meta on this pass.\n`
             : `Do NOT return site_profile, meta, or scores on this pass.\n`) +
           `\n${bundle}`,
-        schema: SCHEMA,
+        schema: mode === "after" ? AFTER_SCHEMA : SCHEMA,
         timeoutMs: 130_000,
       });
 
@@ -606,6 +652,11 @@ Deno.serve(async (req) => {
     // score: signals we do not score a site on are struck out, and the ones
     // that need a fact from the owner are marked so the report can ask.
     applyCatalogueRules(detection);
+    // Weights come from the catalogue, never from the model — see stampWeights.
+    // The lean after-scan schema does not ask for weight at all, so without this
+    // the two halves of the before/after pair would be scored on different
+    // scales and the comparison would be meaningless.
+    stampWeights(detection);
 
     // Recompute the score deterministically from the returned signals.
     const { score, present } = computeScore(detection.signals ?? []);

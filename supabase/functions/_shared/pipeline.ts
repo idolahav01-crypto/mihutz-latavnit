@@ -557,6 +557,18 @@ const SKIP_DOCS =
   /(\.(md|markdown|mdx|rst)$|(^|\/)(LICENSE|LICENCE|COPYING|NOTICE|CHANGELOG|AUTHORS|CONTRIBUTING)(\.(txt|rst))?$)/i;
 const SKIP_FILE =
   /\.(min\.(js|css)|map|lock|png|jpe?g|gif|webp|avif|svg|ico|woff2?|ttf|otf|eot|mp4|webm|mp3|wav|pdf|zip|gz|br|wasm|ds_store)$/i;
+
+/**
+ * The one binary-shaped file worth reading: a logo drawn as SVG.
+ *
+ * SVG is markup, not an image format we cannot open, and the logo is the one
+ * asset whose CONTENT changes a decision — its colours are the only honest way
+ * to answer "base the design on the logo", and the mark itself can then be
+ * pasted back into the rebuilt header instead of being replaced by the site's
+ * name in type. Every other .svg stays filtered: icon sprites are large, dull,
+ * and would crowd out the code the audit is actually for.
+ */
+const LOGO_SVG = /(^|\/)[\w.-]*(logo|brand|wordmark)[\w.-]*\.svg$/i;
 const SKIP_LOCKFILES = /(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|bun\.lockb)$/i;
 // Secrets whose names do NOT start with a dot, so the rule above misses them.
 // A key or a service account is not the website, it is the keys to it, and it
@@ -588,6 +600,6 @@ export function keepPath(path: string): boolean {
   if (SKIP_DOCS.test(path)) return false;
   if (SKIP_LOCKFILES.test(path)) return false;
   if (SKIP_SECRETS.test(path)) return false;
-  if (SKIP_FILE.test(path)) return false;
+  if (SKIP_FILE.test(path)) return LOGO_SVG.test(path);
   return true;
 }

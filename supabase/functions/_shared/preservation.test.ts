@@ -1,16 +1,5 @@
 import { assert, assertEquals, assertFalse } from "jsr:@std/assert@1";
-import {
-  checkPreservation,
-  collectJs,
-  factTokens,
-  MIN_WORD_RATIO,
-  type PreservationReport,
-  scriptHooks,
-  summarize,
-  visibleText,
-  warnings,
-  wordCount,
-} from "./preservation.ts";
+import { MIN_WORD_RATIO, checkPreservation, collectJs, factTokens, restoreMissingImages, scriptHooks, summarize, type PreservationReport, visibleText, warnings, wordCount } from "./preservation.ts";
 
 // ---------- visibleText ----------
 
@@ -192,4 +181,68 @@ Deno.test("checkPreservation: an empty original cannot fail", () => {
 Deno.test("summarize: silent on success, specific on failure", () => {
   assertEquals(summarize(check(RICH, RICH)), "content preserved");
   assert(summarize(check(RICH, "<p>gone</p>")).includes("visible text fell"));
+});
+
+// ---------- putting back a photograph the builder dropped ----------
+
+Deno.test("an image the builder skipped is restored with its own src and alt", () => {
+  const built = `<section class="sec-hero"><h1>תיקון סלולר</h1><p>מעבדה מוסמכת</p></section>`;
+  const r = restoreMissingImages(built, [{ src: "images/hero.jpg", alt: "מעבדה" }]);
+  assertEquals(r.restored, ["images/hero.jpg"]);
+  assert(r.html.includes('src="images/hero.jpg"'));
+  assert(r.html.includes('alt="מעבדה"'));
+  assert(r.html.includes('loading="lazy"'));
+});
+
+Deno.test("an image the builder DID use is left exactly as it laid it out", () => {
+  const built = `<section><img src="images/hero.jpg" alt="מעבדה" class="hero-shot"></section>`;
+  const r = restoreMissingImages(built, [{ src: "images/hero.jpg", alt: "מעבדה" }]);
+  assertEquals(r.restored, []);
+  assertEquals(r.html, built, "no duplicate, no rewrite of the designer's markup");
+});
+
+Deno.test("a re-rooted path is recognised rather than duplicated", () => {
+  // The builder is free to write /images/hero.jpg or ./images/hero.jpg; the
+  // file is the same file and appending a second copy would be the bug.
+  for (const written of ["/images/hero.jpg", "./images/hero.jpg", "../images/hero.jpg"]) {
+    const r = restoreMissingImages(`<section><img src="${written}"></section>`, [
+      { src: "images/hero.jpg" },
+    ]);
+    assertEquals(r.restored, [], `${written} should count as present`);
+  }
+});
+
+Deno.test("an image used as a CSS background counts as used", () => {
+  const built = `<section style="background-image:url('images/hero.jpg')"><h2>א</h2></section>`;
+  assertEquals(restoreMissingImages(built, [{ src: "images/hero.jpg" }]).restored, []);
+});
+
+Deno.test("an image inside a srcset counts as used", () => {
+  const built = `<section><img srcset="images/hero.jpg 1x, images/hero@2x.jpg 2x" src="x.webp"></section>`;
+  assertEquals(restoreMissingImages(built, [{ src: "images/hero.jpg" }]).restored, []);
+});
+
+Deno.test("several dropped images all come back, in the order the page had them", () => {
+  const built = `<section><h2>מה תמצאו אצלנו</h2></section>`;
+  const r = restoreMissingImages(built, [
+    { src: "images/laptop.jpg", alt: "מחשב" },
+    { src: "images/watch.jpg" },
+    { src: "images/headphones.jpg", alt: "אוזניות" },
+  ]);
+  assertEquals(r.restored, ["images/laptop.jpg", "images/watch.jpg", "images/headphones.jpg"]);
+});
+
+Deno.test("a section with no images is returned untouched", () => {
+  const built = `<section><h2>מחירון</h2><table><tr><td>מסך</td></tr></table></section>`;
+  const r = restoreMissingImages(built, []);
+  assertEquals(r.html, built);
+  assertEquals(r.restored, []);
+});
+
+Deno.test("quotes in alt text cannot break out of the attribute", () => {
+  const r = restoreMissingImages("<section></section>", [
+    { src: 'a.jpg"onerror="alert(1)', alt: 'say "hi" <b>' },
+  ]);
+  assertFalse(r.html.includes('onerror="alert(1)"'), "the src is escaped, not executed");
+  assert(r.html.includes("&quot;"));
 });

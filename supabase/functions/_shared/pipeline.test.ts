@@ -470,3 +470,24 @@ Deno.test("the diagnostic names the runner-up it beat", () => {
   assertEquals(pick.runnerUp, "about.html");
   assertEquals(pick.pages, 2);
 });
+
+Deno.test("a logo drawn as SVG reaches the bundle; other SVGs do not", () => {
+  // An SVG logo is markup, and the only asset whose CONTENT changes a decision:
+  // its colours steer the palette and the mark is pasted back into the header.
+  assert(keepPath("logo.svg"));
+  assert(keepPath("img/logo.svg"));
+  assert(keepPath("assets/site-logo.svg"));
+  assert(keepPath("brand.svg"));
+  assert(keepPath("images/wordmark.svg"));
+  // Everything else stays filtered — icon sets are large, dull, and would
+  // crowd out the code the audit is actually for.
+  assertFalse(keepPath("icons/arrow.svg"));
+  assertFalse(keepPath("sprite.svg"));
+  assertFalse(keepPath("illustration.svg"));
+});
+
+Deno.test("the logo exception does not reopen the door to other binaries", () => {
+  for (const p of ["logo.png", "logo.jpg", "logo.webp", "logo.ico", "logo.woff2"]) {
+    assertFalse(keepPath(p), `${p} is a binary we cannot read`);
+  }
+});

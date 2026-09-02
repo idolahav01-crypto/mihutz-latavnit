@@ -149,3 +149,24 @@ export function applyCatalogueRules(detection: DetectionLike): void {
     if (needs !== undefined) s.needs_owner_input = needs;
   }
 }
+
+/**
+ * Set every signal's weight from the catalogue rather than from the model.
+ *
+ * Weight is a property of the SIGNAL — "more than one h1" is a medium fault on
+ * every site there has ever been — so asking a model to restate it each run was
+ * always a way to make the score wobble for no reason. It becomes load-bearing
+ * with the lean after-scan schema, which does not ask for weight at all: without
+ * this, an unweighted signal would fall to the default of 2 and the after-score
+ * would drift away from the before-score for a reason that has nothing to do
+ * with the site. Applied to both scans so the pair stays comparable.
+ */
+export function stampWeights(detection: DetectionLike): void {
+  const catalogue = new Map(
+    (signals as Array<{ id: number; weight: string }>).map((s) => [s.id, s.weight]),
+  );
+  for (const s of detection.signals ?? []) {
+    const weight = catalogue.get(Number(s.id));
+    if (weight) s.weight = weight;
+  }
+}

@@ -31,7 +31,7 @@ import {
   serializeBundle,
   unreferencedAssets,
 } from "../_shared/pipeline.ts";
-import { checkPreservation, summarize } from "../_shared/preservation.ts";
+import { checkPreservation, restoreMissingImages, summarize } from "../_shared/preservation.ts";
 import { balanceCss, selfCheck } from "../_shared/selfcheck.ts";
 import { redressSecondaryPages } from "../_shared/redress.ts";
 import { checkRichness, collectCss, richnessTargets } from "../_shared/richness.ts";
@@ -184,6 +184,8 @@ interface BuiltSection {
   css: string;
   /** This section's CSS came back structurally broken and was repaired. */
   cssRepaired?: boolean;
+  /** Photographs the builder dropped and we put back. */
+  imagesRestored?: string[];
   /** Controls the builder invented here that no script could ever drive. */
   deadControls?: string[];
 }
@@ -968,10 +970,24 @@ Deno.serve(async (req) => {
       }
     }
 
+    // The photographs the section was given, put back if the builder skipped
+    // them. Same posture as the CSS balancing above: repair, then report — the
+    // page ships pointing at its own pictures whatever the model chose to do.
+    const wantedImages = section.images ?? [];
+    const restore = restoreMissingImages(sectionHtml, wantedImages);
+    sectionHtml = restore.html;
+
     // Accumulate this section (merge-upload, keyed by index). Parts run strictly
     // one at a time per scan, so the copy read before the call is still current.
     const merged = built0.filter((s) => s.index !== sectionIndex);
-    merged.push({ index: sectionIndex, html: sectionHtml, css: sectionCss, cssRepaired, deadControls });
+    merged.push({
+      index: sectionIndex,
+      html: sectionHtml,
+      css: sectionCss,
+      cssRepaired,
+      deadControls,
+      imagesRestored: restore.restored,
+    });
     await writeJson(admin, P.sections, merged);
 
     const done = part >= parts;
@@ -1100,6 +1116,7 @@ Deno.serve(async (req) => {
       // repaired this, look at it". A structurally broken stylesheet is the one
       // failure a user cannot see in a screenshot and can see instantly in a
       // browser, so it is worth naming.
+      const restoredImages = merged.flatMap((s) => s.imagesRestored ?? []);
       const repairedSections = merged
         .filter((s) => s.cssRepaired)
         .map((s) => s.index + 1)
@@ -1110,6 +1127,14 @@ Deno.serve(async (req) => {
         // A link that scrolls nowhere and a button that does nothing are the
         // two failures a screenshot cannot show. Both are repaired above; both
         // are reported here so a run cannot look clean while shipping them.
+        ...(restoredImages.length
+          ? [{
+            kind: "images_restored",
+            detail: `${restoredImages.length} image(s) the original showed were missing ` +
+              `from the rebuilt markup and have been put back: ${restoredImages.join(", ")}`,
+            items: restoredImages,
+          }]
+          : []),
         ...(navFallbacks.length || navDropped.length
           ? [{
             kind: "nav_unresolved",

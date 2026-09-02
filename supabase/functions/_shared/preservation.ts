@@ -314,3 +314,61 @@ export function summarize(report: PreservationReport): string {
 export function warnings(report: PreservationReport): PreservationFailure[] {
   return report.failures.filter((f) => !f.blocking);
 }
+
+/**
+ * Put back a photograph the builder was given and did not use.
+ *
+ * The section spec carries the images the original page showed, and the section
+ * prompt is told to emit every one of them. A prompt is a request, and this
+ * file's neighbours do not rely on requests: broken CSS is balanced, a nav link
+ * with no target is re-pointed, and both are then reported. Images get the same
+ * treatment, because the failure mode is the one the user actually complained
+ * about — a rebuild that came back as boxes of text where the site had pictures.
+ *
+ * The restore is deliberately plain: an <img> appended to the section, with the
+ * original src and alt. It is not a design, and it is not meant to be — it is
+ * the difference between a page that references its photographs and a page that
+ * silently dropped them. Reported so nobody mistakes it for the builder's work.
+ */
+export function restoreMissingImages(
+  html: string,
+  wanted: Array<{ src: string; alt?: string }>,
+): { html: string; restored: string[] } {
+  if (!wanted.length) return { html, restored: [] };
+
+  // Every src the built markup already points at, however it was written.
+  const present = new Set<string>();
+  for (const m of html.matchAll(/(?:src|srcset|href)\s*=\s*["']([^"']+)["']/gi)) {
+    for (const candidate of m[1].split(",")) {
+      const url = candidate.trim().split(/\s+/)[0];
+      if (url) present.add(url);
+    }
+  }
+  for (const m of html.matchAll(/url\(\s*["']?([^"')]+)["']?\s*\)/gi)) present.add(m[1].trim());
+
+  const restored: string[] = [];
+  let out = html;
+  for (const image of wanted) {
+    const src = (image.src ?? "").trim();
+    if (!src || present.has(src)) continue;
+    // A path can be written relatively in one place and absolutely in another;
+    // matching on the file name too keeps a re-rooted src from being counted
+    // as missing and duplicated.
+    const base = src.split("/").pop() ?? src;
+    if ([...present].some((p) => p.endsWith("/" + base) || p === base)) continue;
+
+    const alt = escapeAttr(image.alt ?? "");
+    out += `\n<img src="${escapeAttr(src)}" alt="${alt}" loading="lazy" class="restored-image">`;
+    restored.push(src);
+    present.add(src);
+  }
+  return { html: out, restored };
+}
+
+function escapeAttr(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}

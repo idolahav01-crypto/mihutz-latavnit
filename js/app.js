@@ -184,13 +184,19 @@
   var SKIP_ARCHIVE_ARTIFACT = /(^|\/)pax_global_header$/;
   var SKIP_DOCS = /(\.(md|markdown|mdx|rst)$|(^|\/)(LICENSE|LICENCE|COPYING|NOTICE|CHANGELOG|AUTHORS|CONTRIBUTING)(\.(txt|rst))?$)/i;
   var SKIP_FILE = /\.(min\.(js|css)|map|lock|png|jpe?g|gif|webp|avif|svg|ico|woff2?|ttf|otf|eot|mp4|webm|mp3|wav|pdf|zip|gz|br|wasm|ds_store)$/i;
+  /* A logo drawn as SVG is markup, and the only asset whose CONTENT changes a
+     decision downstream — its colours steer the palette and the mark itself is
+     pasted back into the header. Every other .svg stays filtered. Mirrors
+     LOGO_SVG in pipeline.ts. */
+  var LOGO_SVG = /(^|\/)[\w.-]*(logo|brand|wordmark)[\w.-]*\.svg$/i;
   var SKIP_LOCKFILES = /(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|bun\.lockb)$/i;
   /* Secrets that are not named like dotfiles, so the dotted rule misses them. */
   var SKIP_SECRETS = /((^|\/)(secrets?\.(json|ya?ml|toml)|credentials?\.(json|ya?ml)|service[-_]?account[^/]*\.json|id_(rsa|dsa|ecdsa|ed25519)(\.pub)?|htpasswd)$)|\.(pem|key|p12|pfx|keystore|jks|ppk|asc|gpg)$/i;
   function keepPath(p) {
     return !!safeRelPath(p) && !SKIP_DIR.test(p) && !SKIP_DOTTED.test(p) &&
       !SKIP_ARCHIVE_ARTIFACT.test(p) && !SKIP_DOCS.test(p) &&
-      !SKIP_LOCKFILES.test(p) && !SKIP_SECRETS.test(p) && !SKIP_FILE.test(p);
+      !SKIP_LOCKFILES.test(p) && !SKIP_SECRETS.test(p) &&
+      (!SKIP_FILE.test(p) || LOGO_SVG.test(p));
   }
 
   /* A ZIP can be perfectly valid, survive keepPath, and still hold no site:
@@ -261,31 +267,59 @@
      project and expects a project back, so removing the file from the download
      would be us deleting their configuration.
 
+     The same is now true of the site's PHOTOGRAPHS, and for a sharper reason.
+     The rebuild carries each section's images by path, so the rebuilt page
+     points at images/hero.jpg — and the ZIP is assembled from the bundle, which
+     filtered that file out at upload. The result would be a page referencing
+     pictures that are not in the folder: broken image icons where the original
+     had photographs, which is worse than the empty boxes we started from.
+
      So the browser keeps its own copy, in memory, and puts it back into the ZIP
      at download time. It is never uploaded, never stored, and never leaves this
      machine. That also means it only works in the session that did the upload:
      a download from the history has nothing to put back, which is the honest
      consequence of never having sent it anywhere. */
   var CARRY_DOTTED = /(^|\/)\.(env(\..+)?|npmrc|htpasswd)$/i;
-  var MAX_CARRY_BYTES = 2 * 1024 * 1024;
+  /* What a page paints or loads: pictures, fonts, icons, and video posters. */
+  var CARRY_ASSET = /\.(png|jpe?g|gif|webp|avif|svg|ico|bmp|woff2?|ttf|otf|eot)$/i;
+  /* Twenty megabytes of assets is a photo-heavy small-business site whole. It
+     is held as Blob references, not decoded pixels, so the cost is a handle per
+     file rather than the bytes themselves. */
+  var MAX_CARRY_BYTES = 20 * 1024 * 1024;
   var carryThrough = [];   /* [{ path, data }] — data is a Blob or Uint8Array */
   var carryBytes = 0;
+  var carrySkipped = 0;    /* assets the budget could not hold — reported, not hidden */
 
   /* True for a file we filtered out of the bundle but owe back to the user.
      Deliberately narrow: not .git internals, not macOS sidecars, not
      node_modules — those are noise the user did not ask us to preserve. */
   function isCarryThrough(p) {
     if (!safeRelPath(p) || SKIP_DIR.test(p) || SKIP_ARCHIVE_ARTIFACT.test(p)) return false;
-    return SKIP_SECRETS.test(p) || CARRY_DOTTED.test(p);
+    return SKIP_SECRETS.test(p) || CARRY_DOTTED.test(p) || CARRY_ASSET.test(p);
   }
 
   function rememberCarry(path, data, size) {
-    if (carryBytes + size > MAX_CARRY_BYTES) return;
+    if (carryBytes + size > MAX_CARRY_BYTES) { carrySkipped += 1; return; }
     carryBytes += size;
     carryThrough.push({ path: path, data: data });
   }
 
-  function clearCarry() { carryThrough = []; carryBytes = 0; }
+  function clearCarry() { carryThrough = []; carryBytes = 0; carrySkipped = 0; }
+
+  /* The order the budget is spent in.
+     Configuration first: a .env is tiny and losing it breaks a project outright.
+     Then assets smallest-first, which buys the largest NUMBER of surviving
+     pictures — a site with one enormous unused background and forty photographs
+     keeps the forty, rather than the background eating the budget alone. */
+  function carryOrder(list, sizeOf) {
+    var pathOf = function (x) { return typeof x === "string" ? x : x.path; };
+    var config = [], assets = [];
+    list.forEach(function (x) {
+      (CARRY_ASSET.test(pathOf(x)) ? assets : config).push(x);
+    });
+    assets.sort(function (a, b) { return sizeOf(a) - sizeOf(b); });
+    return config.concat(assets);
+  }
 
   /* ===== dom ===== */
   var $ = function (id) { return document.getElementById(id); };
@@ -342,7 +376,7 @@
      "fix-pipeline", "rebuild-site", "fix-hint", "design-direction",
      "build-warnings",
      "deliver-actions", "download-zip", "push-github", "deliver-result", "secrets-note",
-     "design-gate", "clean-note", "lang-note",
+     "design-gate", "clean-note", "lang-note", "after-scan",
      "add-features", "features-result", "rb-progress", "score-delta",
      "scan-progress", "site-url"
     ].forEach(function (id) { els[id] = $(id); });
@@ -652,7 +686,10 @@
       /* Read the excluded-but-owed files as bytes, not text: a .p12 or a
          keystore is binary, and decoding it would hand the user back a
          corrupted file. */
-      var carry = all.filter(isCarryThrough);
+      var carry = carryOrder(all.filter(isCarryThrough), function (n) {
+        var e = zip.files[n];
+        return (e && e._data && e._data.uncompressedSize) || 0;
+      });
       var carryChain = Promise.resolve();
       carry.forEach(function (n) {
         carryChain = carryChain.then(function () {
@@ -686,8 +723,12 @@
     clearCarry();
     /* The File object itself is the copy — nothing is read, decoded or
        re-encoded, so what goes back into the ZIP is the original bytes. */
-    entries.forEach(function (e) {
-      var rel = isCarryThrough(e.path) ? relOf(e.path) : null;
+    var owed = carryOrder(
+      entries.filter(function (e) { return isCarryThrough(e.path); }),
+      function (e) { return e.file.size; },
+    );
+    owed.forEach(function (e) {
+      var rel = relOf(e.path);
       if (rel) rememberCarry(rel, e.file, e.file.size);
     });
     var byPath = {};
@@ -1266,6 +1307,14 @@
       github_failed: "פתיחת ה-Pull Request נכשלה. במקום זה הורדנו את הפרויקט כקובץ ZIP."
     },
     zipBroken: "הקובץ שנוצר יצא פגום. מנסה שוב…",
+    afterAsk: "רוצים למדוד כמה ירד ציון ה-AI? זו סריקה נוספת מלאה של האתר החדש, והיא עולה כמו סריקה.",
+    afterRun: "מדדו את הציון אחרי",
+    afterRunning: "סורק את התוצאה…",
+    zipAssetsDropped: function (n) {
+      return "שימו לב: " + n + (n === 1 ? " קובץ מדיה היה" : " קבצי מדיה היו") +
+        " גדולים מכדי להיכלל בהורדה. העתיקו אותם ידנית מהפרויקט המקורי.";
+    },
+    zipFromHistory: "הורדה מהיסטוריה לא כוללת תמונות ופונטים — הם נשמרים רק בדפדפן של הסשן שבו העליתם. הריצו הורדה מהסשן המקורי, או העתיקו אותם ידנית.",
     zipFailed: "לא הצלחנו להכין קובץ תקין להורדה. שום דבר לא נגבה — נסו שוב, ואם זה חוזר זה אצלנו.",
     prWarnings: function (list) {
       var kinds = {
@@ -1371,6 +1420,14 @@
       github_failed: "Opening the pull request failed. We've downloaded the project as a ZIP instead."
     },
     zipBroken: "The file came out corrupt. Trying again…",
+    afterAsk: "Want to measure how far the AI score dropped? That is a second full audit of the rebuilt site, and it costs about what a scan costs.",
+    afterRun: "Measure the score after",
+    afterRunning: "Scanning the result…",
+    zipAssetsDropped: function (n) {
+      return "Heads up: " + n + (n === 1 ? " media file was" : " media files were") +
+        " too large to include in the download. Copy them across from the original project.";
+    },
+    zipFromHistory: "A download from the history carries no images or fonts — those are kept only in the browser session that uploaded them. Download from that session, or copy them across yourself.",
     zipFailed: "We could not produce a valid file to download. Nothing was charged — try again, and if it repeats it's on us.",
     prWarnings: function (list) {
       var kinds = {
@@ -1420,6 +1477,7 @@
        rebuild settled on */
     if (scan.design_direction) renderDesign(scan.design_direction);
     hideDesignGate();
+    if (els["after-scan"]) els["after-scan"].hidden = true;
     resetRebuildLabel();
     /* A direction proposed but never approved outlives the tab it was proposed
        in: it is on disk in spec.json and cost real money. Reopening the scan
@@ -1602,6 +1660,32 @@
         return afterScanPass(n, total, attempt + 1);
       });
   }
+  /* ===== the after-score, on request =====
+     It used to run at the end of every build, unasked. It is a second full
+     audit — measured across 14 runs it cost MORE than the first scan ($0.60
+     against $0.49) — and what it produces is two numbers on a card. Plenty of
+     runs never need them: the user wanted their site fixed, not measured. So it
+     is offered rather than taken, with its price named. */
+  function offerAfterScan() {
+    var el = els["after-scan"];
+    if (!el) return;
+    el.innerHTML =
+      '<p class="after-ask">' + esc(P.afterAsk) + "</p>" +
+      '<button type="button" class="btn" id="after-run">' + esc(P.afterRun) + "</button>";
+    el.hidden = false;
+    document.getElementById("after-run").addEventListener("click", function () {
+      el.hidden = true;
+      pipelineProgress(P.afterRunning);
+      runAfterScan().then(function () {
+        hideProgress();
+      }).catch(function (e) {
+        hideProgress();
+        els["fix-hint"].textContent = P.err + " [after]" + fmtReason(e);
+        el.hidden = false;
+      });
+    });
+  }
+
   function runAfterScan() {
     els["fix-hint"].textContent = P.scoreScanning(0, 0);
     pipelineProgress(P.scoreScanning(0, 0));
@@ -1772,7 +1856,7 @@
       prog.done();
       renderBuildWarnings(data && data.warnings);
       showDeliver(); /* the rebuilt bundle is saved — offer download / PR */
-      return runAfterScan(); /* measure the honest before/after AI score */
+      offerAfterScan();
     }).then(function () {
       hideProgress();
       els["fix-hint"].textContent = P.rebuildDone;
@@ -1867,7 +1951,7 @@
       /* one feature per scan — the way back is a new scan */
       els["add-features"].hidden = true;
       showDeliver();
-      return runAfterScan(); /* the honest before/after AI score */
+      offerAfterScan();
     }).then(function () {
       reenableFixButtons();
     }).catch(function (e) {
@@ -2038,8 +2122,13 @@
           a.click();
           a.remove();
           URL.revokeObjectURL(url);
-          deliverSay(join(note, P.zipReady((data.changed_files || []).length) +
-            (restored ? " " + P.zipCarried(restored) : "")));
+          /* The download is only a whole project if what it references is in
+             it. Both ways that can fail are said out loud rather than left for
+             the user to discover in a folder of broken images. */
+          var tail = restored ? " " + P.zipCarried(restored) : "";
+          if (carrySkipped) tail += " " + P.zipAssetsDropped(carrySkipped);
+          else if (!carryThrough.length && referencesAssets(data.files)) tail += " " + P.zipFromHistory;
+          deliverSay(join(note, P.zipReady((data.changed_files || []).length) + tail));
         });
       });
     }).catch(function (e) {
@@ -2050,6 +2139,17 @@
   /* Two lines where there are two things to say: why this is a ZIP, and how
      the ZIP went. Either may be empty. */
   function join(a, b) { return a ? a + " " + b : b; }
+
+  /* Does the project we are about to hand over point at media we are not
+     carrying? True after a reload or from the history, where the browser's copy
+     of the originals is gone. */
+  function referencesAssets(files) {
+    return (files || []).some(function (f) {
+      return /\.(html?|css)$/i.test(f.path || "") &&
+        /(src|href)\s*=\s*["'][^"']+\.(png|jpe?g|gif|webp|avif|svg)|url\(\s*["']?[^"')]+\.(png|jpe?g|gif|webp|avif|svg)/i
+          .test(f.content || "");
+    });
+  }
 
   /* Opens a PR on a NEW branch. The server refuses outright when QA failed
      unless we say we know — so the confirm() below is the user making that
