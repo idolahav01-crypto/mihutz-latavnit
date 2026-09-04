@@ -10,8 +10,14 @@ window.Wallet = (function () {
      is not a balance. No wallet row means nothing has been bought yet, which
      is an honest zero. A failed read means we do not know, and an unknown
      number is a dash — we never print a figure we did not get. */
+  /* The last number we actually read. The store uses it as the "before" of a
+     purchase, so a page coming back from a payment can wait for a specific
+     balance rather than for any change at all. null means we never got one. */
+  var last = null;
+
   function paint(n) {
-    var txt = (typeof n === "number" && isFinite(n)) ? String(n) : "\u2014";
+    last = (typeof n === "number" && isFinite(n)) ? n : null;
+    var txt = last === null ? "\u2014" : String(last);
     Array.prototype.forEach.call(
       document.querySelectorAll("[data-wallet-n]"),
       function (el) { el.textContent = txt; }
@@ -28,5 +34,5 @@ window.Wallet = (function () {
       .catch(function () { paint(null); });
   }
 
-  return { paint: paint, load: load };
+  return { paint: paint, load: load, value: function () { return last; } };
 })();

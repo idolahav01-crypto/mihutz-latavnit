@@ -2,7 +2,8 @@
   "//": "Test runner config only. The edge functions are deployed by the Supabase CLI, which bundles each function from supabase/functions/ and does not take its import resolution from here — keep this file free of compilerOptions, imports and scopes so that stays true.",
   "tasks": {
     "//test": "Four tests in anthropic.test.ts stand up a local Deno.serve stub in place of api.anthropic.com. Without a net permission they fail on the first line with NotCapable, which reads like broken code and is not. Loopback only, deliberately: the suite never calls a real API and this proves it.",
-    "test": "deno test --allow-net=0.0.0.0,127.0.0.1,localhost supabase/functions/_shared/",
+    "//test-read": "pricing.test.ts reads js/store.js to prove the page and the server price the same packages. That check is the only thing keeping the two copies of the catalogue honest, so the suite is given read access rather than the test being dropped.",
+    "test": "deno test --allow-read --allow-net=0.0.0.0,127.0.0.1,localhost supabase/functions/_shared/",
     "check": "deno check supabase/functions/*/index.ts supabase/functions/_shared/*.ts"
   },
   "lock": false,

@@ -1095,6 +1095,11 @@ code, .mono { font-family: var(--font-mono); }
   max-width: none;
 }
 :lang(he) .store-status { font-weight: 700; }
+/* The line the store speaks through: a payment opening, a payment landed, a
+   payment that could not start. Same two colours the custom-quantity note
+   uses, so "good" and "bad" mean one thing on this page. */
+.store-status.is-win { color: var(--color-ok); font-weight: 700; }
+.store-status.is-bad { color: var(--color-error); font-weight: 700; }
 
 /* One package per line on a phone: the count and the price on the top
    line, the value under them, the button across the full width so it is

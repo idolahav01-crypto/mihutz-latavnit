@@ -40,6 +40,12 @@
     buy: "רכישה",
     buyLabel: function (n) { return "רכישת חבילה של " + n + " טוקנים"; },
     payNotLive: "התשלום עדיין לא פעיל באתר, אז שום דבר לא נגבה ולא נשלח.",
+    payOpening: "מעבירים אתכם לדף התשלום…",
+    payFailed: "לא הצלחנו לפתוח דף תשלום. לא חויבתם — נסו שוב בעוד רגע.",
+    /* coming back from the payment page */
+    paidThanks: "התשלום התקבל. הטוקנים נכנסים ליתרה…",
+    paidDone: function (n) { return "הטוקנים נוספו. היתרה עכשיו: " + n + "."; },
+    paidSlow: "התשלום התקבל ורשום אצלנו. היתרה מתעדכנת תוך כמה רגעים — רעננו את הדף. אם היא לא השתנתה תוך כמה דקות, כתבו לנו.",
     /* the custom quantity */
     customBase: function (rate) {
       return rate + " לטוקן, מחיר הבסיס. ההנחות חלות רק על החבילות שלמעלה.";
@@ -64,6 +70,12 @@
     buy: "Buy",
     buyLabel: function (n) { return "Buy the " + n + " token package"; },
     payNotLive: "Payment isn't live on the site yet, so nothing was charged and nothing was sent.",
+    payOpening: "Taking you to the payment page…",
+    payFailed: "We could not open a payment page. You have not been charged — try again in a moment.",
+    /* coming back from the payment page */
+    paidThanks: "Payment received. Your tokens are landing in your balance…",
+    paidDone: function (n) { return "Tokens added. Your balance is now " + n + "."; },
+    paidSlow: "Payment received and recorded. The balance updates within a few seconds — refresh the page. If it has not moved in a few minutes, write to us.",
     /* the custom quantity */
     customBase: function (rate) {
       return rate + " per token, the base price. The discounts apply only to the packages above.";
@@ -97,7 +109,7 @@
       }
       user = session.user;
       showUser();
-      return window.Wallet.load(sb, user);
+      return window.Wallet.load(sb, user).then(watchForCredit);
     }).catch(function () {
       if (!DEV_NO_AUTH) window.location.replace(HOME);
     });
@@ -186,7 +198,7 @@
     if (list) {
       list.addEventListener("click", function (e) {
         var btn = e.target.closest ? e.target.closest(".pack-buy") : null;
-        if (btn) buy();
+        if (btn) buy(Number(btn.getAttribute("data-tokens")));
       });
     }
     var qty = $("custom-qty");
@@ -194,7 +206,13 @@
       qty.addEventListener("input", priceCustom);
       priceCustom();
     }
-    if ($("custom-buy")) $("custom-buy").addEventListener("click", buy);
+    if ($("custom-buy")) {
+      $("custom-buy").addEventListener("click", function () {
+        var raw = ($("custom-qty").value || "").trim();
+        if (!/^\d+$/.test(raw)) return;   /* priceCustom already said why */
+        buy(Number(raw));
+      });
+    }
   }
 
   /* ===== a quantity of the customer's own =====
@@ -258,13 +276,122 @@
     note.textContent = T.customBase(usdRate(baseRate()));
   }
 
-  /* Nothing is charged: no payment provider is connected yet. The page says
-     so out loud rather than leaving a dead button, and this is the single
-     place a checkout call will go when there is one. */
-  function buy() {
+  /* ===== checkout =====
+     The page sends a QUANTITY and nothing else. It does not send a price, and
+     it does not send who is buying: the price is worked out by the checkout
+     function from its own copy of the catalogue, and the buyer is read off the
+     session's JWT. So a customer who edits this file in their own browser can
+     order a different number of tokens, at that number's real price, for their
+     own account — and that is the whole of what they can do.
+
+     Every button is disabled while the call is in flight. A second click is a
+     second checkout, and two checkouts is two charges. */
+  var buying = false;
+
+  function buy(tokens) {
     var out = $("store-status");
-    if (!out) return;
-    out.textContent = T.payNotLive;
+    if (buying || !Number.isFinite(tokens) || tokens < 1) return;
+    if (!sb || !user) return;
+    buying = true;
+    setBuyingState(true);
+    if (out) { out.className = "store-status"; out.textContent = T.payOpening; }
+
+    sb.functions.invoke("checkout", {
+      body: { tokens: tokens },
+      headers: { "x-store-lang": he ? "he" : "en" }
+    }).then(function (res) {
+      if (res.error || !res.data || !res.data.url) throw res.error || new Error("no url");
+      /* What we are about to wait for on the way back. Kept in the tab, not
+         the URL: a number in a query string is a number the customer can
+         type, and this one decides when we tell them their tokens arrived. */
+      try {
+        window.sessionStorage.setItem("tshane_pending", JSON.stringify({
+          tokens: tokens, before: window.Wallet.value()
+        }));
+      } catch (e) { /* private mode: the poll falls back to "any increase" */ }
+      /* replace, not assign: the payment page is where the customer is now,
+         and Back should return them to the store, not to a spent checkout. */
+      window.location.replace(res.data.url);
+    }).catch(function (err) {
+      buying = false;
+      setBuyingState(false);
+      if (!out) return;
+      out.className = "store-status is-bad";
+      /* 503 is the store not being open yet, which is a different sentence
+         from the store being broken. Anything else is our problem, and the
+         customer has certainly not been charged for it. */
+      var status = err && (err.status || (err.context && err.context.status));
+      out.textContent = status === 503 ? T.payNotLive : T.payFailed;
+      console.error("checkout failed:", err);
+    });
+  }
+
+  function setBuyingState(on) {
+    Array.prototype.forEach.call(
+      document.querySelectorAll(".pack-buy, #custom-buy"),
+      function (b) { b.disabled = on; }
+    );
+  }
+
+  /* ===== coming back from the payment page =====
+     Lemon Squeezy redirects here the moment the card clears, and the webhook
+     that actually credits the balance is a separate call arriving at the
+     server around the same time. Usually it wins the race; sometimes it does
+     not. So the page waits for the number to move rather than printing a
+     balance it has not seen, and if it never moves it says the payment IS
+     recorded — because it is — instead of leaving the customer wondering.
+
+     ?paid=1 is only ever a claim by a URL, so it is treated as one: it starts
+     a poll, and nothing more. Nothing on this page can add a token. */
+  function watchForCredit() {
+    if (!/[?&]paid=1(&|$)/.test(window.location.search)) return;
+    /* the marker has done its job — a refresh should not re-run this */
+    if (window.history.replaceState) {
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+    var out = $("store-status");
+    if (out) { out.className = "store-status is-win"; out.textContent = T.paidThanks; }
+
+    /* What we expect, from the checkout that sent them away. With it, "the
+       tokens arrived" is a specific number and the answer is right even when
+       the webhook beat the redirect home. Without it — a new tab, private
+       mode, a bookmarked ?paid=1 — we fall back to waiting for any increase,
+       which is the best a page with no memory can honestly do. */
+    var want = null;
+    try {
+      var saved = JSON.parse(window.sessionStorage.getItem("tshane_pending") || "null");
+      window.sessionStorage.removeItem("tshane_pending");
+      if (saved && typeof saved.before === "number" && typeof saved.tokens === "number") {
+        want = saved.before + saved.tokens;
+      }
+    } catch (e) { /* leave want null and watch for any increase */ }
+
+    var before = want === null ? window.Wallet.value() : null, tries = 0;
+    var tick = function () {
+      sb.from("token_wallets").select("balance").eq("user_id", user.id).maybeSingle()
+        .then(function (r) {
+          var now = (r && !r.error && r.data) ? Number(r.data.balance) : null;
+          if (want === null && before === null) before = now;
+          var arrived = now !== null &&
+            (want !== null ? now >= want : (before !== null && now > before));
+          if (arrived) {
+            window.Wallet.paint(now);
+            if (out) { out.className = "store-status is-win"; out.textContent = T.paidDone(now); }
+            return;
+          }
+          /* ~20 seconds, then stop asking. A webhook that has not arrived by
+             then is not going to arrive because we asked a ninth time. */
+          if (++tries >= 8) {
+            if (out) { out.className = "store-status"; out.textContent = T.paidSlow; }
+            return;
+          }
+          window.setTimeout(tick, 2500);
+        })
+        .catch(function () {
+          if (out) { out.className = "store-status"; out.textContent = T.paidSlow; }
+        });
+    };
+    window.setTimeout(tick, 1200);
   }
 
   function esc(s) {
