@@ -44,7 +44,12 @@
     payFailed: "לא הצלחנו לפתוח דף תשלום. לא חויבתם — נסו שוב בעוד רגע.",
     /* coming back from the payment page */
     paidThanks: "התשלום התקבל. הטוקנים נכנסים ליתרה…",
-    paidDone: function (n) { return "הטוקנים נוספו. היתרה עכשיו: " + n + "."; },
+    paidDone: function (added, n) {
+      return (added === 1 ? "נוסף טוקן אחד" : "נוספו " + added + " טוקנים") +
+        ". היתרה עכשיו: " + n + ".";
+    },
+    /* the same moment, when the tab does not remember what was bought */
+    paidDoneBalance: function (n) { return "הטוקנים נוספו. היתרה עכשיו: " + n + "."; },
     paidSlow: "התשלום התקבל ורשום אצלנו. היתרה מתעדכנת תוך כמה רגעים — רעננו את הדף. אם היא לא השתנתה תוך כמה דקות, כתבו לנו.",
     /* the custom quantity */
     customBase: function (rate) {
@@ -74,7 +79,12 @@
     payFailed: "We could not open a payment page. You have not been charged — try again in a moment.",
     /* coming back from the payment page */
     paidThanks: "Payment received. Your tokens are landing in your balance…",
-    paidDone: function (n) { return "Tokens added. Your balance is now " + n + "."; },
+    paidDone: function (added, n) {
+      return (added === 1 ? "1 token added" : added + " tokens added") +
+        ". Your balance is now " + n + ".";
+    },
+    /* the same moment, when the tab does not remember what was bought */
+    paidDoneBalance: function (n) { return "Tokens added. Your balance is now " + n + "."; },
     paidSlow: "Payment received and recorded. The balance updates within a few seconds — refresh the page. If it has not moved in a few minutes, write to us.",
     /* the custom quantity */
     customBase: function (rate) {
@@ -357,12 +367,13 @@
        the webhook beat the redirect home. Without it — a new tab, private
        mode, a bookmarked ?paid=1 — we fall back to waiting for any increase,
        which is the best a page with no memory can honestly do. */
-    var want = null;
+    var want = null, bought = null;
     try {
       var saved = JSON.parse(window.sessionStorage.getItem("tshane_pending") || "null");
       window.sessionStorage.removeItem("tshane_pending");
       if (saved && typeof saved.before === "number" && typeof saved.tokens === "number") {
         want = saved.before + saved.tokens;
+        bought = saved.tokens;
       }
     } catch (e) { /* leave want null and watch for any increase */ }
 
@@ -376,7 +387,16 @@
             (want !== null ? now >= want : (before !== null && now > before));
           if (arrived) {
             window.Wallet.paint(now);
-            if (out) { out.className = "store-status is-win"; out.textContent = T.paidDone(now); }
+            if (out) {
+              out.className = "store-status is-win";
+              /* How many arrived and what is left, in one sentence — the two
+                 numbers a customer checks after paying. The count comes from
+                 the checkout that sent them away; when the tab has forgotten
+                 it, the balance alone is what we actually know. */
+              out.textContent = bought === null
+                ? T.paidDoneBalance(now)
+                : T.paidDone(bought, now);
+            }
             return;
           }
           /* ~20 seconds, then stop asking. A webhook that has not arrived by
