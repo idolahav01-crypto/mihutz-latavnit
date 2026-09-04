@@ -22,12 +22,20 @@
 -- these; it goes through admin_customers() and admin_scan_log(), which check
 -- is_admin() first.
 
+-- A view's column types cannot be altered in place, so each one is dropped
+-- before it is rebuilt. That also makes this file safe to run again.
+drop view if exists public.customers;
+drop view if exists public.scan_log;
+drop view if exists public.build_costs;
+drop view if exists public.cost_by_month;
+drop view if exists public.token_log;
+
 -- ============================================================
 -- customers — the roster, and what each one has done
 -- ============================================================
 create or replace view public.customers as
 select
-  u.email::text,
+  u.email::text                                             as email,
   u.created_at::date                                        as joined,
   coalesce(w.balance, 0)                                    as tokens,
   count(s.id)                                               as runs,
@@ -49,15 +57,18 @@ order by count(s.id) desc;
 create or replace view public.scan_log as
 select
   s.created_at::timestamp(0)              as ran_at,
-  u.email::text,
+  u.email::text                           as email,
   s.source_type,
   left(coalesce(s.source_ref, ''), 48)    as source,
   s.status,
   s.pipeline_status                       as build_status,
   s.files_scanned                         as files,
-  s.ai_fingerprint_score                  as score_before,
-  s.ai_fingerprint_score_after            as score_after,
-  -- the number the product is actually judged on: how far the score fell
+  -- Stored on the AI-fingerprint scale (0 human, 100 AI) and read here on the
+  -- scale the product shows (100 human, 0 AI), so the admin desk and the
+  -- customer's report never disagree about which direction is good.
+  100 - s.ai_fingerprint_score            as score_before,
+  100 - s.ai_fingerprint_score_after      as score_after,
+  -- the number the product is actually judged on: how far the score rose
   case when s.ai_fingerprint_score_after is not null
        then s.ai_fingerprint_score - s.ai_fingerprint_score_after end as improved_by,
   round(coalesce(s.total_cost_usd, 0)::numeric, 2) as cost_usd,
@@ -75,7 +86,7 @@ order by s.created_at desc;
 create or replace view public.build_costs as
 select
   s.created_at::timestamp(0)                              as ran_at,
-  u.email::text,
+  u.email::text                                           as email,
   round((s.cost_breakdown ->> 'scan_usd')::numeric, 3)       as scan_usd,
   round((s.cost_breakdown ->> 'scan_after_usd')::numeric, 3) as rescan_usd,
   round((s.cost_breakdown ->> 'design_usd')::numeric, 3)     as design_usd,
@@ -111,7 +122,7 @@ order by 1 desc;
 create or replace view public.token_log as
 select
   l.created_at::timestamp(0)  as changed_at,
-  u.email::text,
+  u.email::text               as email,
   l.delta,
   l.balance_after,
   l.reason,

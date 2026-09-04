@@ -172,7 +172,7 @@
 
   /* Numbers are data: monospace, tabular, and aligned to the same edge down
      the column so they can be compared without reading each one. */
-  function num(v) { return '<td class="n">' + esc(v === null || v === undefined ? "—" : String(v)) + "</td>"; }
+  function num(v) { return '<td class="n ltr">' + esc(v === null || v === undefined ? "—" : String(v)) + "</td>"; }
   function txt(v) { return "<td>" + esc(v === null || v === undefined ? "—" : String(v)) + "</td>"; }
   function mono(v) { return '<td class="m ltr">' + esc(v === null || v === undefined ? "—" : String(v)) + "</td>"; }
 
@@ -188,7 +188,7 @@
     return "<tr>" + mono(String(r.ran_at).replace("T", " ").slice(0, 16)) + mono(r.email) +
       "<td class=\"src ltr\">" + esc(r.source || "—") + "</td>" + txt(status) +
       num(r.score_before) + num(r.score_after) +
-      num(r.improved_by === null ? null : "-" + r.improved_by) +
+      num(r.improved_by) +
       num(r.cost_usd === null ? null : "$" + r.cost_usd) + "</tr>";
   }
 

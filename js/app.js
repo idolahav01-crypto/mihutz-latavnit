@@ -378,7 +378,7 @@
      "build-warnings",
      "deliver-actions", "download-zip", "push-github", "deliver-result", "secrets-note",
      "design-gate", "clean-note", "lang-note", "after-scan",
-     "add-features", "features-result", "rb-progress", "score-delta",
+     "features-result", "rb-progress", "score-delta",
      "scan-progress", "site-url"
     ].forEach(function (id) { els[id] = $(id); });
   }
@@ -1147,6 +1147,16 @@
   }
 
   /* ===== report view ===== */
+  /* ===== the score the user reads =====
+     What we store is ai_fingerprint_score: 0 is fully human, 100 is obvious
+     AI, and every row in the database — old scans included — is written on
+     that scale. What the user reads runs the other way: 100 is human, 0 is
+     AI, so the good end is the high end and a rebuild moves the number up.
+     Flipping here rather than in the database keeps one scale in storage and
+     one on screen, and means no historical row needs rewriting. */
+  function shownScore(ai) { return ai == null ? null : 100 - ai; }
+  function scoreText(ai) { var v = shownScore(ai); return v == null ? "—" : String(v); }
+
   function renderReport(scan) {
     var det = scan.detection || {};
     /* The stored detection carries an entry for every signal (present & absent).
@@ -1165,7 +1175,7 @@
         ? det.applicable_count
         : 110 - ((det.not_applicable_ids || []).length));
 
-    els.score.innerHTML = esc(String(scan.ai_fingerprint_score != null ? scan.ai_fingerprint_score : 0)) + "<small>/100</small>";
+    els.score.innerHTML = esc(scoreText(scan.ai_fingerprint_score)) + "<small>/100</small>";
     /* A signal nobody evaluated is recorded with confidence 0 rather than
        dropped, so it cannot quietly leave the denominator. Saying so out loud
        is the point: this failure was found by reading the database by hand,
@@ -1306,7 +1316,6 @@
     rebuildSection: function (d, t) { return "בונה מאפס — סקשן " + d + " מתוך " + t + "…"; },
     rebuildDone: "האתר נבנה מחדש מאפס — אפשר להוריד ולראות את התוצאה.",
     /* propose one → approve → build */
-    addFeatures: "הצע פיצ'ר חדש",
     rebuildLabel: "בנה מחדש מאפס",
     featuresProposing: "קורא ומבין את האתר — חושב על פיצ'ר…",
     featureBuilding: "בונה את הפיצ'ר…",
@@ -1320,15 +1329,15 @@
     rbStepDesign: "בונה שפת עיצוב",
     rbStepSection: function (i) { return "בונה סקשן " + i; },
     rbStepAssemble: "מרכיב את האתר",
-    /* AI score before/after */
-    scoreScanning: function (d, t) { return t ? "מודד כמה AI האתר עכשיו — מעבר " + d + " מתוך " + t + "…" : "מודד כמה AI האתר עכשיו…"; },
-    scoreTitle: "כמה AI האתר",
-    scoreHint: "0 = אנושי לגמרי · 100 = AI מובהק",
+    /* the score, before/after */
+    scoreScanning: function (d, t) { return t ? "מודד כמה אנושי האתר עכשיו — מעבר " + d + " מתוך " + t + "…" : "מודד כמה אנושי האתר עכשיו…"; },
+    scoreTitle: "כמה אנושי האתר",
+    scoreHint: "0 = AI מובהק · 100 = אנושי לגמרי",
     scoreBefore: "לפני",
     scoreAfter: "אחרי",
-    scoreImproved: function (d) { return "ירידה של " + d + " נקודות ברמת ה-AI."; },
+    scoreImproved: function (d) { return "עלייה של " + d + " נקודות — האתר קורא פחות כמו AI."; },
     scoreSame: "אין שינוי מדיד בציון.",
-    scoreWorse: function (d) { return "עלייה של " + d + " נקודות — כדאי לבדוק."; },
+    scoreWorse: function (d) { return "ירידה של " + d + " נקודות — כדאי לבדוק."; },
     designTitle: "כיוון עיצובי", proposalsTitle: function (n) { return "הצעות תיקון (" + n + ")"; },
     apply: "החל תיקונים מאושרים", applying: "מחיל תיקונים…", qaRunning: "בקרת איכות…", qaFail: "בקרת האיכות מצאה בעיות — מריץ סבב תיקון…",
     qaSkipped: "בקרת האיכות לא הושלמה — אבל התיקונים כבר הוחלו. אפשר להוריד ולבדוק.",
@@ -1352,7 +1361,7 @@
     cleanTitle: "האתר שלכם במצב טוב",
     cleanBody: function (n) {
       return "מצאנו רק " + n + (n === 1 ? " סימן" : " סימנים") +
-        ". זה ציון נמוך — האתר לא נראה תבניתי. שיפוץ מלא כנראה מיותר כאן; " +
+        ". זה ציון גבוה — האתר לא נראה תבניתי. שיפוץ מלא כנראה מיותר כאן; " +
         "כדאי להסתכל על הסימנים הבודדים שנמצאו ולתקן רק אותם.";
     },
     cleanAnyway: "בכל זאת לבנות מחדש",
@@ -1388,7 +1397,7 @@
       github_failed: "פתיחת ה-Pull Request נכשלה. במקום זה הורדנו את הפרויקט כקובץ ZIP."
     },
     zipBroken: "הקובץ שנוצר יצא פגום. מנסה שוב…",
-    afterAsk: "רוצים למדוד כמה ירד ציון ה-AI? זו סריקה נוספת מלאה של האתר החדש, והיא עולה כמו סריקה.",
+    afterAsk: "רוצים למדוד כמה עלה הציון? זו סריקה נוספת מלאה של האתר החדש, והיא עולה כמו סריקה.",
     afterRun: "מדדו את הציון אחרי",
     afterRunning: "סורק את התוצאה…",
     zipAssetsDropped: function (n) {
@@ -1417,7 +1426,6 @@
     rebuildSection: function (d, t) { return "Rebuilding from scratch — section " + d + " of " + t + "…"; },
     rebuildDone: "The site was rebuilt from scratch — download to see the result.",
     /* propose one → approve → build */
-    addFeatures: "Suggest a new feature",
     rebuildLabel: "Rebuild from scratch",
     featuresProposing: "Reading & understanding the site — thinking of a feature…",
     featureBuilding: "Building the feature…",
@@ -1431,15 +1439,15 @@
     rbStepDesign: "Building the design language",
     rbStepSection: function (i) { return "Building section " + i; },
     rbStepAssemble: "Assembling the site",
-    /* AI score before/after */
-    scoreScanning: function (d, t) { return t ? "Measuring how AI the site is now — pass " + d + " of " + t + "…" : "Measuring how AI the site is now…"; },
-    scoreTitle: "How AI the site is",
-    scoreHint: "0 = fully human · 100 = obvious AI",
+    /* the score, before/after */
+    scoreScanning: function (d, t) { return t ? "Measuring how human the site reads now — pass " + d + " of " + t + "…" : "Measuring how human the site reads now…"; },
+    scoreTitle: "How human the site reads",
+    scoreHint: "0 = obvious AI · 100 = fully human",
     scoreBefore: "Before",
     scoreAfter: "After",
-    scoreImproved: function (d) { return d + " points less AI."; },
+    scoreImproved: function (d) { return d + " points more human."; },
     scoreSame: "No measurable change in score.",
-    scoreWorse: function (d) { return d + " points higher — worth a look."; },
+    scoreWorse: function (d) { return d + " points lower — worth a look."; },
     designTitle: "Design direction", proposalsTitle: function (n) { return "Fix proposals (" + n + ")"; },
     apply: "Apply approved fixes", applying: "Applying fixes…", qaRunning: "Running QA…", qaFail: "QA found issues — running a fix round…",
     qaSkipped: "QA couldn't finish — but the fixes are already applied. You can download and inspect.",
@@ -1463,7 +1471,7 @@
     cleanTitle: "Your site is in good shape",
     cleanBody: function (n) {
       return "We found only " + n + (n === 1 ? " signal" : " signals") +
-        ". That is a low score — the site does not read as template output. A full rebuild is " +
+        ". That is a high score — the site does not read as template output. A full rebuild is " +
         "probably unnecessary here; the few signals we did find are worth a look on their own.";
     },
     cleanAnyway: "Rebuild anyway",
@@ -1501,7 +1509,7 @@
       github_failed: "Opening the pull request failed. We've downloaded the project as a ZIP instead."
     },
     zipBroken: "The file came out corrupt. Trying again…",
-    afterAsk: "Want to measure how far the AI score dropped? That is a second full audit of the rebuilt site, and it costs about what a scan costs.",
+    afterAsk: "Want to measure how far the score rose? That is a second full audit of the rebuilt site, and it costs about what a scan costs.",
     afterRun: "Measure the score after",
     afterRunning: "Scanning the result…",
     zipAssetsDropped: function (n) {
@@ -1540,7 +1548,6 @@
     if (els["deliver-actions"]) els["deliver-actions"].hidden = true;
     if (els["deliver-result"]) els["deliver-result"].hidden = true;
     els["fix-hint"].textContent = "";
-    if (els["add-features"]) { els["add-features"].textContent = P.addFeatures; els["add-features"].disabled = false; els["add-features"].hidden = false; }
     if (els["features-result"]) els["features-result"].hidden = true;
     if (els["rb-progress"]) els["rb-progress"].hidden = true;
     if (els["score-delta"]) els["score-delta"].hidden = true;
@@ -1599,17 +1606,17 @@
   }
 
   /* ===== a site that is already in good shape =====
-     0 is fully human and 100 is obvious AI, so a LOW score is the good end.
-     Below the floor a full rebuild is the wrong offer: it costs real money to
-     replace a site that was not the problem. The button stays — this is advice,
-     not a lock — but it stops being the obvious next step. */
-  var CLEAN_FLOOR = 15;
+     On the scale the user reads, 100 is human and 0 is AI, so a HIGH score is
+     the good end. Above the ceiling a full rebuild is the wrong offer: it costs
+     real money to replace a site that was not the problem. The button stays —
+     this is advice, not a lock — but it stops being the obvious next step. */
+  var CLEAN_CEILING = 85;
 
   function renderCleanNote(scan) {
     var el = els["clean-note"];
     if (!el) return;
     el.hidden = true;
-    var score = scan.ai_fingerprint_score;
+    var score = shownScore(scan.ai_fingerprint_score);
     if (score == null) return;
 
     /* A near-empty result the audit itself could not corroborate is the one
@@ -1622,7 +1629,7 @@
       return;
     }
 
-    if (score >= CLEAN_FLOOR) return;
+    if (score <= CLEAN_CEILING) return;
     el.innerHTML = "<h3>" + esc(P.cleanTitle) + "</h3>" +
       "<p>" + esc(P.cleanBody(scan.present_count || 0)) + "</p>";
     el.hidden = false;
@@ -1708,11 +1715,9 @@
 
   function reenableFixButtons() {
     if (els["rebuild-site"]) els["rebuild-site"].disabled = false;
-    if (els["add-features"]) els["add-features"].disabled = false;
   }
   function busyFixButtons() {
     if (els["rebuild-site"]) els["rebuild-site"].disabled = true;
-    if (els["add-features"]) els["add-features"].disabled = true;
   }
 
   /* ===== honest AI score: re-run the SAME audit on the rebuilt/updated site
@@ -1785,9 +1790,9 @@
   function renderScoreDelta(before, after) {
     var el = els["score-delta"];
     if (!el || !after || after.ai_fingerprint_score == null) return;
-    var b = (before && before.ai_fingerprint_score != null) ? before.ai_fingerprint_score : null;
-    var a = after.ai_fingerprint_score;
-    var delta = b == null ? null : (b - a); /* positive = less AI = better */
+    var b = shownScore(before && before.ai_fingerprint_score != null ? before.ai_fingerprint_score : null);
+    var a = shownScore(after.ai_fingerprint_score);
+    var delta = b == null ? null : (a - b); /* positive = more human = better */
     var msg = delta == null ? "" :
       (delta > 0 ? P.scoreImproved(delta) : (delta < 0 ? P.scoreWorse(-delta) : P.scoreSame));
     el.hidden = false;
@@ -1950,9 +1955,13 @@
   }
 
   /* ===== FeatureDesigner: propose one feature, build it only once approved =====
+     No longer offered: the button that started this flow was taken off the
+     report, so nothing calls proposeFeature. The code stays defined — the
+     server side is untouched and the flow is a decision away from returning —
+     but from the report it is unreachable.
      Nothing reaches the user's site until they press "build". They get one
      alternative if the first idea misses — two proposals is the whole budget —
-     and one feature per scan, so the button goes away once it is built. */
+     and one feature per scan. */
   var FEATURE_ATTEMPTS = 2;
   var featureRejects = [];  /* names the user turned down, sent back so the model doesn't repeat them */
   var featureAttempts = 0;
@@ -2029,8 +2038,6 @@
           '<p class="feat-summary">' + esc(feat.summary || "") + "</p>" +
         "</div>";
       els["fix-hint"].textContent = P.featuresDone;
-      /* one feature per scan — the way back is a new scan */
-      els["add-features"].hidden = true;
       showDeliver();
       offerAfterScan();
     }).then(function () {
@@ -2317,13 +2324,13 @@
   function renderHistoryInto(rows, target) {
     var chevron = he ? "‹" : "›";
     target.innerHTML = rows.map(function (s) {
-      var score = s.ai_fingerprint_score != null ? s.ai_fingerprint_score : 0;
+      var score = scoreText(s.ai_fingerprint_score);
       var ref = s.source_ref || sourceLabel(s.source_type);
       var sub = [sourceLabel(s.source_type), fmtDate(s.created_at)];
       if (s.present_count != null) sub.push(s.present_count + (he ? " סימנים" : " signals"));
       return '<li class="history-item">' +
         '<button type="button" class="history-row" data-id="' + esc(s.id) + '">' +
-        '<span class="history-score" dir="ltr">' + esc(String(score)) + "<small>/100</small></span>" +
+        '<span class="history-score" dir="ltr">' + esc(score) + "<small>/100</small></span>" +
         '<span class="history-meta">' +
           '<span class="history-ref ltr">' + esc(ref) + "</span>" +
           '<span class="history-sub">' + esc(sub.join(" · ")) + "</span>" +
@@ -2568,7 +2575,6 @@
     // Primary flow is now the whole-file redesign (TransformDesigner). The old
     // propose→apply patch handlers stay defined but are no longer wired.
     if (els["rebuild-site"]) els["rebuild-site"].addEventListener("click", rebuildSite);
-    if (els["add-features"]) els["add-features"].addEventListener("click", proposeFeature);
     if (els["download-zip"]) els["download-zip"].addEventListener("click", downloadZip);
     if (els["push-github"]) els["push-github"].addEventListener("click", function () {
       pushToGithub(false);

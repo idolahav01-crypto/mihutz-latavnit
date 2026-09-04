@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700;9..144,800&family=Frank+Ruhl+Libre:wght@500;700;800;900&family=Rubik:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/css/styles.css" />
-  <link rel="stylesheet" href="/css/app.css?v=8" />
+  <link rel="stylesheet" href="/css/app.css?v=9" />
 </head>
 <body>
   <a class="skip-link" href="#app-main">דלג לתוכן העמוד</a>
@@ -132,7 +132,7 @@
       <section class="report" id="report" hidden>
         <button type="button" class="linkbtn report-back" id="report-back"><span class="back-arrow" aria-hidden="true">←</span> חזרה לאבחונים</button>
         <div class="report-summary">
-          <span class="score" id="score">0<small>/100</small></span>
+          <span class="score" id="score">&mdash;<small>/100</small></span>
           <span class="caption" id="report-caption"></span>
         </div>
         <!-- ===== צינור התיקון: שלב 2 (עיצוב) ← 4 (יישום) ← 5 (QA) =====
@@ -146,7 +146,6 @@
           <p class="site-url-note">בלי הכתובת אי אפשר לייצר תגיות שיתוף ותגית canonical — ואנחנו לא ממציאים כתובת.</p>
         </div>
           <button type="button" class="btn btn-primary" id="rebuild-site">בנה מחדש מאפס</button>
-          <button type="button" class="btn" id="add-features">הצע פיצ'ר חדש</button>
           <p class="fix-hint" id="fix-hint" aria-live="polite"></p>
           <div class="rb-progress" id="rb-progress" hidden aria-live="polite"></div>
           <div class="fix-stage" id="score-delta" hidden aria-live="polite"></div>

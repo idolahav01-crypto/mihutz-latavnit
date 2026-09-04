@@ -25,10 +25,8 @@
   var PACKAGES = [
     { tokens: 10,  usd: 10 },
     { tokens: 20,  usd: 18 },
-    { tokens: 30,  usd: 26 },
     { tokens: 50,  usd: 42, popular: true },
-    { tokens: 100, usd: 80 },
-    { tokens: 250, usd: 185 }
+    { tokens: 100, usd: 80 }
   ];
 
   var T = he ? {
