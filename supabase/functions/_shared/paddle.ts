@@ -171,25 +171,40 @@ export function parseSignatureHeader(
  */
 export const DEFAULT_TOLERANCE_SECONDS = 300;
 
-export async function verifySignature(
+export interface VerifyResult {
+  ok: boolean;
+  /** Why it failed, for the log. Never contains the secret or the signature. */
+  reason?: "no_secret" | "bad_header" | "stale" | "mismatch";
+  /** Seconds between Paddle's timestamp and ours. Useful exactly once: when
+   *  a correct secret still fails and the clocks are the reason. */
+  skewSeconds?: number;
+}
+
+export async function verifySignatureDetailed(
   rawBody: string,
   header: string | null,
   secret: string,
   toleranceSeconds = DEFAULT_TOLERANCE_SECONDS,
   nowSeconds = Math.floor(Date.now() / 1000),
-): Promise<boolean> {
-  if (!secret) return false;
+): Promise<VerifyResult> {
+  // A secret pasted into a form picks up whitespace and, from a textarea, a
+  // trailing newline. Neither is visible and either changes the HMAC
+  // completely, so the value is trimmed before it is ever used as a key.
+  const key0 = secret.trim();
+  if (!key0) return { ok: false, reason: "no_secret" };
   const sig = parseSignatureHeader(header);
-  if (!sig) return false;
+  if (!sig) return { ok: false, reason: "bad_header" };
 
   // Future timestamps are allowed the same slack as past ones: the skew can
   // run either way, and it is our clock that is as likely to be wrong.
-  const age = nowSeconds - Number(sig.ts);
-  if (Math.abs(age) > toleranceSeconds) return false;
+  const skewSeconds = nowSeconds - Number(sig.ts);
+  if (Math.abs(skewSeconds) > toleranceSeconds) {
+    return { ok: false, reason: "stale", skewSeconds };
+  }
 
   const key = await crypto.subtle.importKey(
     "raw",
-    new TextEncoder().encode(secret),
+    new TextEncoder().encode(key0),
     { name: "HMAC", hash: "SHA-256" },
     false,
     ["sign"],
@@ -199,7 +214,23 @@ export async function verifySignature(
     key,
     new TextEncoder().encode(`${sig.ts}:${rawBody}`),
   );
-  return timingSafeEqual(toHex(mac), sig.h1);
+  if (!timingSafeEqual(toHex(mac), sig.h1)) {
+    return { ok: false, reason: "mismatch", skewSeconds };
+  }
+  return { ok: true, skewSeconds };
+}
+
+export async function verifySignature(
+  rawBody: string,
+  header: string | null,
+  secret: string,
+  toleranceSeconds = DEFAULT_TOLERANCE_SECONDS,
+  nowSeconds = Math.floor(Date.now() / 1000),
+): Promise<boolean> {
+  const r = await verifySignatureDetailed(
+    rawBody, header, secret, toleranceSeconds, nowSeconds,
+  );
+  return r.ok;
 }
 
 export function timingSafeEqual(a: string, b: string): boolean {

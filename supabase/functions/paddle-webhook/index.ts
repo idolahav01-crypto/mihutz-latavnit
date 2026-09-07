@@ -14,7 +14,7 @@
 // not finish returns non-2xx on purpose, so Paddle tries again later.
 
 import { cors } from "../_shared/http.ts";
-import { PaddleError, readEvent, verifySignature } from "../_shared/paddle.ts";
+import { readEvent, verifySignatureDetailed } from "../_shared/paddle.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
 const SECRET = Deno.env.get("PADDLE_WEBHOOK_SECRET") ?? "";
@@ -40,10 +40,31 @@ Deno.serve(async (req) => {
   }
 
   const raw = await req.text();
-  const ok = await verifySignature(raw, req.headers.get("Paddle-Signature"), SECRET);
-  if (!ok) {
-    console.warn("webhook signature did not verify — ignored");
-    return reply("bad signature", 401);
+  const v = await verifySignatureDetailed(
+    raw,
+    req.headers.get("Paddle-Signature"),
+    SECRET,
+  );
+  if (!v.ok) {
+    // Says WHICH way it failed, because "bad signature" alone cannot tell a
+    // wrong secret from a clock that drifted, and those have opposite fixes.
+    // Nothing here reveals the secret or the signature itself.
+    console.warn(
+      `webhook rejected: ${v.reason}` +
+        (v.skewSeconds !== undefined ? ` (clock skew ${v.skewSeconds}s)` : "") +
+        ` [secret configured: ${SECRET.trim().length} chars]`,
+    );
+    // The reason goes in the body too, because the provider's delivery log is
+    // where anybody debugging this is already looking. It distinguishes a
+    // wrong secret from a drifted clock and reveals neither the secret nor
+    // the signature — an attacker learns only that they failed, which they
+    // knew from the 401.
+    return reply(
+      `bad signature (${v.reason}` +
+        (v.skewSeconds !== undefined ? `, clock skew ${v.skewSeconds}s` : "") +
+        ")",
+      401,
+    );
   }
 
   let event;
