@@ -31,15 +31,27 @@ create index if not exists purchases_user_id_created_at_idx
 -- definer rights, read by admins through the view at the end of this file.
 alter table public.purchases enable row level security;
 
+-- An argument name cannot be changed by create-or-replace, so an earlier
+-- version of either function with different argument names is dropped first.
+-- Harmless on a database that has never seen this file.
+drop function if exists public.credit_tokens(uuid, integer, text, integer, text);
+drop function if exists public.mark_purchase_refunded(text, text);
+
 -- ============================================================
 -- credit_tokens — add tokens for one paid order, exactly once
 -- ============================================================
+-- The arguments carry a p_ prefix because PL/pgSQL substitutes variables
+-- everywhere in a statement, including an ON CONFLICT target. An argument
+-- named after the column it fills makes "provider" ambiguous, and Postgres
+-- raises 42702 at RUN time, not at create time — a payment taken with no
+-- tokens delivered, discovered by a customer rather than by a compiler.
+-- Qualifying the references is not enough; the names have to differ.
 create or replace function public.credit_tokens(
   target       uuid,
   amount       integer,
-  provider_ref text,
-  gross_cents  integer default 0,
-  provider     text default 'paddle'
+  p_provider_ref text,
+  p_gross_cents  integer default 0,
+  p_provider     text default 'paddle'
 )
 returns integer
 language plpgsql
@@ -54,7 +66,7 @@ begin
   if amount is null or amount < 1 then
     raise exception 'amount must be at least 1';
   end if;
-  if provider_ref is null or btrim(provider_ref) = '' then
+  if p_provider_ref is null or btrim(p_provider_ref) = '' then
     raise exception 'provider_ref is required';
   end if;
   if not exists (select 1 from auth.users u where u.id = target) then
@@ -64,7 +76,7 @@ begin
   -- The insert is the lock. Two deliveries of the same order racing each other
   -- both reach here; one inserts, the other conflicts and credits nothing.
   insert into public.purchases (user_id, tokens, gross_cents, provider, provider_ref)
-  values (target, amount, coalesce(gross_cents, 0), provider, provider_ref)
+  values (target, amount, coalesce(p_gross_cents, 0), p_provider, p_provider_ref)
   on conflict (provider, provider_ref) do nothing;
 
   get diagnostics rows_added = row_count;
@@ -85,7 +97,8 @@ begin
   -- actor is null: nobody did this, a payment did. The ledger already carries
   -- who-and-when for hand edits, and a purchase should read differently.
   insert into public.token_ledger (user_id, delta, balance_after, reason, actor)
-  values (target, amount, new_balance, 'purchase ' || provider || ' ' || provider_ref, null);
+  values (target, amount, new_balance,
+          'purchase ' || p_provider || ' ' || p_provider_ref, null);
 
   return new_balance;
 end;
@@ -111,8 +124,8 @@ grant execute on function public.credit_tokens(uuid, integer, text, integer, tex
 -- recorded, shows up on the admin desk, and a person decides what to do with
 -- the balance using admin_set_balance().
 create or replace function public.mark_purchase_refunded(
-  provider_ref text,
-  provider     text default 'paddle'
+  p_provider_ref text,
+  p_provider     text default 'paddle'
 )
 returns boolean
 language plpgsql
@@ -125,8 +138,8 @@ declare
 begin
   update public.purchases p
      set refunded_at = now()
-   where p.provider = mark_purchase_refunded.provider
-     and p.provider_ref = mark_purchase_refunded.provider_ref
+   where p.provider = p_provider
+     and p.provider_ref = p_provider_ref
      and p.refunded_at is null;
   get diagnostics hit = row_count;
   return hit > 0;

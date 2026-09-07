@@ -74,7 +74,7 @@ Deno.serve(async (req) => {
   // on the admin desk and a person decides — see 0014_purchases.sql.
   if (event.eventType === "adjustment.created") {
     const { error } = await admin.rpc("mark_purchase_refunded", {
-      provider_ref: event.transactionId,
+      p_provider_ref: event.transactionId,
     });
     if (error) {
       console.error(
@@ -103,12 +103,14 @@ Deno.serve(async (req) => {
     return reply("not paid");
   }
 
+  // p_ prefixes: the SQL arguments are named after the columns they fill, so
+  // they carry a prefix to stay unambiguous inside PL/pgSQL. See 0014.
   const { data, error } = await admin.rpc("credit_tokens", {
     target: event.userId,
     amount: event.tokens,
-    provider_ref: event.transactionId,
-    gross_cents: event.totalCents,
-    provider: "paddle",
+    p_provider_ref: event.transactionId,
+    p_gross_cents: event.totalCents,
+    p_provider: "paddle",
   });
 
   if (error) {
