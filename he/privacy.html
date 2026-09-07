@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>מדיניות פרטיות — תשנה</title>
+  <meta name="description" content="מדיניות הפרטיות של תשנה: איזה מידע נאסף, מה נעשה בקוד שאתם מעלים, למי הוא מועבר, וכמה זמן הוא נשמר.">
+  <link rel="canonical" href="https://www.teshane.com/he/privacy.html">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@800;900&family=Rubik:wght@500;600;700&display=swap">
+  <link rel="stylesheet" href="../css/styles.css">
+  <style>
+    .fillme { background: #fff3a3; padding: 0 .25em; font-weight: 700; }
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#main">דילוג לתוכן</a>
+  <header class="site-header">
+    <div class="shell">
+      <a class="wordmark" href="/he/"><span>תשנה<span class="mark-dot">.</span></span><small dir="ltr">TESHANE</small></a>
+      <nav class="site-nav" aria-label="ניווט ראשי">
+        <ul>
+          <li><a href="/he/">חזרה לדף הבית</a></li>
+          <li><a href="/privacy.html" lang="en" hreflang="en" dir="ltr" class="lang-switch">English</a></li>
+        </ul>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="section">
+      <div class="shell">
+        <h1>מדיניות פרטיות</h1>
+        <p class="section-intro">עודכנה לאחרונה: 7 בספטמבר 2026</p>
+
+        <p>המדיניות הזו מסבירה איזה מידע נאסף כשאתם משתמשים באתר "תשנה", מה נעשה בו, ולמי הוא מועבר. האתר מופעל על ידי <mark class="fillme">[שם העוסק/החברה המלא + ח.פ. / מספר עוסק]</mark>, מכתובת <mark class="fillme">[כתובת פיזית מלאה]</mark>.</p>
+
+        <h2>איזה מידע נאסף</h2>
+
+        <h3>פרטי חשבון</h3>
+        <p>ההתחברות לשירות מתבצעת דרך Google או GitHub. מהם אנחנו מקבלים את <strong>כתובת המייל</strong> שלכם ואת <strong>שם התצוגה</strong>. איננו מקבלים ואיננו שומרים את הסיסמה שלכם לאף אחד מהשירותים האלה.</p>
+
+        <h3>הקוד שאתם מגישים לאבחון</h3>
+        <p>כדי לאבחן אתר ולבנות אותו מחדש, אנחנו מקבלים את <strong>קוד המקור</strong> שאתם מעלים או מושכים מ־GitHub, ושומרים אותו יחד עם תוצרי הריצה. זה החומר הרגיש ביותר שעובר אצלנו, ולכן שני דברים חשובים:</p>
+        <ul class="keep-list">
+          <li><strong>קבצי הגדרות וסודות (למשל <span dir="ltr">.env</span>) לא נשלחים אלינו כלל.</strong> הם נשארים בדפדפן שלכם, ומוחזרים לקובץ ההורדה מאותו חלון. המודל לא רואה אותם ואנחנו לא שומרים אותם.</li>
+          <li>הקוד נשלח לספק המודל לצורך האבחון והבנייה בלבד — ראו "למי המידע מועבר" למטה.</li>
+        </ul>
+
+        <h3>מידע על השימוש</h3>
+        <p>לכל ריצה נשמרים: מועד, מקור (GitHub או קובץ), הציון והממצאים, סטטוס ההצלחה, וכן נתוני עלות ושימוש טכניים ששימשו אותנו לתמחור ולניטור.</p>
+
+        <h3>מידע על תשלומים</h3>
+        <p>יתרת הטוקנים שלכם ורישום הרכישות נשמרים אצלנו. <strong>פרטי כרטיס האשראי אינם עוברים דרכנו ואינם נשמרים אצלנו כלל</strong> — הם נמסרים ישירות ל־Paddle בחלון התשלום שלהם.</p>
+
+        <h2>למה המידע משמש</h2>
+        <ul class="keep-list">
+          <li>להפעיל את השירות: לאבחן, לבנות מחדש, ולמסור לכם את התוצר.</li>
+          <li>לנהל את החשבון והיתרה, ולהציג לכם היסטוריית ריצות.</li>
+          <li>לתמוך בכם כשאתם פונים, ולחקור תקלות.</li>
+          <li>למדוד עלויות ולשפר את המוצר.</li>
+        </ul>
+        <p><strong>איננו מוכרים מידע אישי, ואיננו מעבירים אותו למפרסמים.</strong></p>
+
+        <h2>למי המידע מועבר</h2>
+        <p>אנחנו נעזרים בספקים הבאים, כל אחד למטרה מוגדרת:</p>
+        <ul class="keep-list">
+          <li><strong>Anthropic</strong> — ספק מודל השפה שמבצע את האבחון ואת הבנייה. הקוד שהגשתם נשלח אליו לצורך זה.</li>
+          <li><strong>Supabase</strong> — אחסון מסד הנתונים, ניהול ההתחברות ואחסון הקבצים.</li>
+          <li><strong>Vercel</strong> — אירוח האתר.</li>
+          <li><strong>Paddle.com Market Limited</strong> — עיבוד התשלומים והוצאת הקבלה. Paddle משמשת כ־Merchant of Record.</li>
+          <li><strong>Google / GitHub</strong> — התחברות בלבד, לפי בחירתכם.</li>
+        </ul>
+        <p>חלק מהספקים האלה פועלים מחוץ לישראל, ולכן ייתכן שהמידע יעובד גם מחוץ לגבולותיה.</p>
+
+        <h2>כמה זמן המידע נשמר</h2>
+        <p>קוד ותוצרי ריצה נשמרים כל עוד החשבון שלכם פעיל, כדי שתוכלו לחזור להיסטוריה. אתם יכולים למחוק ריצה מהדשבורד בכל רגע. רישומי רכישה נשמרים לתקופה הנדרשת על פי דיני המס.</p>
+
+        <h2>הזכויות שלכם</h2>
+        <p>אתם רשאים לעיין במידע שנשמר עליכם, לבקש את תיקונו, ולבקש את מחיקתו ואת מחיקת החשבון. פנו ל־<a href="mailto:idolahav01@gmail.com" dir="ltr">idolahav01@gmail.com</a> ונטפל בזה בתוך <strong>שני ימי עסקים</strong>.</p>
+        <p>אם אתם תושבי האיחוד האירופי או בריטניה, עומדות לכם בנוסף זכויות לפי ה־GDPR, לרבות הזכות לניידות המידע והזכות להתנגד לעיבוד.</p>
+
+        <h2>עוגיות</h2>
+        <p>האתר משתמש באחסון מקומי בדפדפן כדי לשמור את מצב ההתחברות שלכם. אלה אינם משמשים למעקב פרסומי. חלון התשלום של Paddle עשוי להשתמש בעוגיות משלו, בהתאם למדיניות שלהם.</p>
+
+        <h2>אבטחה</h2>
+        <p>הגישה למידע מוגנת ברמת מסד הנתונים: כל משתמש יכול לקרוא רק את הנתונים שלו, ויתרות ורכישות ניתנות לשינוי רק על ידי השרת — לעולם לא מהדפדפן. עם זאת, אף מערכת אינה חסינה לחלוטין, ואיננו יכולים להתחייב לאבטחה מוחלטת.</p>
+
+        <h2>שינויים במדיניות</h2>
+        <p>אם נעדכן את המדיניות, נשנה את התאריך בראש העמוד. שינוי מהותי יימסר לכם גם במייל.</p>
+
+        <h2>יצירת קשר</h2>
+        <p><mark class="fillme">[שם העוסק/החברה]</mark>, <mark class="fillme">[כתובת]</mark>. מייל: <a href="mailto:idolahav01@gmail.com" dir="ltr">idolahav01@gmail.com</a>.</p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="shell">
+      <div class="footer-legal">
+        <span>© 2026 תשנה</span>
+        <span><a href="/he/">לדף הבית</a></span>
+        <span><a href="/he/terms.html">תנאי שימוש</a></span>
+        <span><a href="/he/refunds.html">מדיניות ביטולים</a></span>
+        <span><a href="/he/accessibility.html">הצהרת נגישות</a></span>
+      </div>
+    </div>
+  </footer>
+</body>
+</html>
