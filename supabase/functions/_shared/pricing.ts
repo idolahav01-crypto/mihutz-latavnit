@@ -28,6 +28,19 @@ export function baseRate(): number {
   return PACKAGES[0].usd / PACKAGES[0].tokens;
 }
 
+/** The fewest tokens anyone may buy in one go.
+ *
+ *  The payment fee is a percentage PLUS a flat 50 cents, and the flat part is
+ *  what decides a small sale: a $1 order pays $0.55 to the processor, which is
+ *  55% of it. Ten tokens is $10 — the smallest package, and the figure above
+ *  which the fee stops being most of the price. A whole site costs us about
+ *  two dollars to scan and build, so a sale below this could not pay for
+ *  itself even before the fee.
+ *
+ *  The store's own input carries the same floor; pricing.test.ts checks the
+ *  two agree. */
+export const MIN_TOKENS = 10;
+
 /** The most tokens anyone may buy in one go. A quantity above this is far more
  *  likely to be a typo or a probe than an order, and a wrong extra zero is a
  *  charge somebody has to undo by hand. */
@@ -50,7 +63,9 @@ export function priceCents(tokens: unknown): number {
   if (typeof tokens !== "number" || !Number.isInteger(tokens)) {
     throw new PriceError("tokens must be a whole number");
   }
-  if (tokens < 1) throw new PriceError("tokens must be at least 1");
+  if (tokens < MIN_TOKENS) {
+    throw new PriceError(`tokens must be at least ${MIN_TOKENS}`);
+  }
   if (tokens > MAX_TOKENS) {
     throw new PriceError(`tokens must be at most ${MAX_TOKENS}`);
   }

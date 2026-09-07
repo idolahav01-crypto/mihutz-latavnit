@@ -79,6 +79,13 @@ export async function createTransaction(
           amount: String(Math.round(req.priceCents)),
           currency_code: "USD",
         },
+        // Locked to one. Paddle's checkout shows a quantity stepper and
+        // defaults the maximum to 100, but the number of tokens is decided by
+        // the server and does not follow it — so a customer who nudged it to
+        // two would pay twice and receive the same ten tokens. There is no way
+        // to pay LESS this way, which is why it is a trap for them rather than
+        // a hole for us, and it is closed here rather than explained later.
+        quantity: { minimum: 1, maximum: 1 },
       },
     }],
     custom_data: req.custom,

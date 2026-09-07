@@ -22,6 +22,14 @@
      discount and the money saved are all derived from these two numbers,
      so a price change can never leave a stale "16%" standing beside it.
      The first package is the base rate every other one is measured against. */
+  /* The fewest tokens a single order may contain. The payment fee is a
+     percentage PLUS a flat 50 cents, and on a small sale the flat part is most
+     of the price: a $1 order hands $0.55 to the processor. Ten is the smallest
+     package, and the point where the fee stops dominating. Mirrored in
+     _shared/pricing.ts, which is what the server actually charges on;
+     pricing.test.ts fails if the two ever disagree. */
+  var MIN_TOKENS = 10;
+
   var PACKAGES = [
     { tokens: 10,  usd: 10 },
     { tokens: 20,  usd: 18 },
@@ -63,7 +71,7 @@
       return "עוד " + more + " טוקנים ותשלמו " + price + " במקום " + full +
         ": חבילת ה-" + n + " נותנת לכם יותר טוקנים בפחות כסף.";
     },
-    customBad: "הקלידו מספר שלם, טוקן אחד ומעלה."
+    customBad: function (min) { return "הקלידו מספר שלם, " + min + " טוקנים ומעלה."; }
   } : {
     unit: "tokens",
     rateSuffix: "per token",
@@ -98,7 +106,7 @@
       return more + " more tokens and you would pay " + price + " instead of " + full +
         ": the " + n + " package gives you more tokens for less money.";
     },
-    customBad: "Type a whole number, one token or more."
+    customBad: function (min) { return "Type a whole number, " + min + " tokens or more."; }
   };
 
   var $ = function (id) { return document.getElementById(id); };
@@ -219,7 +227,8 @@
     if ($("custom-buy")) {
       $("custom-buy").addEventListener("click", function () {
         var raw = ($("custom-qty").value || "").trim();
-        if (!/^\d+$/.test(raw)) return;   /* priceCustom already said why */
+        /* priceCustom already said why, and the button is disabled anyway */
+        if (!/^\d+$/.test(raw) || Number(raw) < MIN_TOKENS) return;
         buy(Number(raw));
       });
     }
@@ -254,9 +263,9 @@
     var raw = ($("custom-qty").value || "").trim();
     var out = $("custom-price"), note = $("custom-note"), btn = $("custom-buy");
 
-    if (!/^\d+$/.test(raw) || Number(raw) < 1) {
+    if (!/^\d+$/.test(raw) || Number(raw) < MIN_TOKENS) {
       out.textContent = "—";
-      note.textContent = T.customBad;
+      note.textContent = T.customBad(MIN_TOKENS);
       note.className = "custom-note is-bad";
       if (btn) btn.disabled = true;
       return;
