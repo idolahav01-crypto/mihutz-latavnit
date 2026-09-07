@@ -15,7 +15,7 @@ create table if not exists public.purchases (
   user_id       uuid not null references auth.users (id) on delete cascade,
   tokens        integer not null check (tokens > 0),
   gross_cents   integer not null default 0,
-  provider      text    not null default 'lemonsqueezy',
+  provider      text    not null default 'paddle',
   -- the provider's id for the order. UNIQUE is the whole idempotency story.
   provider_ref  text    not null,
   refunded_at   timestamptz,
@@ -39,7 +39,7 @@ create or replace function public.credit_tokens(
   amount       integer,
   provider_ref text,
   gross_cents  integer default 0,
-  provider     text default 'lemonsqueezy'
+  provider     text default 'paddle'
 )
 returns integer
 language plpgsql
@@ -112,7 +112,7 @@ grant execute on function public.credit_tokens(uuid, integer, text, integer, tex
 -- the balance using admin_set_balance().
 create or replace function public.mark_purchase_refunded(
   provider_ref text,
-  provider     text default 'lemonsqueezy'
+  provider     text default 'paddle'
 )
 returns boolean
 language plpgsql

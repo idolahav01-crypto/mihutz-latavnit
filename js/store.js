@@ -119,7 +119,7 @@
       }
       user = session.user;
       showUser();
-      return window.Wallet.load(sb, user).then(watchForCredit);
+      return window.Wallet.load(sb, user).then(watchForCreditOnReturn);
     }).catch(function () {
       if (!DEV_NO_AUTH) window.location.replace(HOME);
     });
@@ -294,9 +294,50 @@
      order a different number of tokens, at that number's real price, for their
      own account — and that is the whole of what they can do.
 
+     Paddle's checkout opens OVER this page rather than replacing it: the
+     server creates a transaction, and Paddle.js opens an overlay for it. The
+     customer never leaves the store, so there is no return trip to survive
+     and no ?paid=1 in the ordinary case — the completed event fires here.
+
      Every button is disabled while the call is in flight. A second click is a
-     second checkout, and two checkouts is two charges. */
+     second transaction, and two transactions is two charges. */
   var buying = false;
+  var paddleReady = false;
+  /* {tokens, before} for the purchase in flight — set before the checkout
+     opens, read when it completes. Mirrored into sessionStorage so a payment
+     that does redirect (the Paddle.js fallback) still knows what it bought. */
+  var pending = null;
+
+  /* Paddle.js is initialised once, with the token and environment the server
+     hands back. Nothing about the payment provider is written into this page:
+     moving from sandbox to live is a change to the function's secrets. */
+  function initPaddle(clientToken, environment) {
+    if (paddleReady) return true;
+    if (typeof window.Paddle === "undefined") return false;
+    if (environment === "sandbox") window.Paddle.Environment.set("sandbox");
+    window.Paddle.Initialize({
+      token: clientToken,
+      eventCallback: function (ev) {
+        /* The customer paid. The webhook that credits the balance is a
+           separate call landing on the server around now, so the page starts
+           watching for the number to move — it never adds a token itself. */
+        if (ev && ev.name === "checkout.completed") {
+          window.Paddle.Checkout.close();
+          watchForCredit();
+        }
+        /* Closing the overlay without paying is not a failure. The buttons
+           come back and nothing is said, because nothing happened. */
+        if (ev && ev.name === "checkout.closed") {
+          buying = false;
+          setBuyingState(false);
+          var el = $("store-status");
+          if (el && el.textContent === T.payOpening) el.textContent = "";
+        }
+      }
+    });
+    paddleReady = true;
+    return true;
+  }
 
   function buy(tokens) {
     var out = $("store-status");
@@ -310,18 +351,28 @@
       body: { tokens: tokens },
       headers: { "x-store-lang": he ? "he" : "en" }
     }).then(function (res) {
-      if (res.error || !res.data || !res.data.url) throw res.error || new Error("no url");
-      /* What we are about to wait for on the way back. Kept in the tab, not
-         the URL: a number in a query string is a number the customer can
-         type, and this one decides when we tell them their tokens arrived. */
+      var d = res && res.data;
+      if (res.error || !d || !d.transaction_id) {
+        throw res.error || new Error("no transaction");
+      }
+      /* What the completed event will wait for. Kept in the tab, not the URL:
+         a number in a query string is a number the customer can type, and
+         this one decides when we tell them their tokens arrived. */
+      pending = { tokens: tokens, before: window.Wallet.value() };
       try {
-        window.sessionStorage.setItem("tshane_pending", JSON.stringify({
-          tokens: tokens, before: window.Wallet.value()
-        }));
+        window.sessionStorage.setItem("tshane_pending", JSON.stringify(pending));
       } catch (e) { /* private mode: the poll falls back to "any increase" */ }
-      /* replace, not assign: the payment page is where the customer is now,
-         and Back should return them to the store, not to a spent checkout. */
-      window.location.replace(res.data.url);
+
+      if (initPaddle(d.client_token, d.environment)) {
+        window.Paddle.Checkout.open({ transactionId: d.transaction_id });
+        return;
+      }
+      /* Paddle.js did not load — an extension, a blocked CDN, an old
+         browser. The transaction is real either way, and Paddle returns a
+         link that opens it. Sending them there is better than a dead
+         button, even though it costs them the page they were on. */
+      if (d.checkout_url) { window.location.assign(d.checkout_url); return; }
+      throw new Error("paddle.js unavailable and no checkout url");
     }).catch(function (err) {
       buying = false;
       setBuyingState(false);
@@ -353,12 +404,18 @@
 
      ?paid=1 is only ever a claim by a URL, so it is treated as one: it starts
      a poll, and nothing more. Nothing on this page can add a token. */
-  function watchForCredit() {
+  function watchForCreditOnReturn() {
     if (!/[?&]paid=1(&|$)/.test(window.location.search)) return;
     /* the marker has done its job — a refresh should not re-run this */
     if (window.history.replaceState) {
       window.history.replaceState({}, "", window.location.pathname);
     }
+    watchForCredit();
+  }
+
+  function watchForCredit() {
+    buying = false;
+    setBuyingState(false);
     var out = $("store-status");
     if (out) { out.className = "store-status is-win"; out.textContent = T.paidThanks; }
 
@@ -367,15 +424,18 @@
        the webhook beat the redirect home. Without it — a new tab, private
        mode, a bookmarked ?paid=1 — we fall back to waiting for any increase,
        which is the best a page with no memory can honestly do. */
-    var want = null, bought = null;
+    var want = null, bought = null, saved = pending;
+    pending = null;
     try {
-      var saved = JSON.parse(window.sessionStorage.getItem("tshane_pending") || "null");
-      window.sessionStorage.removeItem("tshane_pending");
-      if (saved && typeof saved.before === "number" && typeof saved.tokens === "number") {
-        want = saved.before + saved.tokens;
-        bought = saved.tokens;
+      if (!saved) {
+        saved = JSON.parse(window.sessionStorage.getItem("tshane_pending") || "null");
       }
-    } catch (e) { /* leave want null and watch for any increase */ }
+      window.sessionStorage.removeItem("tshane_pending");
+    } catch (e) { /* private mode: fall through on whatever we have */ }
+    if (saved && typeof saved.before === "number" && typeof saved.tokens === "number") {
+      want = saved.before + saved.tokens;
+      bought = saved.tokens;
+    }
 
     var before = want === null ? window.Wallet.value() : null, tries = 0;
     var tick = function () {
