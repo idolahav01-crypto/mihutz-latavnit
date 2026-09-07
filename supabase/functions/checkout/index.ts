@@ -47,8 +47,17 @@ Deno.serve(async (req) => {
   if (!user) return json({ error: "unauthorized" }, 401);
 
   let tokens: unknown;
+  let lang: unknown;
   try {
-    tokens = (await req.json())?.tokens;
+    const payload = await req.json();
+    tokens = payload?.tokens;
+    // The language rides in the BODY, not a header. A custom request header
+    // has to be named in the CORS allow-list, and the shared list is
+    // deliberately the four Supabase sends; a fifth one there means every
+    // function that imports it needs redeploying. The browser blocks the
+    // request outright when the header is not allowed, so the failure looks
+    // like the function is broken when it was never called at all.
+    lang = payload?.lang;
   } catch {
     return json({ error: "bad request" }, 400);
   }
@@ -65,9 +74,7 @@ Deno.serve(async (req) => {
   // he/store/ and store/ are the same page in two languages; opening the
   // checkout over the one the customer is actually on is the whole reason
   // this is read off the request rather than fixed.
-  const lang = req.headers.get("x-store-lang") === "he"
-    ? "/he/store/"
-    : "/store/";
+  const path = lang === "he" ? "/he/store/" : "/store/";
   const base = SITE_URL.replace(/\/+$/, "");
 
   try {
@@ -81,7 +88,7 @@ Deno.serve(async (req) => {
         user_id: user.id,
         tokens: String(n),
       },
-      checkoutUrl: base ? `${base}${lang}` : undefined,
+      checkoutUrl: base ? `${base}${path}` : undefined,
     });
 
     return json({

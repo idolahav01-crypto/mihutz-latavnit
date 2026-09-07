@@ -347,9 +347,12 @@
     setBuyingState(true);
     if (out) { out.className = "store-status"; out.textContent = T.payOpening; }
 
+    /* The language goes in the body. A custom header would have to be added to
+       the functions' CORS allow-list, and a header the preflight does not
+       permit makes the browser drop the request before it is sent — which
+       reads exactly like a broken server. */
     sb.functions.invoke("checkout", {
-      body: { tokens: tokens },
-      headers: { "x-store-lang": he ? "he" : "en" }
+      body: { tokens: tokens, lang: he ? "he" : "en" }
     }).then(function (res) {
       var d = res && res.data;
       if (res.error || !d || !d.transaction_id) {
